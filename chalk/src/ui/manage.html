@@ -209,7 +209,7 @@ body:not(.help-active) #ops-help .help-head h3{opacity:.75}
 #ops-selection::before{color:var(--ink-accent);font-weight:600}
 .act-label{font-size:.8125rem;color:var(--ink-mute);margin-right:2px}
 #ops-bulk .actions{padding-top:8px;margin-top:8px;border-top:1px dashed var(--ink-line);align-items:center}
-body:not(.has-selection) #ops-bulk .actions{display:none}
+body:not(.has-selection):not(:has(#ops-tools[open])) #ops-bulk .actions{display:none}
 body:not(.has-selection) #ops-selection-policy{display:none}
 body:not(.has-selection) #ops-last{display:none}
 body:not(.has-selection) #ops-pick-confirm,body:not(.has-selection) #ops-dist-confirm{display:none}
@@ -321,7 +321,7 @@ details.ops-tech-fold #ops-tech p{font-size:.75rem;color:var(--ink-mute);margin:
 #ops-summary{margin-right:8px}
 .ops-find input{max-width:14rem}
 #ops-check{display:none}
-body:not(.has-selection) #ops-dist{display:none}
+body:not(.has-selection):not(:has(#ops-tools[open])) #ops-dist{display:none}
 #ops-bulk{padding:6px 8px}
 /* Class-context chip: keep to one line with h1. */
 body.is-connected .topbar h1{font-size:.9375rem}
@@ -346,11 +346,11 @@ body.is-connected #ops-state{display:block;overflow:visible}body.is-connected .t
 .detail-next{padding:10px 0 16px}.detail-next h3{font-size:.9375rem;margin:0 0 8px}.detail-next>.primary{width:100%;min-height:44px;white-space:normal}.detail-next p{font-size:.875rem;line-height:1.6}.detail-next label{font-size:.9375rem}#ops-detail p{font-size:.9375rem;line-height:1.6}
 #ops-bulk{padding:6px 10px}#ops-help .help-head{gap:8px}#ops-help-state{font-size:.875rem}
 @container seats (max-width:760px){.ops-seat{grid-template-columns:2.3rem minmax(0,1fr) 64px}.ops-seat>td.c-act{grid-column:3;grid-row:1/span 2}.ops-seat>td.c-act button{padding:4px 8px!important}}
-@media(max-width:600px){.topbar{padding:10px!important}.topbar h1{font-size:1.125rem!important}.class-status{display:block}.conn-tools #refresh,.conn-tools #disconnect{display:none}#ops-summary{gap:5px!important}#ops-summary button{font-size:.875rem!important;padding:7px 10px!important;min-height:38px!important}.ops-find{flex:1 1 100%}body.help-known #ops-help-state{display:none}#ops-help{padding:6px 8px!important}.ops-top{gap:6px!important}.panel{padding:10px!important}.ops-seat .seat-name{font-size:1rem}#ops-bulk{margin:6px 0!important}.flow{font-size:1rem}}
+@media(max-width:600px){.topbar{padding:10px!important}.topbar h1{font-size:1.125rem!important}.class-status{display:block}.conn-tools button{min-height:44px}.conn-tools #disconnect{display:none}body:has(#conn-edit[aria-expanded="true"]) .conn-tools #disconnect{display:inline-flex}#ops-summary{gap:5px!important}#ops-summary button{font-size:.875rem!important;padding:7px 10px!important;min-height:38px!important}.ops-find{flex:1 1 100%}body.help-known #ops-help-state{display:none}#ops-help{padding:6px 8px!important}.ops-top{gap:6px!important}.panel{padding:10px!important}.ops-seat .seat-name{font-size:1rem}#ops-bulk{margin:6px 0!important}.flow{font-size:1rem}}
 
 @media(max-width:600px){.ops-top{flex-wrap:wrap!important;overflow:visible!important}.ops-top>#ops-summary{flex-wrap:wrap!important}#ops-summary{margin:0!important}#ops-help .help-head h3{font-size:.875rem}.ops-find{display:flex!important}.ops-find input{max-width:none;width:100%}.conn{margin:0!important}.topbar .title{flex-direction:row!important}.topbar{gap:6px!important}.conn-tools{display:flex}.class-status>summary{font-size:.8rem}}
 
-#ops .ops-seat>td{padding-top:0;padding-bottom:0}#ops .seat-open{min-height:44px!important}#ops button{min-height:44px!important}#ops input,#ops textarea,#ops select{border-color:#7d8994}#ops-summary button{min-height:44px!important}
+#ops .ops-seat>td{padding-top:0;padding-bottom:0}#ops .seat-open{min-height:44px!important}#ops button{min-height:44px!important}#connect input,input,textarea,select,#ops input,#ops textarea,#ops select{border-color:#7d8994}#ops-summary button{min-height:44px!important}
 
 html:root{background:#0f1418;color:#e8ecef}
 
@@ -409,7 +409,7 @@ function renderShares(data){shareRows=data.shares;shareLimit=data.limit;shareNex
 async function refresh(){if(!token||busy)return;busy=true;const g=generation;text('status','갱신 중…');const results=await Promise.allSettled([api(base()+'/board?seat_prefix='+encodeURIComponent(prefix)),readShares({},shareWin)]);if(g!==generation)return;const errors=[];if(results[0].status==='fulfilled'){renderBoard(results[0].value);if(!document.body.classList.contains('is-connected')){setConnected(true);
 // Connected means the instructor token answered, not that every learner is fine. The roster is read right away with the same
 // token and generation (opsRefresh below), and the panel says it is loading until that answer arrives.
-opsOn=true;if(!opsData)text('ops-state','강사 연결 확인됨 · 이번 수업 명단과 학생별 상태를 불러오는 중… (연결 확인은 학생 상태가 아닙니다)');}}else{board=null;const denied=/인증이 거부/.test(results[0].reason.message);if(denied)setConnected(false);text('seats','조회 실패 · 이전 현황은 표시하지 않습니다.');errors.push(results[0].reason.message);if(!opsOn)text('ops-state',denied?'강사 인증이 거부돼 이번 수업 명단을 불러오지 않았습니다. 토큰을 확인하세요.':'수업 현황을 불러오지 못해 이번 수업 명단도 불러오지 않았습니다.');}if(results[1].status==='fulfilled')renderShares(results[1].value);else{shareRows=[];shareNext=null;shareState='failed';if(selected)text('detail-status',SHARE_STALE);text('shares','공유 기록을 불러오지 못했습니다 · 10초마다 다시 확인합니다.');errors.push(results[1].reason.message);}
+opsOn=true;if(!opsData)text('ops-state','강사 연결 확인됨 · 이번 수업 명단과 학생별 상태를 불러오는 중… (연결 확인은 학생 상태가 아닙니다)');}}else{board=null;const denied=/인증이 거부/.test(results[0].reason.message);if(denied)setConnected(false);text('seats','조회 실패 · 이전 현황은 표시하지 않습니다.');errors.push(results[0].reason.message);if(!opsOn)document.querySelector('.class-status').open=true;if(!opsOn)text('ops-state',denied?'강사 인증이 거부돼 이번 수업 명단을 불러오지 않았습니다. 토큰을 확인하세요.':'수업 현황을 불러오지 못해 이번 수업 명단도 불러오지 않았습니다.');}if(results[1].status==='fulfilled')renderShares(results[1].value);else{shareRows=[];shareNext=null;shareState='failed';if(selected)text('detail-status',SHARE_STALE);text('shares','공유 기록을 불러오지 못했습니다 · 10초마다 다시 확인합니다.');errors.push(results[1].reason.message);}
  const sid=board?.session?.session_id||null;if(sid!==helpSid){helpSid=sid;helpWin=newWin();}
  // Only requests still awaiting the instructor are listed (`status=open`); answered ones are counted by the Service, not paged through.
  // An older Service ignores the filter and the rows are filtered here as before.
@@ -495,11 +495,12 @@ function seatStatus(s){const why=reasonLabels[s.reason],ask=seatHelp(s),wait=app
   else if(ask)stage='도움 요청 '+ask+'건';
   else if(wait)stage='학생의 승인을 기다리는 중';
   else if(s.runtime&&s.runtime.status)stage=runtimeLabels[s.runtime.status]||'확인 불가';
+  else if(s.observes?.step===false)stage='학습 단계 확인 불가';
   else if(s.entry_stage&&s.entry_stage!=='runtime_ready')stage=entryLabels[s.entry_stage]||'확인 불가';
   else if(s.step&&s.step.status)stage=stepLabels[s.step.status]||'확인 불가';
   else if(s.observes?.step===true)stage='아직 선택한 단계 없음';
   else stage='확인 불가';
-  if(stage==='확인 불가'&&tagCls==='ok'){attLabel='확인 불가';tagCls='unknown';}
+  if(stage.includes('확인 불가')&&tagCls==='ok'){attLabel='확인 불가';tagCls='unknown';}
   return {attLabel,stage,tagCls};}
 function renderSeats(d){const body=$('ops-rows');body.replaceChildren();$('ops-table').hidden=!d.seats.length;text('ops-empty','');
  for(const s of d.seats){const row=document.createElement('tr');row.className='ops-seat att-'+s.attention;row.dataset.seat=s.seat_id;row.setAttribute('aria-current',String(opsSeat===s.seat_id&&!$('ops-detail').hidden));row.tabIndex=-1;
@@ -542,7 +543,7 @@ function openSeat(id,keep){const recoveryOpen=keep&&$('ops-cause').querySelector
  const techDetails=document.createElement('details');techDetails.className='ops-tech-fold';const techSum=document.createElement('summary');techSum.textContent='연결·보고 기록 (현장 확인용)';techDetails.append(techSum);const tech=document.createElement('div');tech.id='ops-tech';techDetails.append(tech);const line=(k,v)=>tech.append(element('p',k+': '+v));
  line('입장',entryLabels[s.entry_stage]||'확인 불가');line('토큰',s.token?'발급 ID '+s.token.issue_id.slice(0,8)+'… · 만료 '+new Date(s.token.expires_at).toLocaleString()+' · '+({matches_issue:'앱이 같은 발급분을 확인함',other_token:'앱이 다른 토큰을 사용 중',unknown:'앱 확인 보고 없음'}[s.token.app_verified]):'발급 기록 없음 (이 기능을 켠 뒤의 발급만 기록됩니다)');{const rejected=s.entry_stage==='token_rejected'||['auth_expired','auth_revoked','auth_signature','auth_rejected','profile_mismatch'].includes(s.reason);const p=element('p',rejected?'이 학생의 앱이 토큰을 거부당했습니다. ‘연결 다시 확인’으로는 해결되지 않습니다. ':s.token&&s.token.app_verified!=='matches_issue'?'발급은 했지만 학생 앱이 그 토큰을 확인했다는 보고는 없습니다. 발급·전달·확인은 서로 다른 단계입니다. ':'',rejected?'caution':'muted');if(p.textContent){const a=document.createElement('a'),pin=opsData?.run?.lesson;a.href=pin?'/authoring':'/issuer';a.textContent=pin?'수업 참여 코드 발급 화면에서 재발급 (강의 '+pin.version+' 유지)':'학생 초대 화면에서 토큰 발급·재발급';p.append(a,document.createTextNode(' · 토큰은 이 화면·주소·기록에 표시되지 않습니다. 재발급하면 이전 연결 세대의 조치는 실행되지 않습니다.'));ev.append(p);}}line('기기 연결',s.connection?({active:'연결됨',revoked:'해제됨',expired:'기한 만료',used:'확인 불가'}[s.connection.state]||'확인 불가')+' · 세대 '+s.connection.epoch:'없음');
  for(const [k,label] of [['activation','활성화 보고'],['step','단계 보고'],['runtime','수행 보고'],['error','오류 보고'],['upload','기록 보고']]){const v=s[k];if(v)line(label,'앱 관측 '+new Date(v.observed_at).toLocaleTimeString()+' · 서버 수신 '+new Date(v.received_at).toLocaleTimeString()+' · 출처 '+v.actor+(k==='error'?' · 코드 '+(v.code||'없음')+(v.request_id?' · 요청 ID '+v.request_id:'')+(v.cleared?' · 해소됨':''):''));}
- line('단계',stepText(s,true));{const seen=(board?.seats||[]).find(x=>x.user_id===s.student_id);line('활동 (기존 보드)',seen?labels[seen.state]||'확인 불가':'확인 불가');}line('마지막 신호',ago(s.last_received_at)+(s.signal==='stale'?' · 오래됨':''));{const n=seatHelp(s);if(n){const p=element('p','이 학생이 보낸 도움 요청 '+n+'건 — 학습 도움이며 기술 장애가 아닙니다. ','help'),b=element('button','도움 요청 보기');b.type='button';b.onclick=()=>{if(getComputedStyle($('ops-detail')).position==='fixed')closeSeat();openHelpList();};p.append(b);ev.prepend(p);}}renderRecovery(s);renderStepReview(s);renderEvidence(s);ev.append(techDetails);techDetails.open=!!techOpen;const recoveryFold=$('ops-cause').querySelector('details');if(recoveryFold)recoveryFold.open=!!recoveryOpen;if(!keep)renderActions(s);else if(actionsKey!==actionsSig(s))renderActions(s,true);}
+ line('단계',stepText(s,true));const lesson=lessonLine(s);if(lesson)tech.append(lesson);{const seen=(board?.seats||[]).find(x=>x.user_id===s.student_id);line('활동 (기존 보드)',seen?labels[seen.state]||'확인 불가':'확인 불가');}line('마지막 신호',ago(s.last_received_at)+(s.signal==='stale'?' · 오래됨':''));{const n=seatHelp(s);if(n){const p=element('p','이 학생이 보낸 도움 요청 '+n+'건 — 학습 도움이며 기술 장애가 아닙니다. ','help'),b=element('button','도움 요청 보기');b.type='button';b.onclick=()=>{if(getComputedStyle($('ops-detail')).position==='fixed')closeSeat();openHelpList();};p.append(b);ev.prepend(p);}}renderRecovery(s);renderStepReview(s);renderEvidence(s);ev.append(techDetails);techDetails.open=!!techOpen;const recoveryFold=$('ops-cause').querySelector('details');if(recoveryFold)recoveryFold.open=!!recoveryOpen;if(!keep)renderActions(s);else if(actionsKey!==actionsSig(s))renderActions(s,true);}
 function renderRecovery(s){const box=$('ops-cause'),g=element('div','','group');g.id='ops-recovery';g.append(element('h3','원인과 조치 결과'));{const why=reasonLabels[s.reason];if(why)g.append(element('p','앱이 보고한 상태: '+why[0]+' — '+why[1],s.attention==='blocked'?'blocked':s.attention==='caution'?'caution':'muted'));}
  const r=s.recommended;if(r&&r.action){const label=recLabel(r.action);g.append(element('p','지금 보이는 원인: '+(r.cause?causeText(r.cause):'확인 불가')+' · 먼저 할 조치: '+label+(whyLabels[r.why]?' — '+whyLabels[r.why]:''),r.family==='shared'?'caution':''));}else g.append(element('p',r?'지금 확인된 원인이 없습니다. 미리보기 문제는 앱이 보고하지 않으므로 학생 요청이 있을 때 ‘미리보기 복구’를 쓰세요.':'먼저 할 조치를 알 수 없습니다 (이 서버 버전은 제시하지 않음).','muted'));
  const c=s.last_command;if(c&&!actionLabelsCoach[c.action]){g.append(element('p','마지막 조치: '+(actionLabels[c.action]||c.action)+' · '+new Date(c.updated_at).toLocaleTimeString()+' · 기기 보고: '+describeTarget(c)),element('p','조치 뒤 검증: '+describeOutcome(c.outcome)+(c.followups==='unknown'?' · 조치 뒤 관측을 읽지 못했습니다':''),c.outcome&&c.outcome.verdict==='resolved'?'':c.outcome&&c.outcome.verdict==='remains'?'caution':'muted'));}
@@ -586,6 +587,7 @@ function discloseActions(act,preferred){
   if(main.dataset.act&&actionImpact[main.dataset.act])lead.append(element('p',actionImpact[main.dataset.act],'muted'));
   lead.append(main);if(confirm)lead.append(confirm);
  }
+ if(!main){const guidance=[...act.querySelectorAll('p')].find(p=>p.textContent.includes('이 좌석에서 먼저 할 개별 조치는 없습니다'));if(guidance)lead.append(guidance);}
  while(act.firstChild)more.append(act.firstChild);act.append(lead,more);
 }
 function renderControl(){const c=opsData?.control;const can=(opsData?.actions||[]).length&&opsData.run.flags.ops_commands;$('ops-control').hidden=!c||!can;if(!c)return;text('ops-control-state','새 AI 실행: '+(c.paused?'일시정지 중':'허용 중')+' · 기기 적용 '+c.devices.applied+' / 적용 대기 '+c.devices.pending+' / 확인 불가 '+c.devices.unknown+' (서버는 즉시 적용 · 기기 수치는 앱이 보고한 것만)'+(!c.paused&&c.control_revision>0?' · 재개 뒤 AI 실행이 관측된 좌석 '+(opsData.seats||[]).filter(x=>x.control_outcome&&x.control_outcome.resumed_run==='observed').length+'석':''));$('ops-pause').textContent=c.paused?'새 AI 실행 재개':'새 AI 실행 일시정지';}

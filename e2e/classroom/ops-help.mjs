@@ -60,7 +60,7 @@ try {
   await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); assert.doesNotMatch(await opsState(), /연결하지 않았습니다/, 'connected at the top is never "not connected" below');
   await row('A10').waitFor(); assert.match(await opsState(), /명단 10명 중 앱 준비 완료/, 'the roster loaded without pressing anything');
   const chips = await page.locator('#ops-summary').innerText();
-  assert.match(chips, /기술 장애 확인 4/); assert.match(chips, /도움 요청 2/); assert.match(chips, /확인 불가 2/); assert.match(chips, /정상 4/, 'connected is not "everyone fine": A3 (never connected) and A4 (quiet) are unknown');
+  assert.match(chips, /문제 확인 4/); assert.match(chips, /도움 요청 2/); assert.match(chips, /확인 불가 5/); assert.match(chips, /정상 0/, 'unreported learning stage is unknown; connected is not "everyone fine": A3 (never connected) and A4 (quiet) are unknown');
   for (const s of ['A3', 'A4']) assert.equal(await row(s).locator('p.blocked').count(), 0, s + ': silence is never red');
 
   // ── 2. Learning help and technical problems are different targets ──
@@ -71,33 +71,33 @@ try {
   assert.equal(await help.count(), 2); assert.match(await help.nth(0).innerText() + await help.nth(1).innerText(), /A2 · student-b[\s\S]*A4 · student-d|A4 · student-d[\s\S]*A2 · student-b/);
   for (const gone of ['student-h', 'student-i', 'student-j', 'student-e']) assert.doesNotMatch(await page.locator('#ops-help-list').innerText(), new RegExp(gone), gone + ' is not an open help request');
   assert.match(await page.locator('#ops-help-state').innerText(), /응답할 도움 요청 2건 · 학생 2명 · 답변함·학생 확인 대기 1건은 뺐습니다/);
-  assert.match(await page.locator('#shares').innerText(), /student-j · 도움 요청\s*접수 · 다른 수업의 기록/, 'another class\'s request stays in the records, marked, and out of the queue');
-  assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2)'); assert.equal((await page.locator('#ops-select-fault').innerText()).trim(), '기술 문제 좌석 선택 (장애 4 · 주의 0)');
+  await page.locator('#legacy-wrap > summary').click(); assert.match(await page.locator('#shares').innerText(), /student-j · 도움 요청\s*접수 · 다른 수업의 기록/, 'another class\'s request stays in the records, marked, and out of the queue');
+  await page.locator('#legacy-wrap > summary').click(); await page.locator('#ops-tools > summary').click(); assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2)'); assert.equal((await page.locator('#ops-select-fault').innerText()).trim(), '기술 문제 좌석 선택 (장애 4 · 주의 0)');
   await page.locator('#ops-select-help').click(); assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 10석 .* — 선택: A2, A4$/, 'the learner who asked is selected; the faults are not');
   await page.locator('#ops-select-fault').click(); assert.match(await page.locator('#ops-selection').innerText(), /— 선택: A1, A5, A6, A7$/);
   assert.equal((await primaries().innerText()).trim(), '좌석 진단', 'one primary on the list — with the fault seats selected it is the next step for them, diagnosis (G1); nothing is sent by it being primary');
 
   // ── 3. The Service's first action is the one primary ──
-  await row('A1').getByRole('button', { name: '근거·조치' }).click();
+  await row('A1').locator('.seat-open').click();
   assert.equal(await primaries().count(), 1, 'one primary CTA on the screen'); const first = page.locator('#ops-actions .primary');
-  assert.equal(await first.evaluate((e) => e.tagName), 'A'); assert.equal(await first.getAttribute('href'), '/authoring', 'a lesson class re-issues on the lesson code page'); assert.match(await first.innerText(), new RegExp('강의 ' + local.lesson.version.replaceAll('.', '\\.') + ' 유지'));
+  assert.equal(await first.evaluate((e) => e.tagName), 'A'); assert.equal(await first.getAttribute('href'), '/authoring', 'a lesson class re-issues on the lesson code page'); assert.equal(await first.innerText(), '참여 코드 재발급'); assert.match(await first.getAttribute('title'), new RegExp('강의 ' + local.lesson.version.replaceAll('.', '\\.') + ' 유지'));
   assert.equal(await first.getAttribute('target'), '_blank', 'opening it keeps this page');
-  assert.deepEqual(await first.evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color, e.getBoundingClientRect().height >= 44]), ['rgb(213, 242, 121)', 'rgb(21, 29, 25)', true], 'the link looks like the one primary button (it was dark-on-dark before the style covered links)');
-  assert.equal(await page.getByRole('button', { name: '진단 다시 실행' }).evaluate((e) => e.classList.contains('primary')), false, 'diagnostics is not the first step for a rejected token');
-  assert.match(await page.locator('#ops-recovery').innerText(), /먼저 할 조치: 수업 참여 코드 발급 화면에서 재발급/);
+  assert.deepEqual(await first.evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color, e.getBoundingClientRect().height >= 44]), ['rgb(42, 196, 217)', 'rgb(8, 19, 26)', true], 'the link looks like the one primary button (it was dark-on-dark before the style covered links)');
+  await page.locator('.detail-more > summary').click(); assert.equal(await page.getByRole('button', { name: '진단 다시 실행' }).evaluate((e) => e.classList.contains('primary')), false, 'diagnostics is not the first step for a rejected token');
+  await page.locator('#ops-cause details > summary').click(); assert.match(await page.locator('#ops-recovery').innerText(), /먼저 할 조치: 수업 참여 코드 발급 화면에서 재발급/);
   assert.equal(await page.locator('#ops-evidence a[href="/authoring"]').count(), 1); assert.equal(await page.locator('#ops-evidence a[href="/issuer"]').count(), 0);
-  await row('A3').getByRole('button', { name: '근거·조치' }).click();
-  assert.equal((await page.locator('#ops-actions .primary').innerText()).trim(), '이 좌석의 연결 코드 발급 (10분 · 1회)'); assert.equal(await page.locator('#ops-actions > .group').first().locator('h3').innerText(), '기기 연결', 'pairing comes first when nothing can be sent');
-  await row('A6').getByRole('button', { name: '근거·조치' }).click();
+  await row('A3').locator('.seat-open').click();
+  assert.equal((await page.locator('#ops-actions .primary').innerText()).trim(), '기기 연결 코드 발급'); assert.equal(await page.locator('#ops-actions .detail-next h3').innerText(), '다음 행동', 'pairing is presented as the next action when nothing can be sent');
+  await row('A6').locator('.seat-open').click();
   assert.equal(await page.locator('#ops-detail .primary').count(), 0, 'a shared outage has no per-PC primary'); assert.match(await page.locator('#ops-actions').innerText(), /PC 초기화는 이 원인을 해결하지 못합니다\. 이 좌석에서 먼저 할 개별 조치는 없습니다/);
   assert.match(await page.locator('#ops-incidents').innerText(), /영향 3명/);
 
   // ── 4. Help during the class is under "2 수업 진행", and going there keeps the page's state ──
-  const running = page.locator('nav.flow .flow-step').nth(1); assert.match(await running.innerText(), /2 수업 진행[\s\S]*운영 보드[\s\S]*도움 요청 응대/); assert.doesNotMatch(await page.locator('nav.flow .flow-step').nth(2).innerText(), /도움/);
-  await row('A2').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-question').fill('어디까지 확인했나요?'); await page.locator('#ops-checkpoint-note').fill('[합성] B 확인 메모'); await row('A4').getByLabel('선택').check();
+  const running = page.locator('nav.flow'); assert.equal(await running.getByRole('link', { name: '도움 요청 응대' }).isVisible(), true);
+  await row('A2').locator('.seat-open').click(); await page.locator('#ops-question').fill('어디까지 확인했나요?'); if (!(await page.locator('.detail-more').evaluate(d=>d.open))) await page.locator('.detail-more > summary').click(); await page.locator('#ops-checkpoint-note').fill('[합성] B 확인 메모'); await row('A4').getByLabel('선택').check();
   await running.getByRole('link', { name: '도움 요청 응대' }).click(); assert.ok(page.url().endsWith('#ops-help-title'));
   assert.equal(await page.locator('#ops-detail').isVisible(), true); assert.equal(await page.locator('#ops-question').inputValue(), '어디까지 확인했나요?'); assert.equal(await row('A4').getByLabel('선택').isChecked(), true); assert.match(await page.locator('#status').innerText(), /연결됨/);
-  await page.keyboard.press('Escape'); await row('A2').getByRole('button', { name: '근거·조치' }).click(); assert.equal(await page.locator('#ops-question').inputValue(), '어디까지 확인했나요?', 'closing the detail (a phone must, to reach the flow bar) keeps the unsent question');
+  await page.keyboard.press('Escape'); await row('A2').locator('.seat-open').click(); assert.equal(await page.locator('#ops-question').inputValue(), '어디까지 확인했나요?', 'closing the detail (a phone must, to reach the flow bar) keeps the unsent question');
   await help.filter({ hasText: 'student-b' }).getByRole('button', { name: '요청 열기' }).click(); await page.locator('#detail').waitFor(); assert.match(await page.locator('#content').innerText(), /student-b 질문/);
   await page.locator('#feedback-text').fill('작성 중인 답'); await page.locator('#refresh').click(); await page.waitForTimeout(500);
   assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답'); assert.equal(await page.locator('#ops-question').inputValue(), '어디까지 확인했나요?'); assert.equal(await row('A4').getByLabel('선택').isChecked(), true, 'a refresh keeps the selection');
@@ -119,15 +119,15 @@ try {
   assert.match(await helpState(), /공유 기록을 불러오지 못해 도움 요청이 있는지 알 수 없습니다 \(요청 없음이 아님\)/); assert.doesNotMatch(await helpState(), /도움 요청이 없습니다/);
   assert.equal(await help.count(), 0); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 확인 불가/); assert.doesNotMatch(await page.locator('#ops-summary').innerText(), /도움 요청 0/);
   assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (확인 불가)'); assert.equal(await page.locator('#ops-select-help').isDisabled(), true, 'no help selection from an unknown read');
-  assert.match(await row('A2').innerText(), /도움 요청 여부 확인 불가/);
-  assert.equal(await page.locator('#ops-seats .ops-seat').count(), 10, 'the roster stays'); assert.match(await page.locator('#ops-summary').innerText(), /기술 장애 확인 4/); assert.equal(await row('A4').getByLabel('선택').isChecked(), true, 'the selection stays');
+  assert.equal(await page.locator('#ops-help-state').isVisible(), true, 'one visible class-wide notice covers unknown help state without repeating it in every row');
+  assert.equal(await page.locator('#ops-seats .ops-seat').count(), 10, 'the roster stays'); assert.match(await page.locator('#ops-summary').innerText(), /문제 확인 4/); assert.equal(await row('A4').getByLabel('선택').isChecked(), true, 'the selection stays');
   assert.equal(await page.locator('#detail').isVisible(), true, 'the open record is not closed by a failed list read'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답'); assert.match(await page.locator('#detail-status').innerText(), /다음 갱신에서 확인합니다/);
   // Partial: the Service's counts keep the number exact, the student count is a lower bound, and the instructor can read on.
   const helpUrls = []; page.on('request', (r) => { const u = new URL(r.url()); if (/\/classroom\/shares$/.test(u.pathname) && u.searchParams.get('kind') === 'help') helpUrls.push(u.searchParams.get('status')); });
   shareMode = 'cap'; await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '최근' }).waitFor();
   assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명 이상 · 답변함·학생 확인 대기 1건은 뺐습니다[\s\S]*이번 수업 도움 요청 중 최근 2건만 불러왔습니다/); assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2 이상)'); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2 이상/);
   assert.equal(await page.locator('#detail').isVisible(), true, 'absence from one partial page is not withdrawal'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답');
-  assert.match(await page.locator('#shares').innerText(), /더 오래된 공유 기록이 있을 수 있습니다 \(목록에 없다고 철회된 것이 아닙니다\)/);
+  await page.locator('#legacy-wrap > summary').click(); assert.match(await page.locator('#shares').innerText(), /더 오래된 공유 기록이 있을 수 있습니다 \(목록에 없다고 철회된 것이 아닙니다\)/);
   assert.ok(helpUrls.length && helpUrls.every((x) => x === 'open'), 'the help read lists only requests awaiting the instructor (answered ones are counted, not paged through)');
   // The next page fails: the whole help read is unknown again, not the first page presented as complete.
   await help.getByRole('button', { name: '더 오래된 도움 요청 불러오기' }).click(); await page.locator('#ops-help-state').filter({ hasText: '알 수 없습니다' }).waitFor(); assert.equal(await help.count(), 0);
@@ -152,7 +152,7 @@ try {
   assert.equal((await local.configure(roster({ A10: 'student-k', A2: 'student-l' }), 2, flags)).status, 200, 'A2 is handed to another learner');
   await page.locator('#refresh').click(); await page.locator('#ops-detail-title').filter({ hasText: 'A2 · student-l' }).waitFor();
   assert.equal(await page.locator('#ops-question').inputValue(), '', 'the new holder of the seat never inherits the question'); assert.equal(await page.locator('#ops-checkpoint-note').inputValue(), '', 'nor the checkpoint note'); assert.match(await page.locator('#ops-detail-status').innerText(), /학생 또는 수업이 바뀌어 쓰던 질문을 이 학생에게 옮기지 않았습니다/);
-  await page.keyboard.press('Escape'); await row('A2').getByRole('button', { name: '근거·조치' }).click(); assert.equal(await page.locator('#ops-question').inputValue(), '', 'reopening does not bring it back either');
+  await page.keyboard.press('Escape'); await row('A2').locator('.seat-open').click(); assert.equal(await page.locator('#ops-question').inputValue(), '', 'reopening does not bring it back either');
   { const c = (await local.pair('A2', 3, 11)).conn.json; assert.equal((await local.sync(c.credential, [local.event(1, 'activation', { stage: 'runtime_ready' })], 11)).status, 200); }
   await page.locator('#refresh').click(); await page.waitForFunction(() => opsData?.seats.find((x) => x.seat_id === 'A2')?.connection?.state === 'active'); assert.equal(await page.getByRole('button', { name: '질문 보내기', exact: true }).isEnabled(), true, 'LIVE_ACTIONS: newly connected same student enables send without closing the detail');
   assert.equal(await page.locator('#ops-question').inputValue(), ''); await page.getByRole('button', { name: '질문 보내기' }).click(); assert.match(await page.locator('#ops-detail-status').innerText(), /보낼 질문을 입력하세요/);
@@ -170,7 +170,7 @@ try {
   const tick = () => page.evaluate(() => refresh()), q = page.locator('#ops-question'), send = () => page.getByRole('button', { name: '질문 보내기', exact: true }), actionsPrimary = () => page.locator('#ops-actions .primary').innerText();
   const seatA2 = () => page.evaluate(() => { const s = opsData.seats.find((x) => x.seat_id === 'A2'); return { state: s.connection?.state ?? null, rec: s.recommended?.action ?? null }; });
   if (!(await row('A4').getByLabel('선택').isChecked())) await row('A4').getByLabel('선택').check(); // roster edits above clear a selection by design
-  assert.equal(await send().isDisabled(), true, 'student-b is not connected on A2 yet (the seat was handed back)'); await q.focus();
+  if (!(await page.locator('.detail-more').evaluate(d=>d.open))) await page.locator('.detail-more > summary').click(); assert.equal(await send().isDisabled(), true, 'student-b is not connected on A2 yet (the seat was handed back)'); await q.focus();
   const b2c = (await local.pair('A2', 4, 12)).conn.json; assert.equal((await local.sync(b2c.credential, [local.event(1, 'activation', { stage: 'runtime_ready' })], 12)).status, 200);
   await tick(); await send().and(page.locator(':enabled')).waitFor();
   assert.equal((await seatA2()).state, 'active'); assert.match(await page.locator('#ops-detail-title').innerText(), /A2 · student-b/); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'disconnected -> connected keeps the same learner\'s question');
@@ -185,7 +185,7 @@ try {
   assert.equal((await local.sync(b2c.credential, [local.event(3, 'error', { class: 'sdk_not_ready', code: 'sdk_missing', request_id: 'req-live-0001', blocking: true })], 12)).status, 200);
   await tick(); await page.waitForFunction(() => opsData.seats.find((x) => x.seat_id === 'A2').recommended?.action === 'reset_runtime');
   await page.locator('#ops-actions .primary').filter({ hasText: 'AI 실행 환경 초기화' }).waitFor(); assert.equal(await page.locator('.primary:visible').count(), 1); assert.equal(await q.inputValue(), '어디까지 확인했나요?');
-  assert.match(await page.locator('#ops-recovery').innerText(), /먼저 할 조치: AI 실행 환경 초기화/);
+  await page.locator('#ops-cause details > summary').click(); assert.match(await page.locator('#ops-recovery').innerText(), /먼저 할 조치: AI 실행 환경 초기화/);
   await page.screenshot({ path: path.join(out, 'live-02-cause-changed.png') });
   // Coaching turned off for the class (flag): the question form leaves; turned back on, the same learner's question returns.
   const offFlags = { flags: { ops_observe: true, ops_commands: false, ops_collect: true } };
@@ -198,7 +198,7 @@ try {
   // The connection is revoked: send is disabled in place, the question is kept, and even a forced click dispatches nothing.
   const sentLive = commands(); assert.equal((await local.request(`${local.base}/grants/${b2c.grant_id}`, 'DELETE')).status, 200);
   await tick(); await send().and(page.locator(':disabled')).waitFor();
-  assert.equal((await seatA2()).state, 'revoked'); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'connected -> disconnected keeps the question'); assert.equal((await actionsPrimary()).trim(), '이 좌석의 연결 코드 발급 (10분 · 1회)');
+  assert.equal((await seatA2()).state, 'revoked'); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'connected -> disconnected keeps the question'); assert.equal((await actionsPrimary()).trim(), '기기 연결 코드 발급');
   await page.evaluate(() => { const b = [...document.querySelectorAll('#ops-actions button')].find((x) => x.textContent === '질문 보내기'); b.disabled = false; b.click(); });
   assert.match(await page.locator('#ops-detail-status').innerText(), /기기 연결이 끊겨 이 질문을 보내지 않았습니다/); assert.equal(commands(), sentLive, 'no command after revocation');
   await page.screenshot({ path: path.join(out, 'live-04-revoked.png') });
@@ -206,9 +206,9 @@ try {
 
   // ── 8. Unsent drafts belong to the signed-in instructor: disconnect / another instructor / reconnect never carry them over ──
   await page.locator('#disconnect').click(); await connect(await local.teacher('teacher-other')); await row('A2').waitFor();
-  await row('A2').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-checkpoint-note').waitFor();
+  await row('A2').locator('.seat-open').click(); if (!(await page.locator('.detail-more').evaluate(d=>d.open))) await page.locator('.detail-more > summary').click(); await page.locator('#ops-checkpoint-note').waitFor();
   assert.deepEqual([await page.locator('#ops-checkpoint-note').inputValue(), await page.locator('#ops-question').inputValue()], ['', ''], 'another instructor inherits neither the checkpoint note nor the question');
-  await page.locator('#disconnect').click(); await connect(teacher); await row('A2').waitFor(); await row('A2').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-checkpoint-note').waitFor();
+  await page.locator('#disconnect').click(); await connect(teacher); await row('A2').waitFor(); await row('A2').locator('.seat-open').click(); if (!(await page.locator('.detail-more').evaluate(d=>d.open))) await page.locator('.detail-more > summary').click(); await page.locator('#ops-checkpoint-note').waitFor();
   assert.deepEqual([await page.locator('#ops-checkpoint-note').inputValue(), await page.locator('#ops-question').inputValue()], ['', ''], 'a new sign-in (even the same instructor) starts empty: drafts live only in that connection');
   await page.locator('#ops-help-toggle').filter({ hasText: '펼치기' }).click(); // a new sign-in starts with the requests folded again
   await help.filter({ hasText: 'student-b' }).getByRole('button', { name: '요청 열기' }).click(); await page.locator('#detail').waitFor();
@@ -270,5 +270,5 @@ try {
   assert.match(await page.locator('#shares').innerText(), /최신 기록은 이 목록 밖에 있습니다/); await page.locator('#shares').locator('p.muted').last().screenshot({ path: path.join(out, 'pages-02-shares-last-window.png') }); assert.ok((await rowsNow()).length <= 300, 'at most three pages rendered');
   await page.locator('#shares').getByRole('button', { name: '최신 기록부터 보기' }).click(); await settled(() => !busy && shareWin.start === null && shareRows.length === 100);
   assert.deepEqual(errors, []);
-  console.log('PASS classroom ops help: auth failure and missing permission named in the class panel, roster loads on connect and never says "not connected" under "connected", unknown seats not counted as fine; help queue from metadata only (open = this class, not answered/resolved/withdrawn/expired), help and fault selection separate with counts, silence not red; first action = Service recommendation (re-issue link to /authoring for a lesson class, pairing first when offline, none for a shared outage); help under "2 수업 진행" keeps detail, draft question (also across closing the detail), selection and share feedback draft; a failed share read is unknown (never no-help) while roster, selection and the open record stay; a partial read keeps the Service-counted exact open count, a lower-bound student count and a next action, a failed next page is unknown, an older Service without counts never says no-help, absence from a partial page does not close the open record, the next read recovers; an unsent question is bound to class run + student + seat (kept across unrelated roster edits, never shown to or sent for the next holder of the seat); the open detail follows live connection (both ways), cause and flag changes without reopening, keeping the question, focus and selection, not rebuilding on a heartbeat, and dispatching nothing after revocation; withdrawal and a new class leave the queue; unsent question and checkpoint drafts never cross a disconnect or another instructor; open help is read with status=open, so an old open request behind 1000 answered ones is on the first read, and past the refresh window the cursor moves on until every open request and every share record is reached, a refresh reading only its window, keeping its place across new rows, withdrawal and a failed page');
+  console.log('PASS classroom ops help: auth failure and missing permission named in the class panel, roster loads on connect and never says "not connected" under "connected", unknown seats not counted as fine; help queue from metadata only (open = this class, not answered/resolved/withdrawn/expired), help and fault selection separate with counts, silence not red; first action = Service recommendation (re-issue link to /authoring for a lesson class, pairing first when offline, none for a shared outage); help in the primary instructor navigation keeps detail, draft question (also across closing the detail), selection and share feedback draft; a failed share read is unknown (never no-help) while roster, selection and the open record stay; a partial read keeps the Service-counted exact open count, a lower-bound student count and a next action, a failed next page is unknown, an older Service without counts never says no-help, absence from a partial page does not close the open record, the next read recovers; an unsent question is bound to class run + student + seat (kept across unrelated roster edits, never shown to or sent for the next holder of the seat); the open detail follows live connection (both ways), cause and flag changes without reopening, keeping the question, focus and selection, not rebuilding on a heartbeat, and dispatching nothing after revocation; withdrawal and a new class leave the queue; unsent question and checkpoint drafts never cross a disconnect or another instructor; open help is read with status=open, so an old open request behind 1000 answered ones is on the first read, and past the refresh window the cursor moves on until every open request and every share record is reached, a refresh reading only its window, keeping its place across new rows, withdrawal and a failed page');
 } finally { if (browser) await browser.close(); await new Promise((r) => server.close(r)); globalThis.fetch = realFetch; local.close(); }

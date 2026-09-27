@@ -39,8 +39,9 @@ try {
   await page.route('**/report-batches', async (route) => { if (route.request().method() !== 'POST' || holdNext <= 0) return route.continue(); holdNext--; const response = await route.fetch(); let release; const gate = new Promise((r) => { release = r; }); held.push({ body: JSON.parse(route.request().postData()), release }); await gate; await route.fulfill({ response }); });
   const heldAnswer = async (k) => { for (let i = 0; i < 100 && held.length <= k; i++) await page.waitForTimeout(50); assert.ok(held[k], 'request ' + k + ' was not intercepted'); return held[k]; };
   await page.goto(origin + '/manage'); await page.locator('#token').fill(local.teacherToken); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill('student-'); await page.locator('#connect button').first().click();
-  await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#ops-check').click(); const row = (id) => page.locator(`#ops-seats .ops-seat[data-seat="${id}"]`); await row('A8').waitFor();
-  const box = (id) => row(id).getByLabel('선택'), selection = () => page.locator('#ops-selection').innerText(), state = () => page.locator('#ops-pick-state').innerText(), note = () => page.locator('#ops-pick-note').innerText(), refresh = async () => { await page.locator('#ops-check').click(); await page.waitForTimeout(700); };
+  await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#refresh').click(); const row = (id) => page.locator(`#ops-seats .ops-seat[data-seat="${id}"]`); await row('A8').waitFor();
+  await page.locator('#ops-tools > summary').click();
+  const box = (id) => row(id).getByLabel('선택'), selection = () => page.locator('#ops-selection').innerText(), state = () => page.locator('#ops-pick-state').innerText(), note = () => page.locator('#ops-pick-note').innerText(), refresh = async () => { await page.locator('#refresh').click(); await page.waitForTimeout(700); };
   const confirmOpen = () => page.locator('#ops-pick-confirm').isVisible(), checked = async () => { const v = []; for (const s of seats) if (await box(s.seat_id).isChecked()) v.push(s.seat_id); return v; };
 
   // ── control: the ordinary path still works (preview → confirm → the Service records exactly what was shown) ──
@@ -135,7 +136,7 @@ try {
   assert.match(await state(), /최종 거부 1 · 전달 안 됨 0 · 결과 미확인 1/); assert.match(await rowOf('A7'), /현재: 결과 미확인 .*일부 파일만 도착/); assert.doesNotMatch(await observed(), /결과 확정/, 'failed and unknown inside the grace are not final');
   for (const id of ['A6', 'A7']) assert.equal((await local.uploadSnapshotAs(conn[id], batch, 1, record)).status, 201); // both records arrive late, inside the grace
   // (a) the board's own "현황 새로 확인" re-reads the collection result too
-  await page.locator('#ops-check').click(); await page.locator('#ops-pick-state').filter({ hasText: /서버 검증됨 2/ }).waitFor({ timeout: 8000 }).catch(async (e) => { throw Error('"현황 새로 확인" did not re-read the batch: ' + await state(), { cause: e }); });
+  await page.locator('#refresh').click(); await page.locator('#ops-pick-state').filter({ hasText: /서버 검증됨 2/ }).waitFor({ timeout: 8000 }).catch(async (e) => { throw Error('"현황 새로 확인" did not re-read the batch: ' + await state(), { cause: e }); });
   assert.equal(await retry.isHidden(), true); assert.match(await observed(), /결과 확정/); assert.match(await rowOf('A7'), /현재: 서버 검증됨 .*기기 요청: 결과 확인 불가/);
   // (b) the same race against the re-select button itself: the page still shows "failed", the Service already says verified
   batch = await collect(['A8', 'A3']); target(batch, 'A8', 'failed', 'upload_failed'); target(batch, 'A3', 'failed', 'upload_failed'); await manual(); assert.match(await retry.innerText(), /도착하지 않은 2명만/);
