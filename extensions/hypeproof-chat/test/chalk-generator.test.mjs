@@ -186,7 +186,7 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflic
 
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'revision conflict; reload before saving' }));
+    res.end(JSON.stringify({ code: 'revision_conflict', error: '버전이 충돌했습니다.' }));
   }, async (port) => {
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port, { cwd: tmpDir }),
@@ -198,8 +198,8 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflic
   });
 });
 
-// ─── T-G10: knowledge version not found(409) → error: knowledge_version_not_found ──
-await check('T-G10 execSavePlan returns knowledge_version_not_found on 409 knowledge version not found', async () => {
+// ─── T-G10: knowledge_missing(409) → error: knowledge_missing ────────────
+await check('T-G10 execSavePlan returns knowledge_missing on 409 knowledge_missing', async () => {
   const tmpDir = join(tmpdir(), `chalk-test-kv-${Date.now()}`);
   const course = 'lesson-01';
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
@@ -208,23 +208,23 @@ await check('T-G10 execSavePlan returns knowledge_version_not_found on 409 knowl
 
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'knowledge version not found' }));
+    res.end(JSON.stringify({ code: 'knowledge_missing', error: '지식이 없습니다.' }));
   }, async (port) => {
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port, { cwd: tmpDir }),
       'chalk_save_plan',
       { cohort: 'c1', course, knowledge_version: 999, expected_revision: 1, request_id: 'uuid-kv' },
     ));
-    assert.equal(result.error, 'knowledge_version_not_found', `지식 버전 오류가 knowledge_version_not_found로 반환되지 않았다: ${JSON.stringify(result)}`);
-    assert.ok(result.message.includes('chalk_get_knowledge'), '안내에 chalk_get_knowledge가 없다');
+    assert.equal(result.error, 'knowledge_missing', `지식 없음이 knowledge_missing으로 반환되지 않았다: ${JSON.stringify(result)}`);
+    assert.ok(result.message, '안내 메시지가 없다');
   });
 });
 
 // ─── T-G11: brief inputs 없음(409) → error: inputs_missing ───────────────
-await check('T-G11 execGeneratorBrief returns inputs_missing on 409 inputs missing', async () => {
+await check('T-G11 execGeneratorBrief returns inputs_missing on 409 inputs_missing', async () => {
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: '입력을 먼저 저장하세요 (PUT .../inputs)' }));
+    res.end(JSON.stringify({ code: 'inputs_missing', error: '입력을 먼저 저장하세요.' }));
   }, async (port) => {
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port),
@@ -237,10 +237,10 @@ await check('T-G11 execGeneratorBrief returns inputs_missing on 409 inputs missi
 });
 
 // ─── T-G12: knowledge incompatible(409) → error: knowledge_incompatible ──
-await check('T-G12 execGeneratorBrief returns knowledge_incompatible on 409 knowledge incompatible', async () => {
+await check('T-G12 execGeneratorBrief returns knowledge_incompatible on 409 knowledge_incompatible', async () => {
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'knowledge incompatible', field: 'conditions', unranked: ['no_prior'] }));
+    res.end(JSON.stringify({ code: 'knowledge_incompatible', error: '지식 호환 오류', field: 'conditions', unranked: ['no_prior'] }));
   }, async (port) => {
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port),

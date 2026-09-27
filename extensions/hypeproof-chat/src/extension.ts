@@ -478,6 +478,7 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch (err) { vscode.window.showErrorMessage(`저장 실패: ${(err as Error).message}`); }
     }),
 
+
     // #72: auto-update commands. The banner in the chat panel calls
     // installUpdate via the openInstallUpdate webview message → provider →
     // here. checkForUpdates is also exposed as a command so the user can
