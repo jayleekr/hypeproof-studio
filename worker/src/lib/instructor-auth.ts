@@ -121,6 +121,11 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (path === "/admin/issuers" && method === "POST") return true;
   // #1293 — Chalk method recommendation. Handler re-verifies issuer + cohort scope.
   if (method === "POST" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/recommend$/.test(path)) return true;
+  // #1295 — Chalk course generation: exact pairs only (PUT inputs/plan, GET plan/brief).
+  if (
+    (method === "PUT" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/(inputs|plan)$/.test(path)) ||
+    (method === "GET" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/(plan|brief)$/.test(path))
+  ) return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
   // #1288 — Chalk knowledge read-only endpoints. No cohort scope needed.

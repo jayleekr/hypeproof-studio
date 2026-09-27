@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET, COHORT } from "./harness/index.mjs";
 
-const { recommendMethods, VocabError } = await import("../src/lib/chalk-recommend.ts");
+const { recommendMethods, VocabError, KnowledgeIncompatibleError } = await import("../src/lib/chalk-recommend.ts");
 const { issueIssuer, issue } = await import("../src/lib/tokens.ts");
 const { listProfiles } = await import("../src/profiles/index.ts");
 
@@ -252,6 +252,22 @@ await check("U-16 sort by goal match count: more matches rank higher", () => {
   assert.equal(result.chosen[1].id, "m-cooperative-learning"); // 1 match second
 });
 
+await check("U-17 vocab:prior with unranked value throws KnowledgeIncompatibleError", () => {
+  const vocabWithUnranked = { ...VOCAB, prior: ["novice", "intermediate", "any", "advanced"] };
+  assert.throws(
+    () => recommendMethods({ conditions: [], goals: [] }, BASE_METHODS, vocabWithUnranked, 1),
+    (err) => err instanceof KnowledgeIncompatibleError && err.field === "vocab:prior" &&
+      Array.isArray(err.unranked) && err.unranked.includes("advanced"),
+  );
+});
+
+await check("U-18 learner_level: 'any' throws VocabError (not a learner input)", () => {
+  assert.throws(
+    () => recommendMethods({ conditions: [], goals: [], learner_level: "any" }, BASE_METHODS, VOCAB, 1),
+    (err) => err instanceof VocabError && err.field === "learner_level",
+  );
+});
+
 // ── Integration tests (real routing, in-memory D1) ────────────────────────────
 // Tables defined inline to avoid depending on #1288 migration file (not in main yet).
 const KB_SCHEMA = `
@@ -366,6 +382,7 @@ await check("I-02 no knowledge version → 409", async () => {
 await check("I-03 unknown condition → 400 with field", async () => {
   const r = await req({ conditions: ["not-a-real-condition"], goals: [] }, issuerTok);
   assert.equal(r.status, 400);
+  assert.equal(r.json.code, "vocab_unknown");
   assert.equal(r.json.field, "condition");
 });
 
@@ -405,6 +422,7 @@ await check("I-08 other issuer's course → 404", async () => {
 await check("I-09 vocab:prior missing → 409 knowledge incomplete", async () => {
   const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb({ omitPriorVocab: true }));
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "knowledge_incomplete");
   assert.ok(r.json.error.includes("incomplete"));
 });
 
@@ -438,6 +456,28 @@ await check("I-11 oversized body with valid token → 413", async () => {
     env, makeCtx(),
   );
   assert.equal(res.status, 413);
+});
+
+await check("I-12 vocab:prior has unranked value → 409 knowledge incompatible", async () => {
+  // Seed a KB with vocab:prior containing 'advanced' (not in LEVEL_RANK, not 'any')
+  const db = makeDb({ seed: false, seedDraft: true });
+  db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,3,'digest0')`).run();
+  db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
+    1, "vocab:goal", "vocab", JSON.stringify({ keys: GOAL_VOCAB.map(k => ({ key: k, label: k })) }), "", null,
+  );
+  db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
+    1, "vocab:condition", "vocab", JSON.stringify({ keys: COND_VOCAB.map(k => ({ key: k, label: k })) }), "", null,
+  );
+  db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
+    1, "vocab:prior", "vocab",
+    JSON.stringify({ keys: ["novice", "intermediate", "any", "advanced"].map(k => ({ key: k, label: k })) }), "", null,
+  );
+  const r = await req({ conditions: [], goals: [] }, issuerTok, db);
+  assert.equal(r.status, 409, JSON.stringify(r.json));
+  assert.equal(r.json.code, "knowledge_incompatible");
+  assert.equal(r.json.error, "knowledge incompatible");
+  assert.equal(r.json.field, "vocab:prior");
+  assert.ok(Array.isArray(r.json.unranked) && r.json.unranked.includes("advanced"));
 });
 
 console.log(`\n${passed} tests passed.`);
