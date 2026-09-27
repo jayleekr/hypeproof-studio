@@ -37,6 +37,21 @@ assert.strictEqual(shared.isIssuerAllowedEndpoint, auth.isIssuerAllowedEndpoint,
 assert.strictEqual(shared.TokenError, tokens.TokenError, "TokenError class identity (instanceof must work across both)");
 console.log("✓ drift-lock: Chalk re-exports the Service's verifier — same function objects");
 
+// --- isIssuerAllowedEndpoint: exact method×path pairs only (#1295) ----------------
+{
+  const allow = auth.isIssuerAllowedEndpoint;
+  const base = "/admin/chalk/cohorts/test-cohort/courses/test-course";
+  // positives
+  assert.equal(allow(`${base}/inputs`, "PUT"), true, "PUT inputs allowed");
+  assert.equal(allow(`${base}/plan`, "PUT"), true, "PUT plan allowed");
+  assert.equal(allow(`${base}/plan`, "GET"), true, "GET plan allowed");
+  assert.equal(allow(`${base}/brief`, "GET"), true, "GET brief allowed");
+  // negatives — non-existent method×path pairs must be rejected
+  assert.equal(allow(`${base}/inputs`, "GET"), false, "GET inputs must NOT be allowed");
+  assert.equal(allow(`${base}/brief`, "PUT"), false, "PUT brief must NOT be allowed");
+  console.log("✓ isIssuerAllowedEndpoint: exact PUT×(inputs|plan) and GET×(plan|brief) only");
+}
+
 // --- one KV, two workers ------------------------------------------------------
 const COHORT = "boah-dental-2026-a";
 const PROFILE = "boah-dental-director-copyclone-2026-s1";
