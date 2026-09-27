@@ -3330,6 +3330,100 @@
           "path": "worker/test/chalk-plan-parser.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-DRAFT-CHECK",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-courses.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-METHOD-RECOMMEND",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB",
+        "ST-IMP-CHALK-KB-STORE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/chalk-recommend.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-recommend.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-DRAFT-CHECK",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-draft-check.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-METHOD-RECOMMEND",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-METHOD-RECOMMEND",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-recommend.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-TOOL-LAYER",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localRuntime/index.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/extension.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-TOOL-LAYER",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-tools.test.mjs"
+        }
+      ]
     }
   ]
 }

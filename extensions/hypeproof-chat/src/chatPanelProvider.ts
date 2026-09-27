@@ -1,5 +1,6 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
+import { chalkToolsEnabled } from './chalk/tools';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -2333,7 +2334,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this._instructorMode.selectModel(
           modelId,
           () => this.context.workspaceState.get('hps.modelChoice'),
-          c => this.context.workspaceState.update('hps.modelChoice', c),
+          c => Promise.resolve(this.context.workspaceState.update('hps.modelChoice', c)),
         );
         await this.postConfig();
         return;
@@ -3040,9 +3041,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
         const cwd=this.resolveCoachCwd();
         if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+        // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+        // #1298 (E4-3): final gate is server-verified whoami (isInstructor === true).
+        const chalkCtx = (await chalkToolsEnabled(this.context.secrets) && this._instructorMode.isInstructor === true)
+          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+          : undefined;
         const result=await runLocalCoach({config:local,profile,cwd,
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
-          signal:ctrl.signal,onDelta,onActivity,
+          signal:ctrl.signal,onDelta,onActivity,chalkCtx,
           // #1298 — pass instructor brief as system prompt override when in instructor mode.
           ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
           requestApproval:async action=>{
@@ -3229,7 +3235,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (refused && !ctrl.signal.aborted) await this.endRefusedTurn({ code: refused, streamId, proxyUrl, token, text, images });
       else if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
       // #1298 — revert model choice if a direct-entry model caused this turn to fail.
-      await this._instructorMode.revertModelOnTurnError(c => this.context.workspaceState.update('hps.modelChoice', c));
+      await this._instructorMode.revertModelOnTurnError(c => Promise.resolve(this.context.workspaceState.update('hps.modelChoice', c)));
     } finally {
       // The host is the only party that knows a turn ended (an auxiliary request of the same turn ends with end_turn before
       // the main loop does). A closed turn id is refused by the Service from then on; best effort, bounded by the Service.

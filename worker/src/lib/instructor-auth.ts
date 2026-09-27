@@ -104,6 +104,8 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // nothing: every handler re-checks the explicit scope.ops capability
   // (authorizeIssuerForOps) and the per-run feature flag.
   if (/^\/admin\/cohorts\/[^/]+\/classroom\/runs\/[^/]+(?:\/(?:status|pairings|control|grants\/[^/]+|evidence\/[^/]+|contents(?:\/[^/]+\/(?:retire|revisions\/[^/]+))?|setting-options|distributions(?:\/[^/]+(?:\/revoke)?)?|report-batches(?:\/[^/]+(?:\/(?:reconcile|advance|jobs|runner-grants|reports(?:\/[^/]+(?:\/review)?)?|recipients|approve|deliver|deliveries(?:\/[^/]+\/(?:resolve|link))?))?)?|commands(?:\/[^/]+)?))?$/.test(path) && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) return true;
+  // #1294 — chalk draft check. Handler re-verifies issuer identity and course ownership.
+  if (method === 'POST' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/check$/.test(path)) return true;
   if (path === "/admin/tokens/issue" && method === "POST") return true;
   // #167 — issuer-role tokens with can_start_session scope may start/end
   // their scoped cohort's session without admin Basic auth.
@@ -117,6 +119,8 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // instructor issuers via Bearer. The handler re-verifies the token AND the
   // capability; a Bearer minter still cannot create another admin-minter.
   if (path === "/admin/issuers" && method === "POST") return true;
+  // #1293 — Chalk method recommendation. Handler re-verifies issuer + cohort scope.
+  if (method === "POST" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/recommend$/.test(path)) return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
   // #1298 — instructor-mode identity check. No cohort required: any valid issuer

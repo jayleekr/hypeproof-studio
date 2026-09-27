@@ -5,7 +5,7 @@
 ## 사용법
 
 ```bash
-bash scripts/review-pr.sh <PR번호-또는-브랜치> [--provider claude|codex|service]
+bash scripts/review-pr.sh <PR번호-또는-브랜치> [--provider claude|codex|service] [--vault <경로>]
 ```
 
 - `<PR번호-또는-브랜치>`: GitHub PR 번호 (예: `1302`) 또는 브랜치 이름
@@ -13,6 +13,9 @@ bash scripts/review-pr.sh <PR번호-또는-브랜치> [--provider claude|codex|s
   - `service` (기본값): 로컬 wrangler 서버(포트 8787)를 경유
   - `claude`: 로컬 Claude Code 구독 사용
   - `codex`: 로컬 Codex 구독 사용
+- `--vault <경로>`: Chalk 제품 지식을 가져올 `curriculum_wiki` 볼트 경로.
+  생략 시 `CHALK_VAULT_PATH` 환경 변수 → 자동 탐색 순으로 시도합니다.
+  볼트가 없으면 모형 추천·brief 엔드포인트가 409를 반환하지만 나머지는 정상 동작합니다.
 
 ## 동작 단계
 
@@ -20,8 +23,9 @@ bash scripts/review-pr.sh <PR번호-또는-브랜치> [--provider claude|codex|s
 |---|---|---|
 | 1 | PR 브랜치를 임시 worktree로 체크아웃 | ~3초 |
 | 2 | 확장·webview-ui `npm ci` | ~3–5초(캐시 있음) / ~40–60초(첫 실행) |
-| 3 | 임의 로컬 `.dev.vars` 생성 후 D1 초기화, `wrangler dev --port 8787` 기동 | ~25초(cold) |
-| 4 | 로컬 테스트 강사 토큰 발급 및 클립보드 복사 | <1초 |
+| 3 | 임의 로컬 `.dev.vars` 생성 후 D1 초기화, 마이그레이션 적용 | ~5초 |
+| 3.5 | Chalk 제품 지식 적재 (PR에 `scripts/chalk-knowledge-import/`가 있을 때만) | ~2초 |
+| 4 | `wrangler dev --port 8787` 기동 + 강사 토큰 발급 및 클립보드 복사 | ~25초(cold) |
 | 5 | `studio-dev.py run` — 확장 빌드·base app 패치·Dev 앱 실행 | ~15–30초 |
 | 6 | 인앱 안내 출력 | — |
 

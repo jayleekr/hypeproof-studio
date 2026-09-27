@@ -104,4 +104,18 @@ t("first-turn error → revertModelOnTurnError restores prevChoice", async () =>
   assert.deepEqual(stored, { scope: 'instructor', alias: 'some-other' }, "second revert must not change state");
 });
 
+console.log("\n=== chalkCtx gate — whoami 401 must block tools even when token looks like issuer ===");
+
+t("whoami 401 → isInstructor false, so chalkCtx would be undefined", async () => {
+  // chatPanelProvider: chalkCtx = (chalkToolsEnabled && isInstructor === true) ? ... : undefined
+  // This test verifies InstructorModeManager.checkInstructorMode returns false on 401,
+  // which ensures the && isInstructor === true gate in chatPanelProvider blocks chalkCtx.
+  const mgr = new InstructorModeManager();
+  const result = await withFetch(401, () => mgr.checkInstructorMode("looks-like-issuer.signed-token", PROXY));
+  assert.strictEqual(result, false, "whoami 401 → isInstructor false, chalkCtx gate blocks");
+  assert.strictEqual(mgr.isInstructor, false);
+  // Confirm: isInstructor !== true, so the provider gate would not create chalkCtx.
+  assert.notStrictEqual(mgr.isInstructor, true);
+});
+
 console.log(`\n${n} tests passed\n`);
