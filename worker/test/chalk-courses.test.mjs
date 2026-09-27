@@ -10,6 +10,7 @@ import { bootApp, createMockEnv, makeCtx, TEST_SECRET, COHORT } from "./harness/
 
 const { issueIssuer, issue } = await import("../src/lib/tokens.ts");
 const { listProfiles } = await import("../src/profiles/index.ts");
+const { isIssuerAllowedEndpoint } = await import("../src/lib/instructor-auth.ts");
 
 const app = await bootApp();
 
@@ -583,5 +584,16 @@ await check("N-01 student token /v1/profile does not contain plan content", asyn
   assert.ok(!profileText.includes(markerSentence),
     `plan content leaked into /v1/profile: found "${markerSentence}"`);
 });
+
+// isIssuerAllowedEndpoint — exact method×path pairs only (#1295 minimum-privilege)
+{
+  const base = "/admin/chalk/cohorts/test-cohort/courses/test-course";
+  assert.equal(isIssuerAllowedEndpoint(`${base}/inputs`, "PUT"), true,  "PUT inputs allowed");
+  assert.equal(isIssuerAllowedEndpoint(`${base}/plan`,   "PUT"), true,  "PUT plan allowed");
+  assert.equal(isIssuerAllowedEndpoint(`${base}/plan`,   "GET"), true,  "GET plan allowed");
+  assert.equal(isIssuerAllowedEndpoint(`${base}/brief`,  "GET"), true,  "GET brief allowed");
+  assert.equal(isIssuerAllowedEndpoint(`${base}/inputs`, "GET"), false, "GET inputs must NOT be allowed");
+  assert.equal(isIssuerAllowedEndpoint(`${base}/brief`,  "PUT"), false, "PUT brief must NOT be allowed");
+}
 
 console.log(`\n${passed} tests passed.`);
