@@ -1,6 +1,11 @@
 import type { ResolvedProfile } from "../protocol";
 import type { CoachToolAction, SdkActivity } from "../sdkCoachHelpers.ts";
 import { workspaceTools } from "./tools.ts";
+import {
+  CHALK_TOOL_DEFINITIONS,
+  callChalkTool,
+  type ChalkToolContext,
+} from "../chalk/tools.ts";
 import { CodexLocalClient } from "./codexClient.mjs";
 import { runClaude } from "./claudeClient.mjs";
 import { startToolServer } from "./toolServer.mjs";
@@ -54,6 +59,34 @@ export function localModelSelection(
     choices: [{ alias: config.model, id: config.model, label: config.label }],
   };
 }
+/**
+ * 워크스페이스 도구에 Chalk 도구를 붙인다(강사 모드만). 순수 함수 — 테스트 가능.
+ * definitions 배열에 chalk_* 가 추가되면 Claude(toolServer)·Codex(dynamicTools) 모두
+ * 같은 목록을 받는다.
+ */
+export function mergeChalkTools(
+  workTools: {
+    definitions: { name: string; description: string; inputSchema: unknown }[];
+    call: (n: string, i: unknown) => Promise<string>;
+  },
+  chalkCtx?: ChalkToolContext,
+): {
+  definitions: { name: string; description: string; inputSchema: unknown }[];
+  call: (n: string, i: unknown) => Promise<string>;
+} {
+  const chalkDefs: { name: string; description: string; inputSchema: unknown }[] =
+    chalkCtx ? CHALK_TOOL_DEFINITIONS : [];
+  return {
+    definitions: [...workTools.definitions, ...chalkDefs],
+    call: async (name: string, input: unknown) => {
+      if (chalkCtx && CHALK_TOOL_DEFINITIONS.some((d) => d.name === name)) {
+        return callChalkTool(chalkCtx, name, input as Record<string, unknown>);
+      }
+      return workTools.call(name, input);
+    },
+  };
+}
+
 export async function runLocalCoach(args: {
   config: LocalRuntimeConfig;
   profile: ResolvedProfile;
@@ -66,6 +99,8 @@ export async function runLocalCoach(args: {
   requestApproval: (
     a: CoachToolAction,
   ) => Promise<boolean | { approved: boolean; actor: "user" | "policy" }>;
+  /** 강사 모드일 때만 넘긴다. 없으면 Chalk 도구를 AI 에 붙이지 않는다(SUB-06). */
+  chalkCtx?: ChalkToolContext;
 }) {
   const lifetime = new AbortController();
   const signal = AbortSignal.any([
@@ -73,13 +108,16 @@ export async function runLocalCoach(args: {
     lifetime.signal,
     AbortSignal.timeout(180000),
   ]);
-  const tools = workspaceTools({
+  const workTools = workspaceTools({
     cwd: args.cwd,
     profile: args.profile,
     signal,
     approve: args.requestApproval,
     activity: args.onActivity,
   });
+
+  // Chalk 도구는 강사 모드(chalkCtx 있음)에서만 붙는다(SUB-06).
+  const tools = mergeChalkTools(workTools, args.chalkCtx);
   const system =
     "You are the coach in a LOCAL DEVELOPMENT rehearsal of HypeProof Studio. Reply in Korean. Follow the supplied course. Only provided Studio file tools are available; do not claim shell, browser or deployment actions. Read existing files before changing them; preserve unrelated work. Never treat sample results as real customers.\n" +
     JSON.stringify({

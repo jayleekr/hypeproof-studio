@@ -1,5 +1,6 @@
 import { registerLocalReview } from "./localReviewPanel";
 import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
+import { callChalkTool, chalkToolsEnabled } from "./chalk/tools";
 import { fetchProfileResult } from './proxyClient';
 import { ClassroomOpsHost } from './classroomOpsHost';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
@@ -397,6 +398,34 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.forgetIssuerToken", async () => {
       await context.secrets.delete(ISSUER_TOKEN_KEY);
       vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
+    }),
+
+    // #1297 (E4-2): 버튼과 AI가 같은 Chalk 도구 함수를 부른다(SUB-07).
+    // 여기서 등록되는 명령은 명령 팔레트에서 수동으로 부를 수 있고,
+    // AI 도구 호출도 chalk/tools.ts의 같은 execCheckPlan을 거친다.
+    vscode.commands.registerCommand("hypeproof-chat.chalk.checkPlan", async () => {
+      const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz");
+      const enabled = await chalkToolsEnabled(context.secrets);
+      if (!enabled) {
+        vscode.window.showWarningMessage("Chalk 초안 검사는 강사 모드에서만 사용할 수 있습니다. issuer 토큰을 먼저 등록하세요.");
+        return;
+      }
+      const cohort = await vscode.window.showInputBox({ prompt: "코호트 ID", placeHolder: "예: sk-biopharm-kids-s1" });
+      if (!cohort) return;
+      const course = await vscode.window.showInputBox({ prompt: "강의 ID", placeHolder: "예: lesson-01" });
+      if (!course) return;
+      try {
+        const result = await callChalkTool(
+          { serverUrl: proxyUrl, secrets: context.secrets },
+          "chalk_check_plan",
+          { cohort, course },
+        );
+        const panel = vscode.window.createOutputChannel("Chalk 초안 검사", "json");
+        panel.appendLine(result);
+        panel.show(true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`검사 실패: ${(err as Error).message}`);
+      }
     }),
 
     // #72: auto-update commands. The banner in the chat panel calls
