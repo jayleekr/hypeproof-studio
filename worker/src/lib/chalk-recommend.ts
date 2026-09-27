@@ -15,6 +15,17 @@ export class VocabError extends Error {
   }
 }
 
+export class KnowledgeIncompatibleError extends Error {
+  readonly field: string;
+  readonly unranked: string[];
+  constructor(field: string, unranked: string[]) {
+    super(`knowledge incompatible: ${field} has unranked values: ${unranked.join(", ")}`);
+    this.name = "KnowledgeIncompatibleError";
+    this.field = field;
+    this.unranked = unranked;
+  }
+}
+
 // Level rank for prior_knowledge comparison. 'any' (card value = no prerequisite) is
 // excluded from learner input but accepted on method cards.
 const LEVEL_RANK: Record<string, number> = { novice: 1, intermediate: 2 };
@@ -59,6 +70,9 @@ export function recommendMethods(
   vocab: { goals: string[]; conditions: string[]; prior: string[] },
   knowledge_version: number,
 ): RecommendResult {
+  const unranked = vocab.prior.filter((v) => v !== "any" && !(v in LEVEL_RANK));
+  if (unranked.length > 0) throw new KnowledgeIncompatibleError("vocab:prior", unranked);
+
   const badConditions = input.conditions.filter((c) => !vocab.conditions.includes(c));
   if (badConditions.length > 0) throw new VocabError("condition", badConditions);
 
@@ -98,7 +112,7 @@ export function recommendMethods(
 
     // Rule 2: prior_knowledge exceeds learner level
     if (because.length === 0 && m.prior_knowledge && m.prior_knowledge !== "any") {
-      const required = LEVEL_RANK[m.prior_knowledge] ?? 0;
+      const required = LEVEL_RANK[m.prior_knowledge]!;
       if (learnerRank >= 0 && required > learnerRank) {
         because.push("prior_knowledge");
       }
