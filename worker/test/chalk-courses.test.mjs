@@ -585,6 +585,18 @@ await check("N-01 student token /v1/profile does not contain plan content", asyn
     `plan content leaked into /v1/profile: found "${markerSentence}"`);
 });
 
+// admin.ts: each router must be mounted exactly once (source check)
+{
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const src = readFileSync(fileURLToPath(new URL("../src/routes/admin.ts", import.meta.url)), "utf8");
+  const routerNames = ["chalkCourses", "chalkRecommend", "chalkKnowledge", "authoring", "accessAdmin"];
+  for (const name of routerNames) {
+    const matches = src.match(new RegExp(`admin\\.route\\([^)]*${name}`, "g")) ?? [];
+    assert.equal(matches.length, 1, `admin.ts mounts '${name}' exactly once (found ${matches.length})`);
+  }
+}
+
 // isIssuerAllowedEndpoint — exact method×path pairs only (#1295 minimum-privilege)
 {
   const base = "/admin/chalk/cohorts/test-cohort/courses/test-course";

@@ -157,7 +157,6 @@ admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
-admin.route('/', chalkCourses);
 admin.route('/', chalkKnowledge);
 
 // ---- cohort list ------------------------------------------------------------
