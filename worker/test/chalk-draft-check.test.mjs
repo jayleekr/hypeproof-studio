@@ -167,4 +167,34 @@ await check('T-C6 broken content_json returns 200 with a skipped gate-check item
   assert.ok(typeof skipped.message === 'string' && skipped.message.length > 0, 'skipped item has a message');
 });
 
+// ─── T-C7: check route body-limit ───────────────────────────────────────────
+// T-C7a: valid token + body > 256KB → POST /check returns 413
+// T-C7b: invalid token + body > 256KB → POST /check returns 401 (auth before bodyLimit)
+const OVER_LIMIT_BODY = JSON.stringify({ html: 'x'.repeat(256 * 1024 + 1) });
+
+await check('T-C7a POST /check valid-token 256KB+ body returns 413', async () => {
+  const tok = await mkIssuer('alice-c7');
+  const res = await app.fetch(
+    new Request('https://service.test' + checkBase, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
+      body: OVER_LIMIT_BODY,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 413, `expected 413 got ${res.status}`);
+});
+
+await check('T-C7b POST /check invalid-token 256KB+ body returns 401', async () => {
+  const res = await app.fetch(
+    new Request('https://service.test' + checkBase, {
+      method: 'POST',
+      headers: { authorization: 'Bearer not-a-valid-token', 'content-type': 'application/json' },
+      body: OVER_LIMIT_BODY,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 401, `expected 401 got ${res.status}`);
+});
+
 console.log(`\n${passed} tests passed`);

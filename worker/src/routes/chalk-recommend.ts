@@ -1,13 +1,12 @@
 // #1293 — POST /admin/chalk/cohorts/:cohort/courses/:course/recommend
 // Issuer Bearer only. Deterministic closed-vocabulary method recommendation.
 // Depends on chalk_knowledge_versions and chalk_knowledge_docs from #1288 (migration 0030).
-// TODO(#1295): readDraft 통합
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
 import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-auth";
-import { owns, type Draft } from "./authoring";
-import { recommendMethods, VocabError, type MethodFields } from "../lib/chalk-recommend";
+import { readDraft, owns as ownsDraft } from "../lib/authoring-draft-write";
+import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFields } from "../lib/chalk-recommend";
 
 interface KbDoc {
   version: number;
@@ -42,11 +41,8 @@ chalkRecommend.post(
     c.header("cache-control", "no-store");
 
     // Verify the course draft exists and is owned by this issuer.
-    const draft = await c.env.HPS_DB
-      .prepare("SELECT * FROM authoring_drafts WHERE cohort_id=? AND course_id=?")
-      .bind(cohort, course)
-      .first<Draft>();
-    if (!draft || !owns(draft, auth)) {
+    const draft = await readDraft(c.env.HPS_DB, cohort, course);
+    if (!draft || !ownsDraft(draft, auth.payload.u, auth.scope.profiles)) {
       return c.json({ error: "course not found" }, 404);
     }
 
@@ -54,18 +50,18 @@ chalkRecommend.post(
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "request body must be JSON" }, 400);
+      return c.json({ code: "invalid_request", error: "request body must be JSON" }, 400);
     }
     if (typeof body !== "object" || body === null) {
-      return c.json({ error: "request body must be a JSON object" }, 400);
+      return c.json({ code: "invalid_request", error: "request body must be a JSON object" }, 400);
     }
     const req = body as Record<string, unknown>;
 
     if (!Array.isArray(req.conditions) || req.conditions.some((v) => typeof v !== "string")) {
-      return c.json({ error: "conditions must be a string array" }, 400);
+      return c.json({ code: "invalid_request", error: "conditions must be a string array" }, 400);
     }
     if (!Array.isArray(req.goals) || req.goals.some((v) => typeof v !== "string")) {
-      return c.json({ error: "goals must be a string array" }, 400);
+      return c.json({ code: "invalid_request", error: "goals must be a string array" }, 400);
     }
 
     const requestedVersion =
@@ -75,7 +71,7 @@ chalkRecommend.post(
           : null
         : null;
     if (req.knowledge_version !== undefined && requestedVersion === null) {
-      return c.json({ error: "knowledge_version must be a number" }, 400);
+      return c.json({ code: "invalid_request", error: "knowledge_version must be a number" }, 400);
     }
 
     const learnerLevel = typeof req.learner_level === "string" ? req.learner_level : undefined;
@@ -92,7 +88,7 @@ chalkRecommend.post(
           .first<{ version: number }>();
 
     if (!versionRow) {
-      return c.json({ error: "no knowledge version found; load knowledge data first" }, 409);
+      return c.json({ code: "knowledge_missing", error: "no knowledge version found; load knowledge data first" }, 409);
     }
     const kbVersion = versionRow.version;
 
@@ -113,7 +109,7 @@ chalkRecommend.post(
     ]);
 
     if (!goalVocabRow || !condVocabRow || !priorVocabRow) {
-      return c.json({ error: "knowledge incomplete; reload knowledge data" }, 409);
+      return c.json({ code: "knowledge_incomplete", error: "knowledge incomplete; reload knowledge data" }, 409);
     }
 
     const goalKeys = (JSON.parse(goalVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key);
@@ -152,8 +148,11 @@ chalkRecommend.post(
       );
       return c.json(result);
     } catch (err) {
+      if (err instanceof KnowledgeIncompatibleError) {
+        return c.json({ code: "knowledge_incompatible", error: "knowledge incompatible", field: err.field, unranked: err.unranked }, 409);
+      }
       if (err instanceof VocabError) {
-        return c.json({ error: err.message, field: err.field, unknown_values: err.unknown_values }, 400);
+        return c.json({ code: "vocab_unknown", error: err.message, field: err.field, unknown_values: err.unknown_values }, 400);
       }
       throw err;
     }
