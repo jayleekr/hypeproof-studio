@@ -3175,6 +3175,7 @@
       "stage": "test",
       "owner": "JinyongShin",
       "depends_on": [
+        "ST-REQ-CHALK-SUB",
         "ST-DES-CHALK-INSTRUCTOR",
         "ST-IMP-CHALK-INSTRUCTOR-MODE"
       ],
