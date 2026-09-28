@@ -44,7 +44,7 @@
 | | 서버 경로 리허설 | 구독 리허설 |
 |---|---|---|
 | 모델 호출 | 앱 → 서버(`/v1/messages` 또는 `/v1/chat/completions`) | 앱 → 강사 컴퓨터 CLI(`localRuntime`) |
-| 코호트 지시문 | 서버가 넣음(`chat-gate.ts:336-363`, 게이트는 세션·로스터 필요 `:207-256`) | **서버 조립 함수로 내려받아 넣음**(E6-7, `buildAnthropicSystemBlocks` `translate.ts:513-529`) |
+| 코호트 지시문 | 서버가 넣음(`chat-gate.ts:336-363`, 게이트는 세션·로스터 필요 `:207-256`). `buildAnthropicSystemBlocks`(`translate.ts:513-529`)는 `system_prompt`만 조립 — 구독 리허설엔 부족하다 | **[추정] E6-7**: `chat-gate.ts:336-363` 조립 부분을 세션 검사와 분리된 순수 함수로 빼고(동작 불변 시험 필수, 개정 R1), 좌석 토큰으로 단계·도움 방식별로 내려받는다. 로컬 기본 지시문이 원본 수업을 넘겨 `learning.observe`가 보이는 문제(SX-57)도 여기서 막는다 |
 | 미성년 모더레이션·길이 제한 | 걸림 | **안 걸림** → 경고 + 기록 |
 | 요청 기록 | 서버가 직접 봄(`authoring_rehearsal_turns`) | **앱이 올림**(E4-7 `POST /admin/chalk/transcripts`, `rehearsal_id` 포함) |
 | 확정 근거 | 됨 | **됨**(결정 8 (나)) |
@@ -61,10 +61,13 @@
 | 도구 경계 검사(`agent-sdk` 만) | 구독 턴은 앱이 올린 도구 이름으로 같은 검사 |
 | — | **새 검사 `checklist`**: 13절 예상 막힘이 있는 강의면 모든 항목에 표시(알맞음 / 고칠 것)가 있어야 한다. 표시가 빠지면 `checklist_incomplete` 로 실패. "고칠 것"이 있어도 판정은 통과할 수 있다 — 아래 2-2 |
 
+**E6-6 구현 위치**: `rehearsal-report.ts:38`(턴 합계 기준 변경) · `judgeRehearsal`(`lesson-rehearsal.ts:141-146`)(판정 사유 추가) · 확정 기록 칸(새 migration `0032`+). `authoring.ts:357-363`은 `verdict` 결과만 읽으므로 손대지 않는다.
+
 ### 2-2. "고칠 것"은 판정을 막나
 
 - **막지 않는다.** 점검표는 강사의 판단 기록이고, 확정 여부도 강사가 정한다. "고칠 것"이 남아 있으면 확정 화면에 "고칠 것 N개가 남았습니다"를 보이고, 강사가 확정을 누르면 확정 기록에 그 목록이 남는다
 - 이유: 판정을 모델이나 규칙이 막는 것은 강의 퀄리티 게이트(후속)의 일이다. 이번 범위는 흐름을 만드는 것이다(PRD 7판)
+- 점검 결과 저장(E6-5): 보고서 스키마 `hps-rehearsal-report/1`의 새 칸(`checklist`)으로 싣는다. `parseReport`(`lesson-rehearsal.ts:72-91`)는 아는 칸만 검증하고 객체 전체를 반환(`lesson-rehearsal.ts:91`)하므로, 새 칸은 `report_json`에 자동 보존된다. 별도 테이블 불필요. 판정 반영은 E6-6(§2-1 `checklist` 행)
 
 ### 2-3. 확정 기록
 
