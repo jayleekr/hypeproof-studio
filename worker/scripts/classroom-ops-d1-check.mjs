@@ -18,17 +18,18 @@ import { fileURLToPath } from 'node:url';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../migrations');
 export const FIRST = 11;
+export const LAST = 29; // 0030+ is the Chalk range (separate application and check)
 /** migration file → the objects it creates (all of them are CREATE … IF NOT EXISTS; anything else would not be additive). */
-export function expectedObjects(first = FIRST) {
-  return readdirSync(dir).filter((f) => /^\d{4}-.*\.sql$/.test(f) && Number(f.slice(0, 4)) >= first).sort().map((file) => {
+export function expectedObjects(first = FIRST, last = LAST) {
+  return readdirSync(dir).filter((f) => /^\d{4}-.*\.sql$/.test(f) && Number(f.slice(0, 4)) >= first && Number(f.slice(0, 4)) <= last).sort().map((file) => {
     const sql = readFileSync(path.join(dir, file), 'utf8').replace(/--.*$/gm, '');
     const other = sql.split(';').map((s) => s.trim()).filter((s) => s && !/^CREATE\s+(TABLE|(UNIQUE\s+)?INDEX)\s+IF\s+NOT\s+EXISTS\s/i.test(s));
     return { file, objects: [...sql.matchAll(/CREATE\s+(?:TABLE|(?:UNIQUE\s+)?INDEX)\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)/gi)].map((m) => m[1]), not_additive: other.map((s) => s.slice(0, 60)) };
   });
 }
-export function compare(present, first = FIRST) {
+export function compare(present, first = FIRST, last = LAST) {
   const have = new Set(present);
-  const rows = expectedObjects(first).map((m) => { const missing = m.objects.filter((o) => !have.has(o)); return { file: m.file, state: !missing.length ? 'applied' : missing.length === m.objects.length ? 'not_applied' : 'partial', missing, not_additive: m.not_additive }; });
+  const rows = expectedObjects(first, last).map((m) => { const missing = m.objects.filter((o) => !have.has(o)); return { file: m.file, state: !missing.length ? 'applied' : missing.length === m.objects.length ? 'not_applied' : 'partial', missing, not_additive: m.not_additive }; });
   // Additive files may be applied in any order and re-applied, but later ones assume earlier tables exist: a gap is reported.
   const firstMissing = rows.findIndex((r) => r.state !== 'applied'), gap = firstMissing >= 0 && rows.slice(firstMissing).some((r) => r.state === 'applied');
   return { rows, all: rows.every((r) => r.state === 'applied'), none: rows.every((r) => r.state === 'not_applied'), partial: rows.filter((r) => r.state === 'partial').map((r) => r.file), out_of_order: gap, next: rows.filter((r) => r.state !== 'applied').map((r) => r.file) };
