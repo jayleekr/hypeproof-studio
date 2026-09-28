@@ -322,7 +322,7 @@ try {
   await pickSeats(['A1', 'A3', 'A4']); await page.locator('#ops-bulk-diagnose').click(); await wait(() => db("SELECT id FROM ops_commands WHERE action='retry_diagnostics' ORDER BY created_at DESC LIMIT 1")[0], 'command recorded');
   const C = 'command:' + db("SELECT id FROM ops_commands WHERE action='retry_diagnostics' ORDER BY created_at DESC LIMIT 1")[0].id;
   // 2 — collection of A1, started while the diagnosis may still be open
-  await pickSeats(['A1']); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-pick-note').filter({ hasText: '요청을 접수했습니다' }).waitFor();
+  await pickSeats(['A1']); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-kind-record').check(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-last-what').filter({ hasText: '요청 접수' }).waitFor();
   const K = 'collect:' + db('SELECT id FROM classroom_collect_batches WHERE dry_run=0 ORDER BY created_at DESC LIMIT 1')[0].id;
   // 3 — a notice to A1 + A3 (A3 has never connected)
   if (!(await page.locator('#ops-dist').evaluate((d) => d.open))) await page.locator('#ops-dist-summary').click();
@@ -367,7 +367,7 @@ try {
   // ── R6 upload (U1 contract, reused): consent on the device, request from Chalk, and only the Service's verification counts ──
   await palette(win, '수업 기록 보내기 동의·철회'); const agree = '동의하고 보내기 허용';
   await wait(() => win.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .monaco-dialog-box a.monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, agree), 'the consent dialog'); await wait(async () => (await toasts(win)).some((t) => t.includes('동의를 기록했습니다')), 'consent recorded');
-  await I.refresh(); await page.locator('#ops-select-none').click(); await I.row('A1').getByLabel('선택').check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-go').click();
+  await I.refresh(); await page.locator('#ops-select-none').click(); await I.row('A1').getByLabel('선택').check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-kind-record').check(); await page.locator('#ops-pick-go').click();
   await page.locator('#ops-pick-items').filter({ hasText: /A1 · .* — 현재: 서버 검증됨/ }).waitFor({ timeout: 120000 }); await page.locator('#ops-pick-observed').filter({ hasText: /결과 확정/ }).waitFor({ timeout: 60000 }); const pickState = (await I.T('ops-pick-state')).replace(/\s+/g, ' ');
   const batchId = db('SELECT id FROM classroom_collect_batches ORDER BY created_at DESC LIMIT 1')[0].id, items = (await local.request(`${local.base}/report-batches/${batchId}`, 'GET', undefined, teacherToken)).json.items;
   const mine = items.find((i) => i.seat_id === 'A1'); assert.deepEqual([mine.state, mine.outcome], ['verified', 'resolved']); assert.ok(items.filter((i) => i.seat_id !== 'A1').every((i) => i.outcome === undefined || i.outcome === null), 'unselected seats have no verdict');

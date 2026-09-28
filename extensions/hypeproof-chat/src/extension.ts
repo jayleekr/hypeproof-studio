@@ -44,6 +44,7 @@ import type { ResolvedProfile } from "./protocol";
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
 let providerRef: ChatPanelProvider | null = null;
+let spoolRef: SessionSpool | null = null;
 /** #596 — re-entry lock on the upload command (banner + palette clicked at once → no double upload). */
 let uploadInFlight = false;
 
@@ -132,6 +133,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // On shutdown, flush the last events left in the queue (best-effort — a crash is
     // covered by the line-at-a-time append).
     context.subscriptions.push({ dispose: () => void spool.flush() });
+    spoolRef = spool;
     // #596 — leftovers banner at startup (once per activation). The session-end
     // banner only fires on the proxy runtime's session_window, but the main runtime
     // is agent-sdk (session 1 review F6), so that path alone never reaches anyone —
@@ -190,6 +192,7 @@ export async function activate(context: vscode.ExtensionContext) {
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
     readSpool: (sinceMs) => provider.opsReadSpool(sinceMs),
+    readCollection: (sinceMs, identity) => provider.opsReadCollection(sinceMs, identity),
     recoverPreview: () => provider.opsRecoverPreview(),
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
@@ -224,6 +227,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.classroomDisconnect", () => classroomOps.disconnectInteractively()),
     vscode.commands.registerCommand("hypeproof-chat.classroomNotes", () => classroomOps.showCoachingNotes()),
     vscode.commands.registerCommand("hypeproof-chat.classroomCollectionConsent", () => classroomOps.collectionConsentInteractively()),
+    vscode.commands.registerCommand("hypeproof-chat.classroomApproveArtifact", () => provider.approveArtifactInteractively()),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
@@ -996,6 +1000,10 @@ async function applyTestBackdoors(
 
 export function deactivate() {
   providerRef = null;
+  // #751 U1b — a normal shutdown ends the session with a `session_close` line, so a later collection can prove where it ended.
+  // VS Code waits for this promise (bounded); a crash leaves the session without it, and that end stays unproven.
+  const s = spoolRef; spoolRef = null;
+  return s?.close("shutdown");
 }
 
 export { TOKEN_KEY };

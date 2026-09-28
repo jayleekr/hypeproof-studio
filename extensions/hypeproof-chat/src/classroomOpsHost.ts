@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
-import { freezeSnapshot, uploadSnapshot, WINDOW_LEAD_MS, type SnapshotBinding, type SnapshotDeps, type SnapshotScope, type SnapshotState } from "./evidenceSnapshot";
+import { copyFileNames, freezeCollection, freezeSnapshot, normalizeKinds, uploadSnapshot, WINDOW_LEAD_MS, type CollectKind, type CollectionBinding, type SnapshotBinding, type SnapshotDeps, type SnapshotScope, type SnapshotState } from "./evidenceSnapshot";
 import { removeFrozenCopy } from "./evidenceSnapshotStore";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
@@ -67,6 +67,8 @@ export interface ClassroomOpsActions {
   // R4 — allowlisted spool files of the current session, read-only.
   /** The current spool session's files with its sequence state, read under the spool's write queue. `sinceMs` = start of the class window. */
   readSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null>;
+  /** #751 U1b — this learner's sessions in the class window (current + restarted/sealed ones). Absent in older hosts: a kinds collection then records nothing. */
+  readCollection?(sinceMs: number, identity: { u: string; c: string; p: string }): Promise<import("./sessionSpool").SpoolCollectionSource | null>;
 }
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
@@ -128,7 +130,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     const m = this.meta; if (!m?.student || !m.run) return null; // a connection made before the binding contract cannot collect
     return { grant_id: m.grant_id, class_run_id: m.class_run_id, seat_id: m.seat_id, student: m.student, activity: m.lesson ? { course_id: m.lesson.course_id, version: m.lesson.version } : null, run: m.run };
   }
-  private snapshotDeps(consent: { purpose: string; notice_version: string } | null = null): SnapshotDeps {
+  private snapshotDeps(consent: { purpose: string; notice_version: string } | null = null, kinds: CollectKind[] | null = null): SnapshotDeps {
     const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), safe = (s: string) => s.replace(/[^A-Za-z0-9-]/g, "");
     const stateFile = (b: string) => path.join(dir, `${safe(b)}.state.json`), copyDir = (b: string, r: number) => path.join(dir, safe(b), `r${r}`);
     const call = async (url: string, init: RequestInit) => { try { const res = await fetch(`${this.base()}/classroom/ops/collect/${url}`, { ...init, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${this.credential}`, ...(init.headers ?? {}) } }); const j = (await res.json().catch(() => ({}))) as Record<string, string>; return { status: res.status, reason: j.reason, receipt_id: j.receipt_id, coverage: j.coverage, coverage_reason: j.coverage_reason }; } catch { return { status: 0 }; } };
@@ -138,18 +140,27 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       copy: async (b, r) => {
         const target = copyDir(b, r), bindingFile = path.join(target, "binding.json");
         try {
-          const binding = JSON.parse(await fs.readFile(bindingFile, "utf8")) as SnapshotBinding;
-          const files = await Promise.all(["session.meta.json", "events.jsonl"].map(async (name) => ({ name, data: new Uint8Array(await fs.readFile(path.join(target, name))) })));
-          return { files, binding };
+          // A /3 copy (U1b) carries its parts in the binding; the file list is derived from it, never from what else is in the directory.
+          const held = JSON.parse(await fs.readFile(bindingFile, "utf8")) as SnapshotBinding | CollectionBinding, copy = "parts" in held ? { collection: held } : { binding: held };
+          const files = await Promise.all(copyFileNames(copy).map(async (name) => ({ name, data: new Uint8Array(await fs.readFile(path.join(target, name))) })));
+          return { files, ...copy };
         } catch { /* not copied yet */ }
         // Resuming never reads the live spool: without the frozen copy and an explicit consent scope there is nothing to send.
         const scope = this.scope(); if (!scope || !consent) return null;
-        const live = await this.actions.readSpool(scope.run.starts_at - WINDOW_LEAD_MS); if (!live) return null;
-        const frozen = freezeSnapshot(live.files, scope, b, consent, Date.now(), live); if (!frozen.ok) return { code: frozen.code };
+        let frozen: { ok: true; files: Array<{ name: string; data: Uint8Array }>; binding?: SnapshotBinding; collection?: CollectionBinding } | { ok: false; code: string };
+        if (kinds) {
+          // U1b — the asked kinds, over this learner's sessions in the window. Earlier sessions are read from disk by name and identity only.
+          const src = this.actions.readCollection ? await this.actions.readCollection(scope.run.starts_at - WINDOW_LEAD_MS, scope.student) : null; if (!src) return null;
+          const fc = freezeCollection(src, scope, b, consent, kinds, Date.now()); frozen = fc.ok ? { ok: true, files: fc.files, collection: fc.binding } : fc;
+        } else {
+          const live = await this.actions.readSpool(scope.run.starts_at - WINDOW_LEAD_MS); if (!live) return null;
+          frozen = freezeSnapshot(live.files, scope, b, consent, Date.now(), live);
+        }
+        if (!frozen.ok) return { code: frozen.code };
         await fs.mkdir(target, { recursive: true });
         for (const f of frozen.files) await fs.writeFile(path.join(target, f.name), f.data, { flag: "wx" });
-        await fs.writeFile(bindingFile, JSON.stringify(frozen.binding), { flag: "wx" });
-        return { files: frozen.files, binding: frozen.binding };
+        await fs.writeFile(bindingFile, JSON.stringify(frozen.collection ?? frozen.binding), { flag: "wx" });
+        return { files: frozen.files, ...(frozen.collection ? { collection: frozen.collection } : { binding: frozen.binding }) };
       },
       loadState: async (b) => { try { return JSON.parse(await fs.readFile(stateFile(b), "utf8")) as SnapshotState; } catch { return null; } },
       saveState: async (st) => { await fs.mkdir(dir, { recursive: true }); const tmp = `${stateFile(st.batch_id)}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(st), "utf8"); await fs.rename(tmp, stateFile(st.batch_id)); },
@@ -260,8 +271,9 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         postcondition: async (command) => resetPostcondition(await this.readManifest(command.command_id), this.actions.runtimeGeneration()),
       },
       // R4 — issued by the Service as part of a collection batch the learner consented to. Reads the spool; changes nothing.
-      retry_evidence_upload: { mutating: false, acceptsArgs: (a) => typeof a.batch_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(a.batch_id) && Object.keys(a).every((k) => ["batch_id", "purpose", "notice_version"].includes(k)),
-        run: async (_s, command) => { const r = await uploadSnapshot(String(command.args.batch_id), this.snapshotDeps({ purpose: String(command.args.purpose ?? ""), notice_version: String(command.args.notice_version ?? "") })); void this.outbox?.add("upload", uploadPayload(r.ok ? "verified" : r.code === "offline_pending" ? "pending" : "failed")); return r; } },
+      // U1b — `kinds` (with `sessions: "window"`) asks for those kinds over every session of this learner in the class window.
+      retry_evidence_upload: { mutating: false, acceptsArgs: (a) => typeof a.batch_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(a.batch_id) && Object.keys(a).every((k) => ["batch_id", "purpose", "notice_version", "kinds", "sessions"].includes(k)) && (a.kinds === undefined ? a.sessions === undefined : !!normalizeKinds(a.kinds) && a.sessions === "window"),
+        run: async (_s, command) => { const kinds = command.args.kinds === undefined ? null : normalizeKinds(command.args.kinds); const r = await uploadSnapshot(String(command.args.batch_id), this.snapshotDeps({ purpose: String(command.args.purpose ?? ""), notice_version: String(command.args.notice_version ?? "") }, kinds)); void this.outbox?.add("upload", uploadPayload(r.ok ? "verified" : r.code === "offline_pending" ? "pending" : "failed")); return r; } },
       // Coaching: a question or a pointer, shown without covering the work. Nothing on disk or in the conversation changes.
       send_question: { mutating: false, acceptsArgs: (a) => Object.keys(a).join() === "text" && typeof a.text === "string" && a.text.length <= 300,
         run: async (_s, command) => { this.showCoaching("강사의 질문", String(command.args.text)); return { ok: true, code: "shown" }; } },

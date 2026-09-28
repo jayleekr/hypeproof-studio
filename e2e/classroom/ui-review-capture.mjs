@@ -70,7 +70,7 @@ try {
 
   // Selected collection: consented + connected, consented + no upload, not consented (stale), no device.
   for (const id of ['A1', 'B6', 'C6', 'D3']) await pick(p, id).check();
-  await p.click('#ops-pick-collect'); await p.locator('#ops-pick-confirm').waitFor(); await p.click('#ops-pick-go');
+  await p.click('#ops-pick-collect'); await p.locator('#ops-pick-confirm').waitFor(); await p.check('#ops-pick-kind-record'); await p.click('#ops-pick-go');
   await p.locator('#ops-pick-items p').first().waitFor({ timeout: 20000 }); for (let i = 0; i < 6; i++) { await p.waitForTimeout(1500); if (await p.locator('#ops-pick-refresh').isVisible()) await p.click('#ops-pick-refresh'); }
   facts.collect_items = (await p.locator('#ops-pick-items').innerText()).split('\n').filter(Boolean);
   await p.locator('#ops-results').evaluate((e) => e.scrollIntoView({ block: 'start' }));

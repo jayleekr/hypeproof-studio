@@ -28,9 +28,9 @@ const row = (id) => page.locator(`#ops-seats .ops-seat[data-seat="${id}"]`); awa
 assert.match(await row('A1').innerText(), /앱이 같은 발급분|준비|입장/); assert.match(await page.locator('#ops-selection').innerText(), /선택한 좌석이 없습니다/);
 await row('A1').getByLabel('선택').check(); assert.match(await page.locator('#ops-selection').innerText(), /선택 1 \/ 전체 6석 .* 기기 연결됨 1 · 기기 연결 없음 0 .*: A1$/);
 await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor();
-const impact = await page.locator('#ops-pick-impact').innerText(); assert.match(impact, /선택 1명 중 1명에게 기록 회수를 요청합니다.*선택하지 않은 5명에게는 아무것도 요청·저장하지 않습니다/);
+const impact = await page.locator('#ops-pick-impact').innerText(); assert.match(impact, /선택 1명 중 1명에게 회수를 요청합니다\(종류는 아래에서 고름\).*선택하지 않은 5명에게는 아무것도 요청·저장하지 않습니다/);
 assert.equal((await status()).upload_commands.length, before.upload_commands.length, 'the preview asked no device'); await page.screenshot({ path: path.join(out, '01-preview.png'), fullPage: true });
-await page.locator('#ops-pick-go').click();
+await page.locator('#ops-pick-kind-record').check(); await page.locator('#ops-pick-go').click();
 await page.locator('#ops-pick-items').filter({ hasText: /A1 · .* — 현재: 서버 검증됨/ }).waitFor({ timeout: 120000 }).catch(async (e) => { throw Error('A1 did not verify: ' + (await page.locator('#ops-pick-state').innerText()) + ' | ' + (await page.locator('#ops-pick-items').innerText()), { cause: e }); });
 await page.locator('#ops-pick-observed').filter({ hasText: /결과 확정/ }).waitFor({ timeout: 30000 }); await page.locator('#ops-pick-state').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(out, '02-collected.png'), fullPage: true });
 

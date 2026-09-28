@@ -21,12 +21,29 @@ export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'with
  * Whether the seats belong to THIS run is the route's question (it needs the roster); this function is pure.
  */
 export const COLLECT_MODES = ['finish', 'collect_only'] as const;
-export const COLLECT_REQUEST_FIELDS = ['idempotency_key', 'roster_revision', 'purpose', 'notice_version', 'dry_run', 'targets', 'mode'] as const;
+export const COLLECT_REQUEST_FIELDS = ['idempotency_key', 'roster_revision', 'purpose', 'notice_version', 'dry_run', 'targets', 'mode', 'kinds'] as const;
+/**
+ * U1b (#751) — WHAT a selected collection asks for. Every kind is a subset of the class record the learner already consented
+ * to send for `class_report` (notice-v1: "내 질문·AI 응답·작업 이벤트"), so no kind needs a new consent and none widens it:
+ *   record    — every event of this learner in the class window (the U1 content), now across app restarts
+ *   prompts   — the learner's `prompt` events only (text as recorded, truncation flags, instructor prompt references)
+ *   artifacts — only artifact versions the learner explicitly approved (`artifact_approval`), plus those approvals
+ * The record already contains the other two, so `record` is asked alone; `prompts`+`artifacts` may be asked together.
+ */
+export const COLLECT_KINDS = ['record', 'prompts', 'artifacts'] as const;
+export type CollectKind = (typeof COLLECT_KINDS)[number];
+const KIND_SETS = ['record', 'prompts', 'artifacts', 'artifacts,prompts'];
+export function normalizeKinds(v: unknown): CollectKind[] | null {
+  if (!Array.isArray(v) || !v.length || v.some((k) => typeof k !== 'string') || new Set(v).size !== v.length) return null;
+  const sorted = [...(v as string[])].sort();
+  return KIND_SETS.includes(sorted.join(',')) ? (sorted as CollectKind[]) : null;
+}
 // This file stays import-free (tests load it without the Service resolver). The two shapes are the command ledger's ID_RE and
 // UUIDISH_RE; classroom-ops-selected-collect.test.mjs fails if they drift apart.
 export const COLLECT_SEAT_RE = /^[A-Za-z0-9_-]{1,128}$/, COLLECT_KEY_RE = /^[A-Za-z0-9-]{8,64}$/;
 const SEAT_RE = COLLECT_SEAT_RE, KEY_RE = COLLECT_KEY_RE, NOTICE = /^[A-Za-z0-9_.-]{1,64}$/;
-export interface CollectRequest { idempotency_key: string; roster_revision: number; purpose: string; notice_version: string; dry_run: boolean; scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[] }
+/** `kinds` absent = the U1 request (the current session's whole record, schema /2). Present = U1b (schema /3, every session in the window). */
+export interface CollectRequest { idempotency_key: string; roster_revision: number; purpose: string; notice_version: string; dry_run: boolean; scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[]; kinds?: CollectKind[] }
 export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: true; value: CollectRequest } | { ok: false; reason: string; detail: string } {
   const no = (reason: string, detail: string) => ({ ok: false as const, reason, detail });
   if (!b || typeof b !== 'object' || Array.isArray(b)) return no('request_invalid', 'a JSON object is required');
@@ -35,9 +52,13 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
   if (typeof o.idempotency_key !== 'string' || !KEY_RE.test(o.idempotency_key) || !Number.isInteger(o.roster_revision) || typeof o.dry_run !== 'boolean' || !(PURPOSES as readonly string[]).includes(o.purpose as string) || typeof o.notice_version !== 'string' || !NOTICE.test(o.notice_version)) return no('request_invalid', 'idempotency_key, roster_revision, purpose, notice_version and dry_run required');
   if (o.mode !== undefined && !(COLLECT_MODES as readonly string[]).includes(o.mode as string)) return no('mode_invalid', 'mode is finish or collect_only');
   const base = { idempotency_key: o.idempotency_key, roster_revision: o.roster_revision as number, purpose: o.purpose as string, notice_version: o.notice_version, dry_run: o.dry_run };
+  // The class wrap-up feeds evaluation from the current session's whole record; kinds and restarted sessions are not part of it (U1b).
+  let kinds: CollectKind[] | undefined;
+  if (o.kinds !== undefined) { const k = normalizeKinds(o.kinds); if (!k) return no('kinds_invalid', 'kinds is ["record"], or one or both of "prompts" and "artifacts"'); kinds = k; }
   if (o.targets === undefined) {
     // Collect-only over "everyone" must name everyone: the whole roster is never a default of the new action.
     if (o.mode === 'collect_only') return no('targets_required', 'collect_only names its seats explicitly');
+    if (kinds) return no('kinds_not_allowed', 'the class wrap-up collects the whole record; kinds belong to a selected collection');
     return { ok: true, value: { ...base, scope: 'roster', mode: 'finish', targets: [] } };
   }
   if (!Array.isArray(o.targets)) return no('targets_invalid', 'targets is a list of seat ids');
@@ -46,7 +67,7 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
   if (o.targets.some((t) => typeof t !== 'string' || !SEAT_RE.test(t))) return no('targets_invalid', 'a seat id is malformed');
   if (new Set(o.targets).size !== o.targets.length) return no('targets_duplicate', 'a seat is named twice');
   if (o.mode === 'finish') return no('mode_not_allowed', 'the class wrap-up (evaluation may follow) covers the whole roster; selected seats are collect_only');
-  return { ok: true, value: { ...base, scope: 'targets', mode: 'collect_only', targets: [...(o.targets as string[])].sort() } };
+  return { ok: true, value: { ...base, scope: 'targets', mode: 'collect_only', targets: [...(o.targets as string[])].sort(), ...(kinds ? { kinds } : {}) } };
 }
 /**
  * What one selected seat of a collection batch IS right now — from three independent facts, none of which is enough alone:
@@ -112,7 +133,8 @@ export function collectStatus(item: { state: string; updated_at: number; request
 }
 
 /** Everything that makes two requests "the same request". The idempotency key itself is not part of it. */
-export const collectRequestCanonical = (r: Pick<CollectRequest, 'scope' | 'mode' | 'targets' | 'purpose' | 'notice_version' | 'dry_run' | 'roster_revision'>): string => JSON.stringify([r.scope, r.mode, r.targets, r.purpose, r.notice_version, r.dry_run, r.roster_revision]);
+// Kinds join the canonical form only when asked, so every request hash recorded before U1b stays what it was.
+export const collectRequestCanonical = (r: Pick<CollectRequest, 'scope' | 'mode' | 'targets' | 'purpose' | 'notice_version' | 'dry_run' | 'roster_revision' | 'kinds'>): string => JSON.stringify([r.scope, r.mode, r.targets, r.purpose, r.notice_version, r.dry_run, r.roster_revision, ...(r.kinds ? [r.kinds] : [])]);
 
 export interface ManifestFile { name: string; bytes: number; sha256: string }
 /**
@@ -130,7 +152,7 @@ export interface SnapshotBinding {
   /** Declared extent of events.jsonl. `final_line_sha256` names the last confirmed event. */
   range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number; session_last_seq?: number; other_sessions_in_window?: number };
 }
-export interface SnapshotManifest { schema: string; files: ManifestFile[]; binding?: SnapshotBinding }
+export interface SnapshotManifest { schema: string; files: ManifestFile[]; binding?: SnapshotBinding; collection?: CollectionBinding }
 export type Coverage = 'complete' | 'gaps' | 'sequence_unavailable' | 'damaged' | 'range_unknown';
 export const SNAPSHOT_SCHEMA_V2 = 'hps-classroom-snapshot/2';
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/, TS = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
@@ -150,6 +172,7 @@ function validateBinding(v: unknown): SnapshotBinding | null {
 export function validateManifest(m: unknown): { ok: true; value: SnapshotManifest } | { ok: false; error: string } {
   if (!m || typeof m !== 'object') return { ok: false, error: 'manifest must be an object' };
   const o = m as Record<string, unknown>;
+  if (o.schema === SNAPSHOT_SCHEMA_V3) return validateCollectionManifest(o);
   if ((o.schema !== SNAPSHOT_SCHEMA && o.schema !== SNAPSHOT_SCHEMA_V2) || !Array.isArray(o.files) || !o.files.length || o.files.length > Object.keys(SNAPSHOT_FILES).length) return { ok: false, error: 'schema and files[] required' };
   const seen = new Set<string>();
   for (const f of o.files as Array<Record<string, unknown>>) {
@@ -237,6 +260,181 @@ export function eventCoverage(jsonl: string, owner: { student: string }, range?:
 export async function finalLineSha(jsonl: string): Promise<string> {
   const last = jsonl.split('\n').filter((l) => l.trim()).pop() ?? '';
   return sha256Bytes(new TextEncoder().encode(last).buffer as ArrayBuffer);
+}
+
+// ── U1b (#751): schema /3 — the kinds a selected collection asked for, over every session of this learner in the window ──
+//
+// One PART per spool session (app restart, second window, sealed session): its own session.meta.json (`p<i>.meta.json`), an
+// INDEX of every event of that session inside the class window (`p<i>.index.jsonl` — seq, ts, type and the sha256 of the raw
+// line; never content), and the raw event lines of the asked kinds only (`p<i>.events.jsonl`, absent when none). Lines are
+// the spool's own bytes: each part keeps its session_id and seq — sessions are never concatenated into one fake stream.
+// The index is what lets the Service tell "not asked for" from "missing" without receiving the lines that were not asked for.
+export const SNAPSHOT_SCHEMA_V3 = 'hps-classroom-snapshot/3';
+export const MAX_PARTS = 8;
+export const V3_FILE_RE = /^p([1-8])\.(meta\.json|index\.jsonl|events\.jsonl)$/;
+const V3_SPECS: Record<string, { maxBytes: number; contentType: string }> = { 'meta.json': { maxBytes: 256 * 1024, contentType: 'application/json' }, 'index.jsonl': { maxBytes: 2 * 1024 * 1024, contentType: 'application/x-ndjson' }, 'events.jsonl': { maxBytes: 8 * 1024 * 1024, contentType: 'application/x-ndjson' } };
+/** Which file names a batch accepts: the legacy two for a batch without kinds, the part files for a U1b batch. Anything else is refused at PUT. */
+export function snapshotFileSpec(name: string, kinds: boolean): { maxBytes: number; contentType: string } | null {
+  if (!kinds) return Object.prototype.hasOwnProperty.call(SNAPSHOT_FILES, name) ? SNAPSHOT_FILES[name]! : null;
+  const m = V3_FILE_RE.exec(name); return m ? V3_SPECS[m[2]!]! : null;
+}
+/** The event types a kind carries. `lesson_binding` (the U3 basis marker, no learner text) travels with every kind as provenance. */
+export function kindSelects(kinds: readonly string[], type: unknown, artifactSha: unknown, approved: ReadonlySet<string>): boolean {
+  if (kinds.includes('record')) return true;
+  if (type === 'lesson_binding') return true;
+  if (kinds.includes('prompts') && type === 'prompt') return true;
+  if (kinds.includes('artifacts') && (type === 'artifact_approval' || (type === 'artifact_snapshot' && typeof artifactSha === 'string' && approved.has(artifactSha)))) return true;
+  return false;
+}
+export type LineCategory = 'prompt' | 'response' | 'artifact_approved' | 'artifact_unapproved' | 'other';
+export const lineCategory = (type: unknown, artifactSha: unknown, approved: ReadonlySet<string>): LineCategory =>
+  type === 'prompt' ? 'prompt' : type === 'response' ? 'response' : type === 'artifact_snapshot' ? (typeof artifactSha === 'string' && approved.has(artifactSha) ? 'artifact_approved' : 'artifact_unapproved') : 'other';
+/** The learner's last word on each artifact version wins, in time order across every part (approve → withdraw → approve again). */
+export function approvedArtifacts(entries: Array<{ type?: unknown; ts?: unknown; artifact_sha256?: unknown; approved?: unknown; part: number; order: number }>): Set<string> {
+  const list = entries.filter((e) => e.type === 'artifact_approval' && typeof e.artifact_sha256 === 'string').sort((a, b) => String(a.ts ?? '').localeCompare(String(b.ts ?? '')) || a.part - b.part || a.order - b.order);
+  const state = new Map<string, boolean>(); for (const e of list) state.set(e.artifact_sha256 as string, e.approved === true);
+  return new Set([...state].filter(([, v]) => v).map(([k]) => k));
+}
+export interface CollectionPart { part: number; spool_session_id: string; current: boolean; lines: number; included: number; from_ts: string; to_ts: string; first_seq?: number; last_seq?: number; session_last_seq?: number; final_index_sha256: string; torn_tail: boolean }
+export interface CollectionBinding { class_run_id: string; batch_id: string; seat_id: string; student: { u: string; c: string; p: string }; activity: { course_id: string; version: string } | null; consent: { purpose: string; notice_version: string }; kinds: CollectKind[]; parts: CollectionPart[]; omitted: { unreadable: number; over_limit: number } }
+const small = (v: unknown, max = 10_000) => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= max;
+function validateCollectionBinding(v: unknown): CollectionBinding | null {
+  const b = v as CollectionBinding; if (!b || typeof b !== 'object') return null;
+  if (![b.class_run_id, b.batch_id, b.seat_id].every((x) => str(x)) || !b.student || ![b.student.u, b.student.c, b.student.p].every((x) => str(x))) return null;
+  if (b.activity !== null && !(b.activity && str(b.activity.course_id) && str(b.activity.version))) return null;
+  if (!b.consent || !str(b.consent.purpose) || !str(b.consent.notice_version) || !normalizeKinds(b.kinds) || normalizeKinds(b.kinds)!.join() !== b.kinds.join()) return null;
+  if (!b.omitted || !small(b.omitted.unreadable) || !small(b.omitted.over_limit) || !Array.isArray(b.parts) || !b.parts.length || b.parts.length > MAX_PARTS) return null;
+  for (const [i, p] of b.parts.entries()) {
+    if (!p || p.part !== i + 1 || !str(p.spool_session_id) || typeof p.current !== 'boolean' || typeof p.torn_tail !== 'boolean' || !Number.isSafeInteger(p.lines) || p.lines < 1 || p.lines > 1_000_000 || !small(p.included, p.lines)) return null;
+    if (!str(p.from_ts, TS) || !str(p.to_ts, TS) || !str(p.final_index_sha256, /^[a-f0-9]{64}$/)) return null;
+    if ((p.first_seq === undefined) !== (p.last_seq === undefined) || (p.first_seq !== undefined && (!Number.isSafeInteger(p.first_seq) || !Number.isSafeInteger(p.last_seq) || p.first_seq! < 1 || p.last_seq! < p.first_seq!))) return null;
+    if (p.session_last_seq !== undefined && (!p.current || !Number.isSafeInteger(p.session_last_seq) || p.session_last_seq < 1)) return null;
+  }
+  if (b.parts.filter((p) => p.current).length > 1) return null;
+  return b;
+}
+function validateCollectionManifest(o: Record<string, unknown>): { ok: true; value: SnapshotManifest } | { ok: false; error: string } {
+  if (!Array.isArray(o.files) || !o.files.length || o.files.length > MAX_PARTS * 3) return { ok: false, error: 'schema and files[] required' };
+  const b = validateCollectionBinding(o.collection); if (!b) return { ok: false, error: 'schema /3 needs a complete collection binding' };
+  if (o.binding !== undefined) return { ok: false, error: 'schema /3 carries `collection`, not `binding`' };
+  const seen = new Set<string>();
+  for (const f of o.files as Array<Record<string, unknown>>) {
+    if (!f || typeof f.name !== 'string' || !V3_FILE_RE.test(f.name) || seen.has(f.name) || !Number.isSafeInteger(f.bytes) || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256)) return { ok: false, error: 'each file needs an allowed part name, bytes and sha256' };
+    seen.add(f.name);
+  }
+  // Exactly the files the binding declares: meta and index for every part, events when that part included a line.
+  const want = new Set(b.parts.flatMap((p) => [`p${p.part}.meta.json`, `p${p.part}.index.jsonl`, ...(p.included ? [`p${p.part}.events.jsonl`] : [])]));
+  if (want.size !== seen.size || [...want].some((n) => !seen.has(n))) return { ok: false, error: 'the files do not match the declared parts' };
+  return { ok: true, value: { schema: SNAPSHOT_SCHEMA_V3, files: o.files as ManifestFile[], collection: b } };
+}
+export interface CollectionOwner extends SnapshotOwner { kinds: readonly string[] }
+export interface CollectionExtent {
+  lines: number; included: number; from_ts: string; to_ts: string; other_sessions_in_window: number; kinds: string[]; sessions: number;
+  parts: Array<{ current: boolean; lines: number; included: number; from_ts: string; to_ts: string; first_seq?: number; last_seq?: number; start_proven: boolean; end_proven: boolean; torn_tail: boolean; truncated_prompts: number; coverage: Coverage }>;
+  received: Record<LineCategory, number> & { instructor_refs: number; truncated_prompts: number; basis_markers: number };
+  not_sent: Record<LineCategory, number>;
+  omitted: { unreadable: number; over_limit: number }; reasons: string[];
+}
+const COVERAGE_RANK: Record<Coverage, number> = { complete: 0, range_unknown: 1, sequence_unavailable: 2, gaps: 3, damaged: 4 };
+const worst = (a: Coverage, b: Coverage): Coverage => (COVERAGE_RANK[b] > COVERAGE_RANK[a] ? b : a);
+const nd = (text: string) => { const lines = text.split('\n'); if (lines.at(-1) === '') lines.pop(); return lines; };
+const zero = (): Record<LineCategory, number> => ({ prompt: 0, response: 0, artifact_approved: 0, artifact_unapproved: 0, other: 0 });
+/**
+ * The Service's own reading of a /3 snapshot, from the bytes it holds. `problem` = it is not this learner's record of this run,
+ * or it carries something that was not asked for (quarantine; the caller also deletes the bytes). Otherwise the coverage answer,
+ * every reason it is not `complete`, and the extent the instructor view shows (numbers, times and flags — no session id, no content).
+ */
+export async function verifyCollection(texts: Map<string, string>, b: CollectionBinding, owner: CollectionOwner): Promise<{ problem: string } | { coverage: Coverage; reason: string; reasons: string[]; extent: CollectionExtent }> {
+  if (b.student.u !== owner.student || b.student.c !== owner.cohort || b.student.p !== owner.profile) return { problem: 'foreign_student' };
+  if (b.class_run_id !== owner.class_run_id || b.batch_id !== owner.batch_id) return { problem: 'foreign_run' };
+  if (b.seat_id !== owner.seat_id) return { problem: 'foreign_seat' };
+  if (b.consent.purpose !== owner.purpose || b.consent.notice_version !== owner.notice_version) return { problem: 'consent_scope_mismatch' };
+  if (JSON.stringify(b.activity ?? null) !== JSON.stringify(owner.activity ?? null)) return { problem: 'foreign_activity' };
+  if ([...owner.kinds].sort().join() !== b.kinds.join()) return { problem: 'kind_scope_mismatch' };
+  type Entry = { seq?: unknown; ts?: unknown; type?: unknown; sha256?: unknown; artifact_sha256?: unknown; approved?: unknown; truncated?: unknown; malformed?: unknown; part: number; order: number };
+  const sessions = new Set<string>(), indexes: Entry[][] = [];
+  for (const p of b.parts) {
+    let meta: Record<string, any>; try { meta = JSON.parse(texts.get(`p${p.part}.meta.json`) ?? ''); } catch { return { problem: 'metadata_invalid' }; }
+    const user = meta?.user;
+    if (!user || typeof user !== 'object' || typeof user.u !== 'string' || typeof user.c !== 'string' || typeof user.p !== 'string') return { problem: 'identity_unbound' };
+    if (user.u !== owner.student) return { problem: 'foreign_student' };
+    if (user.c !== owner.cohort) return { problem: 'foreign_cohort' };
+    if (user.p !== owner.profile) return { problem: 'foreign_profile' };
+    if (meta.session_id !== p.spool_session_id) return { problem: 'binding_mismatch' };
+    if (sessions.has(p.spool_session_id)) return { problem: 'duplicate_session' }; sessions.add(p.spool_session_id);
+    const raw = nd(texts.get(`p${p.part}.index.jsonl`) ?? ''), idx: Entry[] = [];
+    for (const [order, line] of raw.entries()) {
+      let e: Record<string, unknown> | null = null; try { e = JSON.parse(line); } catch { e = null; }
+      if (!e || typeof e !== 'object' || Array.isArray(e) || typeof e.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(e.sha256)) return { problem: 'index_invalid' };
+      idx.push({ ...e, part: p.part, order });
+    }
+    if (idx.length !== p.lines || (await sha256Bytes(new TextEncoder().encode(raw.at(-1) ?? '').buffer as ArrayBuffer)) !== p.final_index_sha256) return { problem: 'range_mismatch' };
+    const ts = idx.map((e) => e.ts).filter((t): t is string => typeof t === 'string');
+    if (ts.length && (ts[0] !== p.from_ts || ts.at(-1) !== p.to_ts)) return { problem: 'range_mismatch' };
+    // An earlier session is only this class's when all of it sits inside the run itself; the current one may start in the lead-in.
+    const earliest = p.current ? owner.run_starts_at - 3_600_000 : owner.run_starts_at;
+    if (ts.some((t) => !(Date.parse(t) >= earliest && Date.parse(t) <= owner.upload_until))) return { problem: 'outside_run_window' };
+    indexes.push(idx);
+  }
+  const approved = approvedArtifacts(indexes.flat());
+  const received = { ...zero(), instructor_refs: 0, truncated_prompts: 0, basis_markers: 0 }, notSent = zero(), reasons: string[] = [], parts: CollectionExtent['parts'] = [];
+  const add = (r: string) => { if (!reasons.includes(r)) reasons.push(r); };
+  let coverage: Coverage = 'complete';
+  for (const [n, p] of b.parts.entries()) {
+    const idx = indexes[n]!, events = texts.has(`p${p.part}.events.jsonl`) ? nd(texts.get(`p${p.part}.events.jsonl`)!) : [];
+    if (events.length !== p.included) return { problem: 'range_mismatch' };
+    // Every sent line is an index entry, in order, with the same type/seq/ts — and of a kind that was asked for.
+    const sent = new Set<number>(); let cursor = 0, truncated = 0;
+    for (const line of events) {
+      const sha = await sha256Bytes(new TextEncoder().encode(line).buffer as ArrayBuffer);
+      while (cursor < idx.length && idx[cursor]!.sha256 !== sha) cursor++;
+      if (cursor >= idx.length) return { problem: 'index_mismatch' };
+      const entry = idx[cursor]!; sent.add(cursor++);
+      let e: Record<string, unknown> | null = null; try { e = JSON.parse(line); } catch { e = null; }
+      // The index writes an absent field as null (older spool lines have no ts or seq); the line simply lacks it.
+      if (!e || typeof e !== 'object' || Array.isArray(e) || (e.type ?? null) !== (entry.type ?? null) || (e.seq ?? null) !== (entry.seq ?? null) || (e.ts ?? null) !== (entry.ts ?? null)) return { problem: 'index_mismatch' };
+      const artifact = e.type === 'artifact_snapshot' ? e.sha256 : e.type === 'artifact_approval' ? e.artifact_sha256 : undefined;
+      if (artifact !== undefined && artifact !== entry.artifact_sha256) return { problem: 'index_mismatch' };
+      if (!kindSelects(b.kinds, e.type, e.sha256, approved)) return { problem: 'kind_violation' };
+      const cat = lineCategory(e.type, e.sha256, approved); received[cat]++;
+      if (e.type === 'prompt') { if (e.text_truncated === true) { received.truncated_prompts++; truncated++; } if (Array.isArray(e.instructor_prompt_refs) && e.instructor_prompt_refs.length) received.instructor_refs++; }
+      if (e.type === 'lesson_binding') received.basis_markers++;
+    }
+    // What was not sent is counted from the index only. A line of an asked kind that did not arrive is a gap, not "not asked".
+    let missing = false;
+    for (const [i, entry] of idx.entries()) { if (sent.has(i)) continue; if (kindSelects(b.kinds, entry.type, entry.artifact_sha256, approved)) missing = true; else notSent[lineCategory(entry.type, entry.artifact_sha256, approved)]++; }
+    // Sequence coverage is read on the whole window of this session (the index), never on the filtered lines.
+    let c: Coverage = 'complete'; const partReasons: string[] = [];
+    const seqs = idx.map((e) => e.seq), malformed = idx.some((e) => e.malformed === true || typeof e.type !== 'string');
+    const nums = seqs.filter((s): s is number => Number.isSafeInteger(s)), sorted = [...nums].sort((x, y) => x - y);
+    const contiguous = sorted.every((s, i) => i === 0 || s === sorted[i - 1]! + 1), last = sorted.at(-1);
+    const startProven = !!sorted.length && p.first_seq !== undefined && p.first_seq === sorted[0] && p.last_seq === last;
+    let endProven = false;
+    if (malformed) { c = 'damaged'; partReasons.push('damaged_line'); }
+    else if (nums.length !== idx.length) { c = 'sequence_unavailable'; partReasons.push('sequence_unavailable'); }
+    else if (!contiguous) { c = 'gaps'; partReasons.push('seq_gap'); }
+    else {
+      if (p.current) {
+        if (p.session_last_seq === undefined) { c = worst(c, 'range_unknown'); partReasons.push('extent_not_declared'); }
+        else if (p.session_last_seq > last!) { c = worst(c, 'gaps'); partReasons.push('tail_missing'); }
+        else if (p.session_last_seq < last!) { c = worst(c, 'gaps'); partReasons.push('declared_seq_mismatch'); }
+        else endProven = true;
+      } else if (idx.at(-1)!.type === 'session_close') endProven = true;
+      else { c = worst(c, 'range_unknown'); partReasons.push('earlier_session_end_unproven'); }
+      if (!startProven) { c = worst(c, 'range_unknown'); partReasons.push('start_not_proven'); }
+    }
+    if (p.torn_tail) partReasons.push('torn_tail_dropped');
+    if (missing) { c = worst(c, 'gaps'); partReasons.push('selected_line_missing'); }
+    if (truncated) { c = worst(c, 'gaps'); partReasons.push('prompt_truncated'); }
+    coverage = worst(coverage, c); partReasons.forEach(add);
+    parts.push({ current: p.current, lines: idx.length, included: events.length, from_ts: p.from_ts, to_ts: p.to_ts, ...(p.first_seq !== undefined ? { first_seq: p.first_seq, last_seq: p.last_seq } : {}), start_proven: startProven, end_proven: endProven, torn_tail: p.torn_tail, truncated_prompts: truncated, coverage: c });
+  }
+  const omitted = b.omitted.unreadable + b.omitted.over_limit;
+  if (omitted) { coverage = worst(coverage, 'range_unknown'); add('session_not_included'); }
+  const order = ['damaged_line', 'seq_gap', 'tail_missing', 'selected_line_missing', 'prompt_truncated', 'declared_seq_mismatch', 'sequence_unavailable', 'session_not_included', 'earlier_session_end_unproven', 'extent_not_declared', 'start_not_proven', 'torn_tail_dropped'];
+  reasons.sort((x, y) => order.indexOf(x) - order.indexOf(y));
+  const froms = b.parts.map((p) => p.from_ts).sort(), tos = b.parts.map((p) => p.to_ts).sort();
+  return { coverage, reason: coverage === 'complete' ? '' : reasons.find((r) => r !== 'torn_tail_dropped') ?? reasons[0] ?? '', reasons, extent: { lines: parts.reduce((s, p) => s + p.lines, 0), included: parts.reduce((s, p) => s + p.included, 0), from_ts: froms[0]!, to_ts: tos.at(-1)!, other_sessions_in_window: omitted, kinds: [...b.kinds], sessions: b.parts.length, parts, received, not_sent: notSent, omitted: { ...b.omitted }, reasons } };
 }
 
 export async function sha256Bytes(b: ArrayBuffer): Promise<string> {
