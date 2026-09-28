@@ -25,10 +25,10 @@ units; this grouping creates neither another product nor another implementation 
 | Live monitoring and communication | See who has entered, their stage, submissions and help requests; connect individual feedback and group recurring problems to reduce instructor attention switching | ADM-02/04/05/09; CLS-01/02/03; E5 #751 and #732 | Existing metadata boards and selected sharing remain useful. One-instructor operation and reduced waiting are field outcomes, still unmeasured |
 | Remote intervention | Issue/verify participation tokens, distribute to selected/all learners, collect permitted data and recover known faults with per-learner effect confirmation | ADM-01/03/07/10/11/13/14; E5 U1–U4, E3 recovery | U1/U2 have local acceptance; U3 has direct Mac prompt-flow evidence but a remaining mixed-basis predicate defect is under correction. Cause-specific recovery and collection extensions follow; external environments remain NOT RUN |
 
-**Finish the current delivery slice before expanding.** First close the reproduced
-U3 basis defect, then accept the bounded U4 known-fault actions and the minimum
-remaining collection flow needed for the agreed class scenario. Reuse the current
-authoring, selection and result UI. Do not start a general block editor, unrestricted
+**Finish the current delivery slice before expanding.** U3, U4 and U1b reached local
+acceptance on 2026-09-22 (#1227/#1232/#1243; external environments NOT RUN). The remaining
+order is the report-gap plan below. Reuse the current authoring, selection and result
+code. Do not start a general block editor, unrestricted
 remote desktop, new messaging product or a second storage/auth system to finish
 this slice. Keep curriculum-composition improvements and optional extensions in
 their existing linked backlog rather than silently dropping or implementing them.
@@ -41,6 +41,22 @@ roadmap. Do not equate local acceptance, release, operational activation and mea
 one-instructor operation. The [integrated acceptance scenario](../testing/classroom-admin.md#one-instructor-acceptance)
 is the finish criterion; the individual U1/U2/U3 records remain the evidence for their
 own scope. No new deadline, seat-capacity claim or production approval is introduced.
+
+<a id="report-gap-reset-20260922"></a>
+
+#### Report-gap reset — ordered gap plan (2026-09-22)
+
+Source: the 2026-09-22 implementation report ([Product intent](../PRODUCT-INTENT.md#one-instructor-classroom-intent))
+and the user's instruction of the same day lifting the development hold. The final user outcome is the one stated
+there. Each step is a separate session and PR; a step starts only after the previous one is reviewed. "Status" is
+what has actually been run, not what is planned.
+
+| Step | Scope | Acceptance (observable) | Status |
+|---|---|---|---|
+| **G1** operating screen | Faithful instructor information architecture on the existing `/manage`: left navigation (preparation / progress / wrap-up), compact class and connection status, filter/search, one comparable student table, persistent right detail on desktop and a drawer below, compact selection toolbar with a context primary, result cards led by final/unknown/pending counts, a four-step wrap-up that names unavailable steps. No API, store or auth change | [classroom-design G1](../requirements/classroom-design.md#g1-instructor-ia-20260922) and [G1 checks](../testing/classroom-admin.md#g1-instructor-ia-tests): ≥8 complete rows at 1280×720 and ≥4 at 1024×640 with 24 synthetic seats, measured row boxes, 14px+ text, no overflow; selection sends nothing; guards and confirmations unchanged | Implemented in a focused Draft PR on #1243 (branch `feat/751-g1-instructor-ia`); browser suites and synthetic captures run locally; **user visual acceptance pending** |
+| **G2** curriculum → runtime | Curriculum authoring → rehearsal in the learner's conditions → confirmation → the bound student mission, help, tools and runtime, with the version in force and evidence that the NEXT turn used it | A changed lesson visibly changes the learner's mission/help/tool set on a real Studio window only after confirmation; a running turn keeps its basis; the version is shown on both sides. Background: the existing `curriculum-runtime-next-prompt-draft.md` in the coordination ledger — background only, not an automatic dispatch | Not started — next separate session after G1 review |
+| **G3** multi-session report and delivery | Kinds collection (`/3`, sessions before a restart) → compatible report inputs; evidence-bound "recent repeated patterns"; PDF attachment and provider-adapter gaps; review/delivery UI | A report built from a `/3` collection cites every included session and says which are missing; collection alone never starts an evaluation or a send; policy- or account-dependent activation (sender account, recipients, retention) stays a separate decision | Not started |
+| **G4** integrated journey | One instructor's whole class on a real Mac with snapshots, regressions and an explicit NOT RUN list | The [integrated acceptance](../testing/classroom-admin.md#one-instructor-acceptance) record. Windows, several physical PCs, a school network, production D1/R2, paid models and real recipients are run only with the environment and authorization — never completed synthetically | Not started |
 
 GitHub 하위 에픽: [E1 #747](https://github.com/jayleekr/hypeproof-studio/issues/747),
 [E2 #748](https://github.com/jayleekr/hypeproof-studio/issues/748),

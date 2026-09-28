@@ -89,7 +89,7 @@ try {
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt'], 'this instructor may distribute, not change lesson settings');
   await page.locator('#ops-dist-kind').selectOption('prompt'); assert.match(await T('ops-dist-kind-help'), /초안에 가져오기.*수업 설정은 지금 쓸 수 없습니다: 이 강사 토큰에는 수업 설정 권한/s);
   await connect(L); await compose();
-  assert.match(await page.locator('#ops-dist-preview').innerText(), /^선택한 학생에게 보내기 \(공지·자료·프롬프트·수업 설정\) — 먼저 확인$/, 'the entry names everything it can send'); assert.match(await T('ops-dist-summary'), /^공지·자료·프롬프트·수업 설정 작성/);
+  assert.match(await page.locator('#ops-dist-preview').innerText(), /^보내기 — 먼저 확인$/, 'G1: the button sits under ‘선택한 학생에게’; the composer entry below names everything it can send'); assert.match(await T('ops-dist-summary'), /^공지·자료·프롬프트·수업 설정 작성/);
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt', 'setting']);
   ok('E1 the setting kind is offered only to an instructor who holds `lesson_settings`; the prompt kind needs only `distribute`');
 

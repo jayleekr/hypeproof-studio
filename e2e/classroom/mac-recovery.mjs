@@ -185,7 +185,7 @@ try {
   await setDraft(chat, '보드 확인 중에도 남아야 하는 학생 초안'); const answersBefore = await answers(chat);
   // One help request by the learner of A1 (made here through the learner route with a synthetic learner token; the app's own help entry is not run).
   const helpId = crypto.randomUUID(), shared = await local.request('/v1/classroom/shares', 'POST', { id: helpId, recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 120, content: { prompt: '[합성] 보드 스모크 도움 요청' } }, await local.student(seats[0].student_id)); assert.equal(shared.status, 201, shared.raw);
-  await page.locator('#refresh').click(); await page.locator('#ops-help-list li').filter({ hasText: seats[0].student_id }).waitFor({ timeout: 30000 });
+  await page.locator('#refresh').click(); await page.locator('#ops-help-toggle').filter({ hasText: '펼치기' }).click({ timeout: 30000 }); /* #751 U1b: the requests are folded behind the summary line */ await page.locator('#ops-help-list li').filter({ hasText: seats[0].student_id }).waitFor({ timeout: 30000 });
   const a1 = await seatNow('A1'); assert.equal(a1.connection?.state, 'active', 'the real window\'s connection is active in the Service');
   await I.open('A1'); const send = page.locator('#ops-actions').getByRole('button', { name: '질문 보내기', exact: true }), mark = page.locator('#ops-actions').getByRole('button', { name: '확인할 지점 표시', exact: true });
   const availability = { question: await send.isEnabled(), checkpoint: await mark.isEnabled(), primary: (await page.locator('#ops-actions .primary').allInnerTexts()).map((x) => x.trim()) };

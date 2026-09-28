@@ -35,12 +35,13 @@ try {
   const mint = await local.request('/admin/tokens/issue', 'POST', { u: 'student-a', c: local.cohort, p: local.profile, hours: 2 });
   await local.sync(conn.json.credential, [local.event(1, 'activation', { stage: 'token_rejected', reason: 'auth_signature', http_status: 401 }), local.event(2, 'error', { class: 'auth_signature', code: 'http_401', request_id: 'req-e2e-0001', blocking: true })]);
   await page.locator('#refresh').click(); await page.locator('#ops-seats p.blocked').waitFor();
-  assert.match(await page.locator('#ops-seats p.blocked').innerText(), /토큰이 올바르지 않습니다 — .+확인하세요/); assert.equal(await page.locator('#ops-seats p.blocked').count(), 1);
+  // G1: the row names the cause; its next step is in the open detail (the row stays one line so the table compares).
+  assert.equal(await page.locator('#ops-seats p.blocked').innerText(), '토큰이 올바르지 않습니다'); assert.equal(await page.locator('#ops-seats p.blocked').count(), 1); assert.match(await page.locator('#ops-recovery').innerText(), /앱이 보고한 상태: 토큰이 올바르지 않습니다 — .+확인하세요/);
   assert.doesNotMatch(await page.locator('#ops-seats').innerText(), /기한이 지났습니다/, '401 is not rendered as expiry');
   const blocked = await page.locator('#ops-seats p.blocked').evaluate((e) => { const s = getComputedStyle(e); return { color: s.color, size: parseFloat(s.fontSize) }; }); assert.ok(blocked.size >= 14);
   // A student on a learning step, waiting for approval, is not an error.
   const c2 = await local.pair('A2', 1, 2); await local.sync(c2.conn.json.credential, [local.event(1, 'activation', { stage: 'runtime_ready' }), local.event(2, 'step', { lesson_version: local.lesson.version, step_id: 'build', status: 'in_progress' }), local.event(3, 'runtime', { status: 'waiting_approval' })], 2);
-  await page.locator('#refresh').click(); await page.locator('#ops-seats').getByText(/build · 진행 중 · 수행: 학생 승인 대기/).waitFor(); assert.equal(await page.locator('#ops-seats p.blocked').count(), 1);
+  await page.locator('#refresh').click(); await page.locator('#ops-seats .ops-seat[data-seat="A2"]').getByText('수행: 학생 승인 대기').waitFor(); assert.match(await page.locator('#ops-seats .ops-seat[data-seat="A2"] td.c-step').innerText(), /^build · 진행 중$/); assert.equal(await page.locator('#ops-seats p.blocked').count(), 1);
   await page.locator('#ops-evidence').getByText(/오류 보고: .*req-e2e-0001/).waitFor(); assert.ok(!(await page.content()).includes(mint.json.token)); assert.ok(!(await page.content()).includes(conn.json.credential));
   // ── R2: browser → Chalk → Service ledger ← the real device client code (sync loop + command runner), in-process ──
   const opsClient = await import('../../extensions/hypeproof-chat/src/classroomOps.ts'); const { CommandRunner } = await import('../../extensions/hypeproof-chat/src/classroomOpsCommands.ts');
@@ -54,7 +55,7 @@ try {
   try {
     await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.getByRole('button', { name: '진단 다시 실행' }).click();
     await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*해결 확인 1 \/ 문제 남음 0 .*선택한 전원 해결 확인[\s\S]*A2: 성공 — 토큰 정상 → 문제 해결 확인 · 학생 PC에서 서버 연결과 토큰이 정상임을 확인함/ }).waitFor(); assert.equal(deviceRuns, 1);
-    await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상 → 문제 해결 확인/).waitFor();
+    await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 → 문제 해결 확인/).waitFor(); // the device's own report (성공 — 토큰 정상) is the detail line above
     // Bulk on "technical problems" + an unconnected seat: A1 has a connection but no running app, A3 has no device at all.
     // (UI pass 2: learning help requests are a separate selection — e2e/classroom/ops-help.mjs.)
     await page.locator('#ops-select-fault').click(); await page.locator('#ops-seats .ops-seat').nth(2).getByLabel('선택').check();
@@ -69,7 +70,7 @@ try {
     assert.equal(await primaries('body').count(), 1, 'one primary CTA on the screen'); assert.equal((await primaries('body').innerText()).trim(), '질문 보내기', 'no technical fault on A2 → coaching is the primary action');
     await page.locator('#ops-seats .ops-seat').nth(0).getByRole('button', { name: '근거·조치' }).click(); assert.equal(await primaries('body').count(), 1); assert.match((await primaries('#ops-detail').innerText()).trim(), /^수업 참여 코드 발급 화면에서 재발급/, 'rejected token on A1 → the Service\'s first action (re-issue) is the primary, offered without any coaching step first; diagnostics is not');
     { const t = await page.locator('#ops-evidence').innerText(); assert.match(t, /토큰을 거부당했습니다\. ‘연결 다시 확인’으로는 해결되지 않습니다/, 're-verify is not re-issue'); assert.equal(await page.locator('#ops-evidence a[href="/authoring"]').count(), 1, 'a lesson class re-issues on the lesson code page (the plain issuer would drop the lesson)'); assert.equal(await page.locator('#ops-evidence a[href="/issuer"]').count(), 0); assert.match(await page.locator('#ops-evidence a[href="/authoring"]').innerText(), new RegExp('강의 ' + local.lesson.version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' 유지')); assert.ok(!/[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}/.test(t), 'no bearer on the board'); }
-    await page.keyboard.press('Escape'); assert.equal(await page.locator('#ops-detail').isHidden(), true, 'Escape closes the detail'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1', 'focus returns to the row that opened it'); assert.equal((await primaries('body').innerText()).trim(), '기술 문제 좌석 선택 (장애 1 · 주의 0)', 'with the detail closed the list\'s call to action is primary again');
+    await page.keyboard.press('Escape'); assert.equal(await page.locator('#ops-detail').isHidden(), true, 'Escape closes the detail'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1', 'focus returns to the row that opened it'); assert.equal((await primaries('body').innerText()).trim(), '좌석 진단', 'with the detail closed the list\'s call to action is primary again — with A1 (fault) and A3 selected, that is diagnosing them (G1)');
     await page.locator('#ops-seats .ops-seat').nth(0).getByRole('button', { name: '근거·조치' }).click();
     assert.match(await page.locator('#ops-evidence').innerText(), /아직 충분히 보지 못함 — 점수나 미달이 아니라/); assert.doesNotMatch((await page.locator('#ops').innerText()).replaceAll('점수나 미달이 아니라', ''), /점수|순위|의존도|상위|하위|역량 부족/, 'no evaluative wording on the operations board (saying that missing evidence is NOT a score is the one allowed mention)');
     assert.match(await page.locator('#ops-state').innerText(), /운영 집계\(학생 평가 아님\)/);
@@ -80,7 +81,7 @@ try {
     assert.deepEqual(shownToStudent, ['테스트 전에 어떤 결과를 기대했나요?']); assert.deepEqual([studentWork.history, studentWork.draft, studentWork.files], [['q1', 'a1'], '쓰던 글', ['index.html']], 'coaching changed nothing on the learner side');
     // Provenance: simulated / unverified evidence is marked in the caution colour, never counted as real; review is not approval.
     const h = (c) => c.repeat(64); deviceEvents.push(local.event(50, 'evidence', { evidence_type: 'action', source_state: 'simulated', step_id: 'build' }, { actor: 'ai' }), local.event(51, 'evidence', { evidence_type: 'change', source_state: 'real', artifact_before: h('a'), artifact_after: h('b') }, { actor: 'student' }));
-    await page.locator('#ops-seats').getByText(/확인할 근거: 2건 · 강사 확인 전 2건/).waitFor(); assert.match(await page.locator('#ops-seats .ops-seat').nth(1).locator('.amber').innerText(), /가상·미확인 1건 포함/);
+    await page.locator('#ops-seats').getByText(/근거 2건 · 확인 전 2건/).waitFor(); assert.match(await page.locator('#ops-seats .ops-seat').nth(1).locator('.amber').innerText(), /가상·미확인 1건 포함/);
     await page.locator('#ops-evidence').getByText(/실제 수행 · 행위자 AI · 단계 build/).waitFor(); await page.locator('#ops-evidence').getByText(/변경 · 행위자 학생 .*변경 전후가 다름/).waitFor();
     await page.locator('#ops-evidence').getByRole('button', { name: '근거 확인' }).first().click(); await page.locator('#ops-detail-status').filter({ hasText: '발송 승인이나 학습 완료와는 별개입니다' }).waitFor(); await page.locator('#ops-evidence').getByText('강사가 근거 확인함').waitFor();
     assert.equal((await local.request(local.base + '/status')).json.seats[1].step.step_id, 'build', 'reviewing evidence did not move the step');
@@ -92,9 +93,9 @@ try {
     { const status = await page.locator('#ops-detail-status').innerText(); assert.match(status, /해결 확인 0 .*실행됨·해결 확인 전 1/); assert.match(status, /명령 실행 완료 · 해결 여부는 아직 확인 전/); assert.doesNotMatch(status, /전원 해결 확인/);
       const resetId = local.db.prepare("SELECT c.id FROM ops_commands c WHERE c.action='reset_runtime' ORDER BY c.created_at DESC").get().id;
       deviceEvents.push(local.event(60, 'recovery', { command_id: 'not-this-command-0001', check: 'turn_completed' })); await page.locator('#refresh').click();
-      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 — 성공 .*→ 명령 실행 완료 · 해결 여부는 아직 확인 전/).waitFor();
+      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 → 명령 실행 완료 · 해결 여부는 아직 확인 전/).waitFor();
       deviceEvents.push(local.event(61, 'recovery', { command_id: resetId, check: 'turn_completed', runtime: 'agent-sdk' }));
-      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 — 성공 .*→ 문제 해결 확인/).waitFor({ timeout: 40000 });
+      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 → 문제 해결 확인/).waitFor({ timeout: 40000 });
       await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-recovery').getByText(/조치 뒤 검증: 문제 해결 확인 · 조치 뒤 학생의 다음 AI 실행이 끝까지 완료됨 · 관측 /).waitFor();
       assert.equal((await local.request(local.base + '/status')).json.seats[0].last_command.outcome.verdict, 'pending', 'the seat that was only queued stays unresolved'); }
     // R3: pause says what it does not stop, and counts only devices that reported the revision.

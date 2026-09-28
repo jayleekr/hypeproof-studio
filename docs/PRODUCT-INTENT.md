@@ -180,6 +180,18 @@ The 2026-09-22 [instructor UI pass](requirements/classroom-design.md#instructor-
 live-monitoring and remote-intervention intents to the existing Chalk screens (list first, cause → action → result);
 it is a draft for user review, not evidence that the one-instructor outcome was measured.
 
+**Report-gap reset, 2026-09-22.** The implementation report of that day (vault
+`04_TJ_결과물/2026-09-22_HypeProof_Studio_구현현황_보고서.docx`, on PR #1243 head `966b5c5`) found the
+functions largely present but the proposed instructor screen not reproduced: dense student comparison and
+navigation were lost. The final user outcome is restated, not widened: **one instructor prepares a
+curriculum-bound class, sees each student's token activation, current stage, problem and help request, selects
+one or many students, collects chosen records, distributes notices, material, prompts and settings, runs allowed
+recovery and sees the actual per-target results; collected sessions feed a reviewed report and delivery flow.**
+The three intents above stay inside this one capability. Code, a usable screen, a local run and an untested
+external environment remain four different claims. The ordered gap plan (G1 operating screen → G2 curriculum to
+runtime → G3 multi-session report and delivery → G4 integrated real-environment journey) and each step's status
+live in the [roadmap](plan/learning-agent-experience-epics.md#report-gap-reset-20260922).
+
 ## 공통 측정 코어와 Jay dogfood
 
 [INT-MC-01–03](intents/measurement-core.md)은 Studio의 관찰·근거·해석 기능을
