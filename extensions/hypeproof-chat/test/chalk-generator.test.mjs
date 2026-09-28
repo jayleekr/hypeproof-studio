@@ -124,12 +124,16 @@ await check('T-G6 execSavePlan reads working copy and sends html in body, reques
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
-  // meta.json에 revision 미리 저장 — fetchExpectedRevision이 서버를 호출하지 않도록
-  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   let capturedPath = '';
   let capturedBody = '';
   await withMockServer((req, res) => {
+    // authoring GET → revision 반환; plan PUT → 저장 결과 반환
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: 1 }));
+      return;
+    }
     capturedPath = req.url ?? '';
     let b = '';
     req.on('data', c => b += c);
@@ -144,7 +148,7 @@ await check('T-G6 execSavePlan reads working copy and sends html in body, reques
     assert.ok(capturedBody.includes('<html>draft</html>'), `작업 사본 html이 바디에 없다`);
     const parsed = JSON.parse(capturedBody);
     assert.ok(typeof parsed.request_id === 'string' && parsed.request_id.length > 0, 'request_id가 자동 생성되지 않았다');
-    assert.equal(parsed.expected_revision, 1, 'meta.json의 revision이 expected_revision으로 사용되지 않았다');
+    assert.equal(parsed.expected_revision, 1, 'authoring GET의 revision이 expected_revision으로 사용되지 않았다');
   });
 });
 
@@ -190,9 +194,14 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflic
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
-  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   await withMockServer((req, res) => {
+    // authoring GET → revision 반환; plan PUT → 409 충돌
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: 1 }));
+      return;
+    }
     res.writeHead(409, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ code: 'revision_conflict', error: '버전이 충돌했습니다.' }));
   }, async (port) => {
@@ -213,9 +222,14 @@ await check('T-G10 execSavePlan returns knowledge_missing on 409 knowledge_missi
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
-  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   await withMockServer((req, res) => {
+    // authoring GET → revision 반환; plan PUT → 409 knowledge_missing
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: 1 }));
+      return;
+    }
     res.writeHead(409, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ code: 'knowledge_missing', error: '지식이 없습니다.' }));
   }, async (port) => {
@@ -305,6 +319,58 @@ await check('T-G14 chalk_set_inputs schema + tool-generated fields cover server 
   assert.ok(Array.isArray(formatSchema?.enum), 'format must have enum');
   assert.ok(formatSchema.enum.includes('workshop'), 'format enum must include workshop');
   assert.ok(formatSchema.enum.includes('track'), 'format enum must include track');
+});
+
+// ─── T-G15: set_inputs로 revision 올린 뒤 save_plan이 최신 revision 사용 ──
+await check('T-G15 set_inputs raises revision; subsequent save_plan uses latest revision', async () => {
+  const tmpDir = join(tmpdir(), `chalk-test-g15-${Date.now()}`);
+  const course = 'lesson-01';
+  const filePath = workingCopyPath(tmpDir, course, 'lesson');
+  await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
+  await writeFile(filePath, '<html>lesson</html>', 'utf-8');
+
+  // 서버 상태: set_inputs 전 revision=1, set_inputs 성공 후 revision=2
+  let currentRevision = 1;
+
+  let savedRevisionInSavePlan = null;
+  await withMockServer((req, res) => {
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      // fetchExpectedRevision 호출마다 현재 revision 반환
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: currentRevision }));
+      return;
+    }
+    let b = '';
+    req.on('data', c => b += c);
+    req.on('end', () => {
+      const parsed = JSON.parse(b);
+      if (req.url?.includes('/inputs')) {
+        // set_inputs 성공 → revision 올림
+        currentRevision = 2;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ revision: 2 }));
+      } else if (req.url?.includes('/plan')) {
+        // save_plan이 넘긴 expected_revision 기록
+        savedRevisionInSavePlan = parsed.expected_revision;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ revision: 3, sha256: 'def', findings: [] }));
+      } else {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not found' }));
+      }
+    });
+  }, async (port) => {
+    // 1. set_inputs — 서버가 revision을 1→2로 올림
+    await execSetInputs(fakeCtx(port), {
+      cohort: 'c1', course,
+      audience: '어린이', assets: ['INTENT'],
+      teaching_style: '탐구', requirements: '없음', format: 'workshop',
+    });
+    // 2. save_plan — fetchExpectedRevision이 authoring에서 revision=2 받아야 함
+    await execSavePlan(fakeCtx(port, { cwd: tmpDir }), { cohort: 'c1', course });
+    assert.equal(savedRevisionInSavePlan, 2,
+      `save_plan expected_revision must be 2 (post-set_inputs revision), got: ${savedRevisionInSavePlan}`);
+  });
 });
 
 console.log(`\n${passed} tests passed`);

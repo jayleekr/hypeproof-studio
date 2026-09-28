@@ -306,55 +306,29 @@ export function workingCopyPath(cwd: string, course: string, file?: string): str
   return nodePath.join(cwd, "chalk", course, fname);
 }
 
-/** 로컬 메타 파일 경로. draft revision을 저장한다. */
-function metaPath(cwd: string, course: string): string {
-  return nodePath.join(cwd, "chalk", course, "meta.json");
-}
-
-/** 로컬 meta.json에서 revision 읽기. 없으면 0 (미확인). */
-async function readLocalRevision(cwd: string, course: string): Promise<number> {
-  try {
-    const raw = await nodeFs.readFile(metaPath(cwd, course), "utf8");
-    const meta = JSON.parse(raw) as { revision?: unknown };
-    if (typeof meta.revision === "number" && meta.revision >= 1) return meta.revision;
-  } catch { /* 없으면 0 */ }
-  return 0;
-}
-
-/** meta.json에 revision 저장. cwd 없으면 no-op. */
-async function saveLocalRevision(cwd: string | undefined, course: string, revision: number): Promise<void> {
-  if (!cwd) return;
-  const mp = metaPath(cwd, course);
-  try {
-    await nodeFs.mkdir(nodePath.dirname(mp), { recursive: true });
-    await nodeFs.writeFile(mp, JSON.stringify({ revision }), "utf8");
-  } catch { /* 저장 실패는 무시 — 다음 호출에서 서버로 재확인 */ }
-}
-
 /**
- * expected_revision 획득. 우선순위: 로컬 meta.json → 서버 GET /plan → 1(기본).
- * 서버 GET /plan 응답의 `ref` 필드가 draft revision 번호다.
+ * expected_revision 획득. GET /admin/cohorts/:cohort/authoring/:course 응답의 revision.
+ * 초안이 없으면(404) "먼저 초안을 만들어야 합니다" 오류를 던진다.
  */
 async function fetchExpectedRevision(
   ctx: ChalkToolContext,
   cohort: string,
   course: string,
-  file: string = "lesson",
 ): Promise<number> {
-  if (ctx.cwd) {
-    const local = await readLocalRevision(ctx.cwd, course);
-    if (local >= 1) return local;
-  }
   try {
     const resp = await issuerFetch(
       ctx,
-      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan?file=${encodeURIComponent(file)}`,
-      { method: "GET" },
+      `/admin/cohorts/${encodeURIComponent(cohort)}/authoring/${encodeURIComponent(course)}`,
     ) as Record<string, unknown>;
-    const ref = Number(resp.ref);
-    if (Number.isFinite(ref) && ref >= 1) return ref;
-  } catch { /* 서버 오류 시 기본값 사용 */ }
-  return 1;
+    const revision = Number(resp.revision);
+    if (Number.isFinite(revision) && revision >= 1) return revision;
+    throw new Error("서버 응답에 유효한 revision이 없습니다.");
+  } catch (e) {
+    if (e instanceof IssuerHttpError && e.status === 404) {
+      throw new Error("먼저 초안을 만들어야 합니다.");
+    }
+    throw e;
+  }
 }
 
 async function hasLocalChanges(filePath: string): Promise<boolean> {
@@ -423,8 +397,6 @@ export async function execSetInputs(
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
       { method: "PUT", body },
     ) as Record<string, unknown>;
-    // 성공 시 새 revision을 로컬에 저장한다.
-    if (typeof result.revision === "number") await saveLocalRevision(ctx.cwd, course, result.revision);
     return result;
   } catch (e) {
     if (e instanceof IssuerHttpError) {
@@ -526,9 +498,6 @@ export async function execOpenCourse(
 
   await nodeFs.mkdir(nodePath.dirname(dest), { recursive: true });
   await nodeFs.writeFile(dest, html, "utf8");
-  // GET /plan 응답의 ref = draft revision 번호. 다음 PUT 호출에 사용한다.
-  const ref = Number(result.ref);
-  if (Number.isFinite(ref) && ref >= 1) await saveLocalRevision(ctx.cwd, course, ref);
   return { ...result, localPath: dest };
 }
 
@@ -566,7 +535,7 @@ export async function execSavePlan(
 
   // knowledge_version 등 모델이 넘긴 추가 필드는 그대로 전달한다.
   const { cohort: _c, course: _co, file: _f, ...extras } = input as Record<string, unknown>;
-  const expected_revision = await fetchExpectedRevision(ctx, cohort, course, file ?? "lesson");
+  const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
   const request_id = randomUUID().replace(/-/g, "");
   try {
     const result = await issuerFetch(
@@ -574,8 +543,6 @@ export async function execSavePlan(
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
       { method: "PUT", body: { html, ...extras, expected_revision, request_id } },
     ) as Record<string, unknown>;
-    // 성공 시 새 revision을 로컬에 저장한다.
-    if (typeof result.revision === "number") await saveLocalRevision(ctx.cwd, course, result.revision);
     return result;
   } catch (e) {
     if (e instanceof IssuerHttpError) {
