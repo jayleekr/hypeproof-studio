@@ -168,6 +168,20 @@ t("localRuntimeConfig: Dev app name but HPS_DEV_RUNTIME unset → returns null �
   assert.strictEqual(result, null, "Dev app + runtime off → null → backdoor gate must not fire");
 });
 
+t("localRuntimeConfig: Dev + runtime on + remote proxyUrl → throws (extension.ts try-catch absorbs)", async () => {
+  // Verifies the scenario that required the try-catch fix: Dev app with HPS_DEV_RUNTIME=1
+  // but a remote (non-localhost) proxyUrl — localRuntimeConfig throws.
+  // The extension.ts wraps this call in try-catch and logs "dev issuer seed skipped" instead
+  // of propagating the exception to activate(), which would prevent the extension from loading.
+  const { localRuntimeConfig } = await import("../src/localRuntime/index.ts");
+  const env = { HPS_DEV_RUNTIME: "1", HPS_DEV_PROVIDER: "claude", HPS_DEV_EXECUTABLE: "/usr/local/bin/claude", HPS_DEV_MODEL: "claude-sonnet-5" };
+  assert.throws(
+    () => localRuntimeConfig("HypeProof Studio Dev", "https://api.hypeproof-ai.xyz/v1", env),
+    /로컬 구독/,
+    "remote proxyUrl with Dev+runtime must throw so the try-catch in applyTestBackdoors is exercised"
+  );
+});
+
 console.log("\n=== whoami status — unreachable must not delete token ===");
 
 t("network failure → lastWhoamiStatus = unreachable, isInstructor false", async () => {
