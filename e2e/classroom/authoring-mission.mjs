@@ -160,6 +160,7 @@ try {
   const manage = await browser.newPage({ viewport: { width: 1280, height: 720 } }); manage.on('pageerror', (e) => errors.push(e.message));
   await manage.goto(origin + '/manage'); await manage.locator('#token').fill(teacher); await manage.locator('#cohort').fill(local.cohort); await manage.locator('#prefix').fill('student-');
   await manage.locator('#connect button').first().click(); await manage.locator('#status').filter({ hasText: '연결됨' }).waitFor();
+  await manage.locator('#ops-tools > summary').click();
   if (!(await manage.locator('#ops-dist').evaluate((d) => d.open))) await manage.locator('#ops-dist-summary').click();
   await manage.locator('#ops-dist-kind').selectOption('setting'); await manage.locator(`#ops-dist-setting option[value="${VA}"]`).waitFor({ state: 'attached' });
   const options = await manage.locator('#ops-dist-setting option').evaluateAll((os) => os.map((o) => [o.value, o.textContent, o.disabled])); results.setting_options = options;

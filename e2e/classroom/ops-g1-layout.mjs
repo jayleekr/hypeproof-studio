@@ -1,6 +1,10 @@
 // Remote classroom operations (#751) — G1 instructor operating surface in a real browser: the student TABLE and what goes around it.
 //
-//   the table      one row per learner, the same seven columns, 24 synthetic seats; the default board shows at least 8 complete rows at
+// Presentation updated in #1363 (progressive disclosure): the row is a single line — seat/name, an attention tag, one short
+// plain-language stage, and a row-open button ("근거·조치"). The full breakdown that used to live in seven per-row cells is
+// rendered in #ops-detail by openSeat(); tests here therefore check the compact row contract AND the drawer contract.
+//
+//   the table      one row per learner, the same four columns, 24 synthetic seats; the default board shows at least 8 complete rows at
 //                  1280×720 and 4 at 1024×640 with 14px+ text and no horizontal overflow (row boxes measured, not CSS read);
 //   filter/search  the summary chips and the search box change only what is SHOWN — a hidden seat stays selected and is still a target;
 //   selection      choosing seats sends nothing; the one primary button follows the context and opens a confirmation, never a request;
@@ -48,7 +52,7 @@ try {
 
   browser = await chromium.launch(); const origin = 'http://127.0.0.1:' + server.address().port, errors = [];
   const open = async (viewport) => { const p = await browser.newPage({ viewport }); p.on('pageerror', (e) => errors.push(e.message)); await p.goto(origin + '/manage'); return p; };
-  const connect = async (p) => { await p.locator('#token').fill(teacher); await p.locator('#cohort').fill(local.cohort); await p.locator('#prefix').fill('student-'); await p.locator('#connect-go').click(); await p.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await p.locator('#ops-seats .ops-seat').nth(23).waitFor(); await p.locator('#ops-help-state').filter({ hasText: '응답할 도움 요청 1건' }).waitFor(); };
+  const connect = async (p) => { await p.locator('#token').fill(teacher); await p.locator('#cohort').fill(local.cohort); await p.locator('#prefix').fill('student-'); await p.locator('#connect-go').click(); await p.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await p.locator('#ops-seats .ops-seat').nth(23).waitFor(); await p.locator('#ops-help-toggle').filter({ hasText: '1건' }).waitFor(); };
   // A row is complete when all of it is inside the viewport AND inside the list's own scrolling box (a clipped row does not count).
   const measure = (p) => p.evaluate(() => { const list = document.getElementById('ops-seats').getBoundingClientRect(), bottom = Math.min(innerHeight, list.bottom), rows = [...document.querySelectorAll('#ops-seats .ops-seat')].filter((r) => !r.hidden).map((r) => r.getBoundingClientRect());
     const texts = [...document.querySelectorAll('#ops-seats td *, #ops-seats th')].filter((e) => [...e.childNodes].some((x) => x.nodeType === 3 && x.textContent.trim()) && e.checkVisibility());
@@ -64,20 +68,20 @@ try {
   if (process.env.HPS_G1_WIDEN) await page.addStyleTag({ content: `*{letter-spacing:${Number(process.env.HPS_G1_WIDEN)}em!important}` });
 
   // ── 1. the table at 1280×720 and 1024×640 ──
-  const heads = await page.locator('#ops-table thead th').allInnerTexts(); assert.deepEqual(heads, ['선택', '좌석 · 학생', '입장 · 토큰', '현재 단계', '수행 · 도움 · 오류', '마지막 신호', '기록 · 근거']);
-  for (const id of ['A1', 'C4', 'D6']) assert.equal(await row(page, id).locator('> td').count(), 7, id + ': every row has the same cells');
-  assert.equal(await page.locator('#ops-dist-preview').isVisible(), true, 'distribution is on, so all four actions share the toolbar while measuring');
+  // #1363 progressive disclosure: the row is one line — 선택, 좌석·학생, 지금 상태, 근거·조치. Cause/token/step/signal/upload live in #ops-detail.
+  const heads = await page.locator('#ops-table thead th').allInnerTexts(); assert.deepEqual(heads, ['선택', '좌석 · 학생', '지금 상태', '근거·조치']);
+  for (const id of ['A1', 'C4', 'D6']) assert.equal(await row(page, id).locator('> td').count(), 4, id + ': every row is one compact line');
+  assert.equal(await page.locator('#ops-dist-preview').isVisible(), false, 'distribution action lives in the bulk row and is hidden until a selection exists');
   const wide = await measure(page); results.default_1280x720 = wide; await page.screenshot({ path: path.join(out, 'g1-default-1280x720.png') });
   assert.ok(wide.complete >= 8, '1280×720: at least 8 complete rows before page scrolling: ' + JSON.stringify(wide)); assert.ok(wide.min_font_px >= 14 && wide.body_font_px >= 14 && !wide.overflow && wide.zoom === 1, JSON.stringify(wide));
   assert.equal(await page.locator('#side').isVisible(), true, 'the left navigation is on screen at 1280'); assert.equal(await page.locator('nav.flow a[aria-current="page"]').innerText(), '운영 보드');
-  assert.equal(await row(page, 'A1').locator('p.blocked').innerText(), '토큰이 올바르지 않습니다'); assert.equal(await row(page, 'A4').locator('p.blocked').count(), 0, 'a stale seat is not red'); assert.match(await row(page, 'A4').innerText(), /\? 신호가 끊겼습니다 · 확인 불가|신호가 끊겼습니다 · 확인 불가/);
-  assert.equal(await row(page, 'A2').locator('p.blocked, p.caution').count(), 0, 'waiting for approval is not an error'); assert.match(await row(page, 'A2').innerText(), /수행: 학생 승인 대기/);
-  assert.match(await row(page, 'B5').locator('p.help').innerText(), /^도움 요청 1건 · 기술 장애 아님$/, 'a learner\'s help request is its own line, not a fault'); assert.equal(await row(page, 'B5').locator('p.blocked').count(), 0);
-  assert.match(await page.locator('#ops-summary').innerText(), /기술 장애 확인 4[\s\S]*도움 요청 1[\s\S]*승인 대기 1/);
-  const long = await row(page, 'D6').evaluate((r) => { const b = r.querySelector('.who').getBoundingClientRect(), c = r.querySelector('td.c-seat').getBoundingClientRect(); return { inside: b.right <= c.right + 0.5 && b.left >= c.left - 0.5, lines: Math.round(b.height / parseFloat(getComputedStyle(r.querySelector('.who')).lineHeight)) }; });
-  assert.ok(long.inside, 'a long learner id wraps inside its cell: ' + JSON.stringify(long));
+  assert.equal(await row(page, 'A1').locator('.c-step .stage.blocked').innerText(), '토큰이 올바르지 않습니다'); assert.equal(await row(page, 'A4').locator('.c-step .stage.blocked').count(), 0, 'a stale seat is not red'); assert.match(await row(page, 'A4').innerText(), /신호가 끊겼습니다 · 확인 불가/);
+  assert.equal(await row(page, 'A2').locator('.c-step .stage.blocked, .c-step .stage.caution').count(), 0, 'waiting for approval is not an error'); assert.match(await row(page, 'A2').locator('.c-step').innerText(), /승인 대기|학생 승인|학생의 승인을 기다리는 중/);
+  assert.match(await row(page, 'B5').locator('.c-step .stage').innerText(), /^도움 요청 1건$/, 'a learner\'s help request is the row status, not a fault'); assert.equal(await row(page, 'B5').locator('.c-step .stage.blocked').count(), 0);
+  assert.match(await page.locator('#ops-summary').innerText(), /문제 확인 4[\s\S]*도움 요청 1[\s\S]*승인 대기 1/);
+  assert.match(await row(page, 'D6').locator('.seat-open').getAttribute('aria-label'), /exchange-program-presenter/, 'full learner id stays accessible and searchable');
   { const p = await open({ width: 1024, height: 640 }); await connect(p); const m = await measure(p); results.default_1024x640 = m; await p.screenshot({ path: path.join(out, 'g1-default-1024x640.png') });
-    assert.ok(m.complete >= 4 && m.min_font_px >= 14 && !m.overflow, '1024×640: at least 4 complete rows, readable, no sideways scroll: ' + JSON.stringify(m));
+    assert.ok(m.complete >= 6 && m.min_font_px >= 14 && !m.overflow, '1024×640: at least 6 complete rows, readable, no sideways scroll: ' + JSON.stringify(m));
     // the navigation is a drawer here: open, the page behind inert, Escape closes it and focus comes back to the menu button
     assert.equal(await p.locator('#side').isVisible(), false); await p.locator('#side-open').click(); assert.equal(await p.locator('#side').isVisible(), true); assert.equal(await p.getAttribute('#side-open', 'aria-expanded'), 'true');
     assert.equal(await p.evaluate(() => document.getElementById('work').inert), true, 'the page behind the drawer is inert'); assert.ok(await p.evaluate(() => document.getElementById('side').contains(document.activeElement)), 'focus moved into the drawer');
@@ -85,7 +89,21 @@ try {
     // the detail is a drawer too; Escape returns focus to the row that opened it
     await row(p, 'A1').getByRole('button', { name: '근거·조치' }).click(); const d = await p.evaluate(() => getComputedStyle(document.getElementById('ops-detail')).position); assert.equal(d, 'fixed'); await p.screenshot({ path: path.join(out, 'g1-detail-drawer-1024x640.png') });
     await p.keyboard.press('Escape'); assert.equal(await p.locator('#ops-detail').isHidden(), true); assert.equal(await p.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1'); await p.close(); }
-  console.log('PASS table: seven comparable columns; 1280×720 ' + wide.complete + ' complete rows, 1024×640 ' + results.default_1024x640.complete + ' (row boxes measured, 14px+, no overflow); fault ≠ help ≠ stale ≠ approval wait; long id wraps; drawers at 1024 with inert page, Escape and focus return');
+  console.log('PASS table: four compact columns; 1280×720 ' + wide.complete + ' complete rows, 1024×640 ' + results.default_1024x640.complete + ' (row boxes measured, 14px+, no overflow); fault ≠ help ≠ stale ≠ approval wait; long id stays accessible; drawers at 1024 with inert page, Escape and focus return');
+
+  const beforeMobileCommands=commands();
+  // Progressive disclosure remains usable on a phone: no clipped filters or unavailable selection tools.
+  { const mobile=await open({width:390,height:844});await connect(mobile);
+    assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    for(const button of await mobile.locator('#ops-summary button').all()){const b=await button.boundingBox();assert.ok(b.x>=0&&b.x+b.width<=390,'every status filter fits the phone');}
+    assert.ok((await measure(mobile)).complete>=2,'at least two full learner rows on mobile');
+    await mobile.locator('#ops-tools > summary').click();await mobile.locator('#ops-select-fault').click();assert.equal(commands(),beforeMobileCommands,'selecting a group is read-only');
+    await row(mobile,'A1').locator('.seat-open').click();assert.equal(await mobile.locator('#ops-actions .primary:visible').count(),1);
+    assert.equal(await mobile.locator('.detail-more').evaluate(d=>d.open),false);assert.equal(await mobile.locator('.detail-evidence').evaluate(d=>d.open),false);
+    assert.equal(commands(),beforeMobileCommands,'opening a learner does not send anything');
+    await mobile.keyboard.press('Escape');assert.equal(await mobile.locator('#ops-detail').isHidden(),true);
+    await mobile.screenshot({path:path.join(out,'g1-phone-390x844.png')});await mobile.close();
+  }
 
   // ── 2. filter and search change the view, never the targets ──
   const before = commands();
@@ -99,6 +117,9 @@ try {
   assert.equal(commands(), before, 'filtering and selecting sent nothing'); console.log('PASS filter/search: view only; hidden selected seats stay targets and are counted; nothing sent');
 
   // ── 3. the primary follows the context and only opens a confirmation ──
+  // #1363: selection helpers live inside the "선택 도구" details on desktop. Open it once so the pickby buttons are reachable.
+  const openTools = async () => { const t = page.locator('details#ops-tools'); if (await t.count() && !(await t.evaluate((d) => d.open))) await t.locator('> summary').click(); };
+  await openTools();
   const primary = () => page.locator('.primary:visible');
   await page.locator('#ops-select-none').click(); assert.equal((await primary().innerText()).trim(), '기술 문제 좌석 선택 (장애 4 · 주의 0)', 'nothing selected → selecting the problems is the one step');
   await page.locator('#ops-select-fault').click(); assert.equal((await primary().innerText()).trim(), '좌석 진단', 'faults selected → diagnosing them'); assert.equal(await primary().count(), 1);
@@ -113,7 +134,8 @@ try {
   await row(page, 'C2').getByLabel('선택').check(); await row(page, 'A1').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: 'A1' }).waitFor();
   const side = await page.evaluate(() => { const l = document.getElementById('ops-seats').getBoundingClientRect(), d = document.getElementById('ops-detail').getBoundingClientRect(); return { position: getComputedStyle(document.getElementById('ops-detail')).position, beside: d.left >= l.right - 1, list_width: Math.round(l.width) }; });
   assert.ok(side.position === 'sticky' && side.beside, JSON.stringify(side)); assert.equal(await row(page, 'A1').getAttribute('aria-current'), 'true'); assert.equal(await row(page, 'C2').getByLabel('선택').isChecked(), true, 'opening a detail keeps the selection');
-  assert.match(await page.locator('#ops-recovery').innerText(), /앱이 보고한 상태: 토큰이 올바르지 않습니다 — /); assert.match(await page.locator('#ops-tech').innerText(), /요청 ID req-g1-0001/, 'technical ids live in the detail');
+  await page.locator('#ops-cause details > summary').click();await page.locator('.detail-evidence > summary').click();
+  assert.match(await page.locator('#ops-recovery').innerText(), /앱이 보고한 상태: 토큰이 올바르지 않습니다 — /); await page.locator('details.ops-tech-fold > summary').click(); assert.match(await page.locator('#ops-tech').innerText(), /요청 ID req-g1-0001/, 'technical ids live in the detail (progressive fold)');
   await page.keyboard.press('Escape'); await row(page, 'D5').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: 'D5' }).waitFor();
   assert.ok(await row(page, 'D5').evaluate((r) => { const a = r.getBoundingClientRect(), l = document.getElementById('ops-seats').getBoundingClientRect(); return a.top >= l.top && a.bottom <= Math.min(l.bottom, innerHeight) + 0.5; }), 'the opened row is in sight inside the list and the window'); await page.keyboard.press('Escape');
   await row(page, 'A1').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: 'A1' }).waitFor();
@@ -121,7 +143,7 @@ try {
   await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1');
   await page.keyboard.press('ArrowDown'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A2'); await page.keyboard.press('End'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'D6');
   await page.keyboard.press('Enter'); await page.locator('#ops-detail-title').filter({ hasText: 'D6' }).waitFor(); await page.keyboard.press('Escape');
-  await row(page, 'B5').locator('td.c-step').click(); await page.locator('#ops-detail-title').filter({ hasText: 'B5' }).waitFor(); assert.match(await page.locator('#ops-evidence').innerText(), /이 학생이 보낸 도움 요청 1건 — 학습 도움이며 기술 장애가 아닙니다/); await page.keyboard.press('Escape');
+  await row(page, 'B5').locator('td.c-step').click(); await page.locator('#ops-detail-title').filter({ hasText: 'B5' }).waitFor(); if(!(await page.locator('.detail-evidence').evaluate(d=>d.open)))await page.locator('.detail-evidence > summary').click(); assert.match(await page.locator('#ops-evidence').innerText(), /이 학생이 보낸 도움 요청 1건 — 학습 도움이며 기술 장애가 아닙니다/); await page.keyboard.press('Escape');
   console.log('PASS detail: beside the list at 1280 with the list, selection and current row kept; cause + next step and technical ids in the detail; arrows/Home/End/Enter; a row click opens it');
 
   // ── 5. a result card: headline first, short lines, the long evidence behind one button; failure-only re-selection sends nothing ──
@@ -140,6 +162,8 @@ try {
   assert.equal(steps.length, 4); assert.match(steps[0].text, /^1 기록 회수 ○ 시작 전\n[\s\S]*아직 시작 전/); assert.equal(steps[0].cls, 'wrap-idle');
   for (const i of [1, 2, 3]) { assert.equal(steps[i].cls, 'wrap-off', 'reports and delivery are off in this class: ' + steps[i].text); assert.match(steps[i].text, /^\d [^\n]+ 사용할 수 없음\n/, 'off is said in words'); }
   assert.match(steps[1].text, /보고서 기능이 꺼져 있어 초안을 만들지 않습니다/); assert.match(steps[3].text, /발송 절차가 꺼져 있습니다/); const pendingPaths = await page.locator('#ops-wrap-note').innerText(); assert.match(pendingPaths, /여러 회차의 반복 패턴 본문/); assert.match(pendingPaths, /카카오·문자·QR 발송/); assert.doesNotMatch(pendingPaths, /종류별 회수 기록/);
+  // #1363: the 마무리 링크는 사이드바의 "더보기" 아래로 이동했다. 스크린샷 전에 먼저 펼친다.
+  const more = page.locator('details.flow-more'); if (await more.count() && !(await more.evaluate((d) => d.open))) await more.locator('> summary').click();
   await page.locator('nav.flow a[href="#ops-wrap-title"]').click(); await page.screenshot({ path: path.join(out, 'g1-wrapup-1280x720.png') }); results.wrap_steps = steps;
   console.log('PASS wrap-up: four steps from the Service state; switched-off steps say unavailable and why; not-yet-connected paths named');
 

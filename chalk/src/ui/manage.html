@@ -32,7 +32,9 @@
 .ops-listhead{display:flex;align-items:baseline;gap:4px 12px;flex-wrap:wrap;margin:0 0 4px}.ops-listhead h2{font-size:1.0625rem}.ops-listhead p{margin:0}
 #ops-seats{max-height:calc(100vh - 96px);overflow:auto;border:1px solid #3A4A3E;border-radius:8px;container-type:inline-size;container-name:seats}#ops-seats:focus-visible{outline:2px solid #D5F279;outline-offset:2px}#ops-empty:empty{display:none}#ops-empty{margin:0;padding:12px}
 #ops-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.875rem;line-height:1.4}#ops-table thead th{position:sticky;top:0;z-index:2;background:#1A241E;text-align:left;font-weight:600;color:#C3CDBD;padding:4px 8px;border-bottom:1px solid #3A4A3E;font-size:.875rem;line-height:1.35}
-col.c-pick{width:3rem}col.c-seat{width:8.75rem}col.c-entry{width:15%}col.c-step{width:18%}col.c-run{width:25%}col.c-signal{width:11.5%}col.c-record{width:14%}
+col.c-pick{width:3rem}col.c-seat{width:12rem}col.c-step{width:auto}col.c-act{width:8rem}
+/* Legacy per-column widths retained for backward compatibility with any test styling: */
+col.c-entry,col.c-run,col.c-signal,col.c-record{width:0}
 .ops-seat>td{padding:2px 8px;border-bottom:1px solid #33433A;vertical-align:top;overflow-wrap:anywhere}.ops-seat>td p{margin:0}.ops-seat>td.c-pick{padding:0;vertical-align:middle}.ops-seat>td.c-seat{padding:0 6px}.ops-seat:hover>td{background:#1D2821}
 .ops-seat>td:first-child{box-shadow:inset 4px 0 0 transparent}.ops-seat.att-blocked>td:first-child{box-shadow:inset 4px 0 0 #FF9D8C}.ops-seat.att-caution>td:first-child{box-shadow:inset 4px 0 0 #E6A373}.ops-seat.att-unknown>td:first-child{box-shadow:inset 4px 0 0 #5C6D5F}.ops-seat[aria-current="true"]>td{background:#26352B}.ops-seat[aria-current="true"]>td:first-child{box-shadow:inset 4px 0 0 #D5F279}
 .pick{display:flex;align-items:center;justify-content:center;min-height:44px;cursor:pointer}.pick input{width:20px;height:20px;min-height:0;margin:0;accent-color:#D5F279}
@@ -59,19 +61,316 @@ a.btn{display:inline-flex;align-items:center;min-height:44px;padding:9px 14px;ma
 /* G1 wrap-up: record collection → report draft → review → delivery, each with what the Service has actually said. */
 #ops-evidence p.help,#ops-evidence p.help button{margin:4px 0}#ops-evidence p.help{color:#E6A373}#ops-wrap{margin-top:14px}.wrap-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 12px}.wrap-head h3{font-size:1.125rem}.wrap-head p{margin:0;flex:1 1 20rem}#ops-wrap-steps{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}#ops-wrap-steps li{border:1px solid #3A4A3E;border-radius:8px;padding:8px 10px;background:#1A241E;min-width:0;overflow-wrap:anywhere}#ops-wrap-steps li h4{margin:0;font-size:.9375rem}#ops-wrap-steps li p{margin:2px 0 0;font-size:.875rem}#ops-wrap-steps li.wrap-off,#ops-wrap-steps li.wrap-unknown,#ops-wrap-steps li.wrap-none{border-style:dashed}#ops-wrap-steps li .wrap-badge{display:inline-block;margin-left:2px;font-size:.875rem;font-weight:600;color:#C3CDBD}#ops-wrap-steps li.wrap-off .wrap-badge,#ops-wrap-steps li.wrap-unknown .wrap-badge,#ops-wrap-steps li.wrap-none .wrap-badge,#ops-wrap-steps li.wrap-idle .wrap-badge{font-weight:400;color:#BAC5B4}#ops-wrap-steps li.wrap-done{border-color:#D5F279}#ops-wrap-steps li.wrap-done .wrap-badge{color:#D5F279}#ops-wrap-steps li.wrap-pending,#ops-wrap-steps li.wrap-partial{border-color:#8FA38F}#ops-wrap-steps li.wrap-blocked{border-color:#E6A373}#ops-wrap-steps li.wrap-blocked .wrap-badge{color:#E6A373}#ops-wrap-note{margin:6px 0 0}
 @media(max-width:900px){#ops-wrap-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){#ops-wrap-steps{grid-template-columns:1fr}}
+/* --- Instructor-first progressive-disclosure theme (#1363). Charcoal + cyan, compact top strip, verbose copy folds behind <details>. --- */
+:root{--ink-bg:#0F1418;--ink-panel:#151C22;--ink-panel-hi:#1D2630;--ink-line:#2A343E;--ink-line-hi:#3A4855;--ink-text:#E8ECEF;--ink-text-2:#B7C1CA;--ink-mute:#7D8994;--ink-accent:#2AC4D9;--ink-accent-hi:#5FE0F2;--ink-warn:#F5C36B;--ink-alert:#FF8686;--ink-ok:#7DC896}
+html,body{background:var(--ink-bg);color:var(--ink-text)}
+a{color:var(--ink-accent)}
+button,input,select,textarea{background:var(--ink-panel);border-color:var(--ink-line-hi);color:var(--ink-text)}
+button:hover{background:var(--ink-panel-hi)}
+label{color:var(--ink-text-2)}
+*:focus-visible{outline-color:var(--ink-accent)}
+button.primary,a.btn.primary{background:var(--ink-accent);color:#08131A;border-color:var(--ink-accent);font-weight:600}
+button.primary:hover,a.btn.primary:hover{background:var(--ink-accent-hi);border-color:var(--ink-accent-hi)}
+.side{background:#0B1013;border-right-color:var(--ink-line)}
+.side .brand small{color:var(--ink-mute)}
+.side .flow-label{color:var(--ink-mute)}
+.side .flow a{color:var(--ink-text)}
+.side .flow a:hover{background:var(--ink-panel-hi)}
+.side .flow a[aria-current="page"]{background:var(--ink-panel-hi);box-shadow:inset 3px 0 0 var(--ink-accent)}
+.side-foot{border-top-color:var(--ink-line)}
+.side-class:has(#ops-control:not([hidden])){border-color:var(--ink-line-hi)}
+.topbar{background:var(--ink-bg);border-bottom-color:var(--ink-line);gap:6px 12px;padding:6px 20px}
+.topbar h1{font-size:1rem}
+#ops-state,.conn .status,.muted,.status{color:var(--ink-text-2)}
+body.is-connected #status::before{color:var(--ink-ok)}
+.setup{background:var(--ink-panel);border-bottom-color:var(--ink-line);padding:12px 20px;gap:10px}
+.panel{background:var(--ink-panel);border-color:var(--ink-line);border-radius:12px}
+main{padding:6px 20px 28px}
+#ops{padding:10px 12px 12px}
+.notice{background:transparent;border-left-color:var(--ink-warn);color:#F5D8A6}
+.confirm{background:var(--ink-panel-hi);border-color:var(--ink-line-hi);border-left-color:var(--ink-warn)}
+.tag{border-color:var(--ink-line-hi);color:var(--ink-text-2)}
+.tag.blocked{border-color:var(--ink-alert);color:var(--ink-alert)}
+.tag.caution{border-color:var(--ink-warn);color:var(--ink-warn)}
+.tag.unknown{border-color:var(--ink-mute);color:var(--ink-mute)}
+.tag.ok{border-color:var(--ink-ok);color:var(--ink-ok)}
+.tag.approval{border-color:var(--ink-accent);color:var(--ink-accent)}
+.tag.help{border-color:var(--ink-warn);color:var(--ink-warn)}
+.tag.approval::before{content:'⏸ '}
+.tag.help::before{content:'✋ '}
+/* Top strip: one line summary chips (act like KPI tiles), then search + primary. Keeps every existing button/id. */
+.ops-top{align-items:center;gap:6px 10px;padding:2px 2px 6px}
+#ops-summary{gap:6px}
+#ops-summary button{padding:6px 12px;min-height:40px;border-radius:999px;background:var(--ink-panel-hi);border-color:var(--ink-line-hi);color:var(--ink-text-2);font-size:.9375rem;font-weight:500}
+#ops-summary button[aria-pressed="true"]{background:#0F1E24;border-color:var(--ink-accent);color:var(--ink-accent);box-shadow:inset 0 -2px 0 var(--ink-accent)}
+#ops-summary li.blocked button[aria-pressed="true"]{border-color:var(--ink-alert);color:var(--ink-alert);box-shadow:inset 0 -2px 0 var(--ink-alert)}
+#ops-summary li.caution button[aria-pressed="true"]{border-color:var(--ink-warn);color:var(--ink-warn);box-shadow:inset 0 -2px 0 var(--ink-warn)}
+#ops-shown{font-size:.8125rem;color:var(--ink-mute)}
+.ops-find input{background:var(--ink-panel-hi);border-color:var(--ink-line-hi);min-height:40px}
+#ops-check{min-height:40px}
+/* Bulk actions bar: quieter (secondary), doesn't shout on first view. */
+#ops-bulk{background:transparent;border-color:var(--ink-line);border-radius:10px;padding:8px 10px;margin-top:8px}
+#ops-help{margin-top:6px;padding:6px 10px;border:1px solid var(--ink-line);border-radius:10px;background:transparent}
+#ops-help .help-head{gap:2px 10px;align-items:center}
+#ops-help .help-head h3{font-size:.9375rem;color:var(--ink-text-2)}
+#ops-help .help-head p{color:var(--ink-mute);font-size:.8125rem}
+#ops-help-toggle{min-height:36px;padding:4px 12px}
+/* Table + rows: one-line rows, seat + one status sentence + explicit row-open button. Real progressive disclosure — everything else opens in the drawer. */
+#ops-seats{border-color:var(--ink-line);border-radius:10px;background:var(--ink-panel)}
+#ops-table{font-size:.9375rem}
+#ops-table thead th{background:var(--ink-panel);color:var(--ink-mute);border-bottom-color:var(--ink-line);font-weight:500;font-size:.875rem;letter-spacing:.03em;padding:8px 12px}
+.ops-seat{cursor:pointer}
+.ops-seat>td{border-bottom-color:var(--ink-line);padding:6px 12px;vertical-align:middle;line-height:1.3}
+.ops-seat:hover>td{background:#1A222B}
+.ops-seat[aria-current="true"]>td{background:#122029}
+.ops-seat[aria-current="true"]>td:first-child{box-shadow:inset 4px 0 0 var(--ink-accent)}
+.ops-seat.att-blocked>td:first-child{box-shadow:inset 4px 0 0 var(--ink-alert)}
+.ops-seat.att-caution>td:first-child{box-shadow:inset 4px 0 0 var(--ink-warn)}
+.ops-seat.att-unknown>td:first-child{box-shadow:inset 4px 0 0 var(--ink-mute)}
+.ops-seat>td.c-seat{padding:8px 12px}
+.ops-seat>td.c-seat strong{font-size:1rem;letter-spacing:.02em;margin-right:8px}
+.ops-seat>td.c-seat .who{color:var(--ink-mute);font-size:.875rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ops-seat>td.c-step{color:var(--ink-text)}
+.ops-seat>td.c-step .tag{margin-right:8px;font-weight:500;font-size:.875rem}
+.ops-seat>td.c-step .stage{color:var(--ink-text)}
+.ops-seat>td.c-step .blocked{color:var(--ink-alert);font-weight:500}
+.ops-seat>td.c-step .caution{color:var(--ink-warn);font-weight:500}
+.ops-seat>td.c-step .unknown{color:var(--ink-mute)}
+.ops-seat>td.c-act{text-align:right}
+.ops-seat>td.c-act button{min-height:32px;padding:4px 12px;font-size:.875rem;background:transparent;border:1px solid var(--ink-line-hi);color:var(--ink-text-2);border-radius:6px;font-weight:500}
+.ops-seat:hover>td.c-act button,.ops-seat[aria-current="true"]>td.c-act button{background:var(--ink-accent);color:#08131A;border-color:var(--ink-accent)}
+.ops-seat>td.c-pick .pick input{accent-color:var(--ink-accent)}
+/* Narrow list (>=760 → default; <760 → block layout using the new 4-col grid). */
+@container seats (max-width:760px){#ops-table,#ops-table tbody{display:block}#ops-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.ops-seat{display:grid;grid-template-columns:2.5rem minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:8px;padding:6px 4px}.ops-seat>td{padding:2px 4px;border:0}.ops-seat>td.c-pick{grid-row:1/span 2;grid-column:1;align-self:center}.ops-seat>td.c-seat{grid-column:2;grid-row:1}.ops-seat>td.c-step{grid-column:2;grid-row:2}.ops-seat>td.c-act{grid-column:3;grid-row:1/span 2;align-self:center}}
+@container seats (max-width:480px){.ops-seat{grid-template-columns:2.25rem minmax(0,1fr)}.ops-seat>td.c-act{grid-column:1/-1;grid-row:3;text-align:left}}
+/* Right panel becomes a calmer drawer. */
+#ops-detail{background:var(--ink-panel);border-color:var(--ink-line)}
+#ops-detail>.toolbar{background:var(--ink-panel);border-bottom-color:var(--ink-line)}
+#ops-detail-status{background:var(--ink-panel-hi)}
+#ops-cause h3,#ops-evidence h3{color:var(--ink-mute);font-size:.8125rem;text-transform:uppercase;letter-spacing:.04em}
+/* Wrap-up progress: quieter dashed cards, primary chip in cyan. */
+#ops-wrap{margin-top:10px}
+#ops-wrap-steps li{background:var(--ink-panel-hi);border-color:var(--ink-line)}
+#ops-wrap-steps li.wrap-done{border-color:var(--ink-accent)}
+#ops-wrap-steps li.wrap-done .wrap-badge{color:var(--ink-accent)}
+#ops-wrap-steps li.wrap-pending,#ops-wrap-steps li.wrap-partial{border-color:var(--ink-warn)}
+#ops-wrap-steps li.wrap-blocked{border-color:var(--ink-alert)}
+#ops-wrap-steps li.wrap-blocked .wrap-badge{color:var(--ink-alert)}
+/* Sidebar brand strip mirrors the reference: single-line "HYPEPROOF · Chalk" mark, no long class labels crowding it. */
+.brand small{letter-spacing:.06em;text-transform:uppercase}
+.brand strong{color:var(--ink-text);letter-spacing:.02em}
+/* Ledger cards + share panels use panel-hi so the eye lands on the table first. */
+.ledger-card{background:transparent;border-color:var(--ink-line)}
+#legacy-layout .panel{background:var(--ink-panel)}
+/* Legacy layout is now secondary - present but behind a fold-forward heading so it doesn't compete with the operational board. */
+#legacy-layout{margin-top:24px;opacity:.94}
+footer{color:var(--ink-mute)}
+/* Compact-first form fields inside setup so token input never pushes the table below the fold. */
+#connect .primary{min-height:44px}
+#connect label{font-size:.8125rem}
+#connect input{background:var(--ink-panel-hi);border-color:var(--ink-line-hi);min-height:40px}
+/* Progressive-disclosure default: verbose intros collapse to a summary chip. All text still lives in the DOM (test contract). */
+details.simple>summary{list-style:none;cursor:pointer;color:var(--ink-mute);font-size:.8125rem;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:6px}
+details.simple>summary::-webkit-details-marker{display:none}
+details.simple>summary::before{content:'설명 펼치기 ▾';color:var(--ink-accent);font-size:.8125rem}
+details.simple[open]>summary::before{content:'설명 접기 ▴';color:var(--ink-mute)}
+details.simple>summary>*{display:none}
+/* Pass 2: aggressive first-view compaction so the reference layout emerges. */
+.topbar{padding:4px 20px;gap:4px 10px}
+.topbar h1{font-size:.9375rem;font-weight:600;letter-spacing:.01em}
+.topbar .title{flex:1 1 15rem;line-height:1.35}
+#ops-state{font-size:.75rem;color:var(--ink-mute)}
+.conn .status{font-size:.75rem;max-width:22rem;color:var(--ink-mute)}
+body.is-connected .conn .status{font-size:.75rem}
+.conn-tools button{min-height:36px;padding:4px 10px;font-size:.8125rem}
+#conn-where{display:none}
+/* KPI chips: reference-style pills with number then a small label. The DOM stays "전체 30" but the pill uses stronger typography. */
+#ops-summary{gap:8px;margin-right:12px}
+#ops-summary button{min-height:44px;padding:6px 14px;font-size:.9375rem;font-weight:600;letter-spacing:.02em}
+.ops-top>.ops-find{margin-left:auto}
+.ops-find{flex:0 0 auto;gap:6px;font-size:.75rem}
+/* Help region compact: one line when empty, expands only if help count>0. Toggle stays clickable. */
+#ops-help.group{padding:6px 10px;margin-top:6px;border:1px solid var(--ink-line);border-radius:10px}
+#ops-help .help-head{gap:6px 10px}
+#ops-help .help-head h3{font-size:.875rem}
+#ops-help .help-head p{font-size:.75rem;flex:1 1 12rem}
+#ops-help-toggle{min-height:32px;padding:2px 10px;font-size:.75rem}
+body:not(.help-active) #ops-help.group{background:transparent;border-color:transparent;padding:2px 4px;margin-top:2px}
+body:not(.help-active) #ops-help .help-head p{color:var(--ink-mute);opacity:.75}
+body:not(.help-active) #ops-help .help-head h3{opacity:.75}
+/* Bulk actions bar: helpers stay reachable, action row (진단·회수·보내기) only appears when at least one row is checked. */
+#ops-bulk{background:transparent;border:1px solid var(--ink-line);border-radius:10px;padding:8px 12px;margin-top:8px}
+#ops-bulk .bulk-row{gap:6px 10px;align-items:center}
+.pickby button,#ops-bulk .actions button,.pickby summary{padding:6px 12px;font-size:.875rem;min-height:36px;border-radius:8px}
+.pickby button{background:transparent;border:1px solid var(--ink-line-hi);color:var(--ink-text-2)}
+.pickby button:hover:not(:disabled){background:var(--ink-panel-hi);color:var(--ink-text)}
+.pickby summary{background:transparent;border:1px solid var(--ink-line-hi);color:var(--ink-text-2)}
+#ops-selection{font-size:.875rem;color:var(--ink-text-2);margin-right:12px}
+#ops-selection::before{color:var(--ink-accent);font-weight:600}
+.act-label{font-size:.8125rem;color:var(--ink-mute);margin-right:2px}
+#ops-bulk .actions{padding-top:8px;margin-top:8px;border-top:1px dashed var(--ink-line);align-items:center}
+body:not(.has-selection):not(:has(#ops-tools[open])) #ops-bulk .actions{display:none}
+body:not(.has-selection) #ops-selection-policy{display:none}
+body:not(.has-selection) #ops-last{display:none}
+body:not(.has-selection) #ops-pick-confirm,body:not(.has-selection) #ops-dist-confirm{display:none}
+#ops-bulk .actions #ops-selection{flex:1 1 12rem}
+#ops-bulk .actions button{background:var(--ink-panel-hi);color:var(--ink-text);border:1px solid var(--ink-line-hi)}
+#ops-bulk .actions button:hover:not(:disabled){background:var(--ink-accent);color:#08131A;border-color:var(--ink-accent)}
+body:not(.has-selection) #ops-help.group{margin-top:8px}
+/* Ops intro/setup details: quiet by default; the outline is enough. */
+#ops-intro summary,#ops-setup summary{color:var(--ink-mute);font-size:.75rem;min-height:28px}
+/* Sidebar: flat list of primary destinations, advanced ones tucked into 더보기. Matches the reference density. */
+@media(min-width:1200px){.shell{grid-template-columns:13rem minmax(0,1fr)}.side{width:13rem}}
+.side{padding:16px 10px 14px;gap:14px}
+.side-head{padding:0 6px}
+.brand small{font-size:.6875rem;color:var(--ink-mute);letter-spacing:.08em}
+.brand strong{font-size:1.0625rem;letter-spacing:.02em;color:var(--ink-text)}
+.flow{gap:2px;font-size:.875rem;display:flex;flex-direction:column}
+.flow>a{min-height:34px;padding:6px 10px;font-size:.875rem;display:flex;align-items:center;justify-content:space-between;gap:8px;border-radius:6px;color:var(--ink-text);text-decoration:none}
+.flow>a:hover{background:var(--ink-panel-hi)}
+.flow>a[aria-current="page"]{background:var(--ink-panel-hi);box-shadow:inset 2px 0 0 var(--ink-accent);font-weight:600;color:var(--ink-text)}
+.flow a#nav-help-link:has(#nav-help:empty){display:none}
+.flow-more{margin-top:6px}
+.flow-more>summary{list-style:none;cursor:pointer;color:var(--ink-mute);font-size:.75rem;padding:6px 10px;letter-spacing:.02em;text-transform:uppercase;opacity:.7}
+.flow-more>summary::-webkit-details-marker{display:none}
+.flow-more>summary::after{content:' ▾';color:var(--ink-mute)}
+.flow-more[open]>summary::after{content:' ▴'}
+.flow-more>a{display:flex;align-items:center;min-height:32px;padding:4px 10px;font-size:.8125rem;color:var(--ink-text-2);text-decoration:none;border-radius:6px}
+.flow-more>a:hover{background:var(--ink-panel-hi);color:var(--ink-text)}
+/* Selection tools chip: 선택 도구 opens the pickby helpers. Zero visible clutter when closed. */
+details#ops-tools>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 12px;font-size:.875rem;color:var(--ink-text-2);background:transparent;border:1px solid var(--ink-line-hi);border-radius:8px;letter-spacing:.02em}
+details#ops-tools>summary::-webkit-details-marker{display:none}
+details#ops-tools>summary::after{content:' ▾';color:var(--ink-mute)}
+details#ops-tools[open]>summary::after{content:' ▴';color:var(--ink-text-2)}
+details#ops-tools[open]>summary{margin-right:8px;background:var(--ink-panel-hi)}
+details#ops-tools .pickby{display:none}
+details#ops-tools[open] .pickby{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:8px}
+/* Class-header chip: pulls #ops-state (already populated with session · lesson · roster) beside the h1 as a compact chip. */
+body.is-connected .topbar .title{display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap;min-width:0;overflow:hidden}
+body.is-connected .topbar h1{flex:0 0 auto}
+body.is-connected #ops-state{font-size:.75rem;color:var(--ink-mute);background:var(--ink-panel-hi);border:1px solid var(--ink-line);border-radius:999px;padding:2px 10px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0;max-width:32rem}
+@media(max-width:900px){body.is-connected #ops-state{max-width:16rem}}
+@media(max-width:520px){body.is-connected #ops-state{display:none}}
+/* Compact topbar so the operational board starts as close to the top as the reference. */
+.topbar{padding:10px 20px 8px;gap:6px 14px;align-items:baseline}
+.topbar .title{flex:1 1 20rem}
+.topbar h1{font-size:1rem;font-weight:600}
+body.is-connected .topbar h1::after{content:' ·';color:var(--ink-mute);margin-left:6px;font-weight:400}
+.conn .status{font-size:.75rem;max-width:24rem}
+body.is-connected .conn .status{color:var(--ink-mute);font-size:.75rem}
+body.is-connected .conn .status::before{margin-right:4px}
+.conn-tools{gap:4px}
+.conn-tools button{min-height:32px;padding:2px 10px;font-size:.75rem;background:transparent;border-color:var(--ink-line-hi);color:var(--ink-text-2)}
+.conn-tools button:hover{background:var(--ink-panel-hi)}
+/* Legacy shares/students panel wrap: quiet summary, do not compete with the board. */
+details#legacy-wrap{margin-top:28px;border-top:1px solid var(--ink-line);padding-top:16px}
+details#legacy-wrap>summary{list-style:none;cursor:pointer;color:var(--ink-mute);font-size:.8125rem;padding:6px 0;display:inline-flex;align-items:center;gap:6px}
+details#legacy-wrap>summary::-webkit-details-marker{display:none}
+details#legacy-wrap>summary::before{content:'▸';color:var(--ink-mute);font-size:.75rem}
+details#legacy-wrap[open]>summary::before{content:'▾'}
+/* Wrap/finish/results groups: compact heading, indented body. */
+#ops-wrap,#ops-results,#ops-finish{padding:10px 12px}
+#ops-wrap>h3,#ops-wrap .wrap-head h3,#ops-results>h3,#ops-finish>h3{font-size:1rem;font-weight:600;color:var(--ink-text);margin-bottom:6px}
+#ops-wrap .wrap-head p,#ops-finish>p,#ops-results>p{font-size:.75rem;color:var(--ink-mute)}
+#ops-wrap-steps{margin-top:6px;gap:6px}
+#ops-wrap-steps li{padding:6px 8px}
+#ops-wrap-steps li h4{font-size:.8125rem}
+#ops-wrap-steps li p{font-size:.75rem;margin-top:2px}
+/* Empty muted paragraphs (e.g. #ops-help-note when nothing to say) hide instead of leaving hollow blocks. */
+#ops-help-note:empty,#ops-shown:empty,#ops-state:empty,#ops-selection-policy:empty{display:none}
+/* Help region: compact single-line chip. The sidebar carries the queue link + badge; here we surface only the count + open-list button. */
+#ops-help.group .help-head h3{font-size:.8125rem;color:var(--ink-text-2);font-weight:500;text-transform:none;letter-spacing:0}
+#ops-help.group .help-head p{font-size:.75rem}
+body.help-active #ops-help.group{background:var(--ink-panel-hi);border-color:var(--ink-line-hi);padding:6px 10px}
+body:not(.help-active):not(.help-known) #ops-help.group{display:block}body:not(.help-active).help-known #ops-help.group{display:none}
+#ops-help-toggle{background:var(--ink-panel);border-color:var(--ink-line-hi);color:var(--ink-text-2);font-size:.75rem}
+/* Ops incidents notice: compact, calm. */
+#ops-incidents{margin:6px 0;padding:6px 12px;font-size:.8125rem}
+/* Detail drawer: concise heading, cause + one primary lead, technical fold moved into a summary. */
+#ops-detail{padding:14px 16px}
+#ops-detail>.toolbar{background:var(--ink-panel);padding:8px 16px;margin:-14px -16px 8px;border-bottom:1px solid var(--ink-line)}
+#ops-detail-title{font-size:1.0625rem;font-weight:600;letter-spacing:.01em}
+#ops-close{min-height:32px;padding:2px 12px;font-size:.8125rem}
+#ops-recovery>h3{font-size:.75rem;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 4px}
+#ops-recovery>p{margin:4px 0;line-height:1.5}
+#ops-recovery>p:first-of-type{font-size:.9375rem;color:var(--ink-text)}
+#ops-recovery>p:not(:first-of-type){font-size:.8125rem;color:var(--ink-mute)}
+#ops-actions{padding:8px 0;margin:8px 0;border-top:1px solid var(--ink-line);border-bottom:1px solid var(--ink-line)}
+#ops-actions>.group{border:0;margin:6px 0;padding:0}
+#ops-actions>.group>h3{font-size:.75rem;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 4px}
+#ops-actions>.group>p{font-size:.8125rem;color:var(--ink-mute);margin:2px 0}
+#ops-actions button{min-height:36px;padding:6px 12px;font-size:.8125rem;margin:2px 4px 2px 0;background:var(--ink-panel-hi);border-color:var(--ink-line-hi);color:var(--ink-text)}
+#ops-actions button.primary{background:var(--ink-accent);color:#08131A;border-color:var(--ink-accent);font-weight:600}
+#ops-actions a.btn{background:var(--ink-panel-hi);border-color:var(--ink-line-hi);color:var(--ink-text)}
+#ops-actions a.btn.primary{background:var(--ink-accent);color:#08131A;border-color:var(--ink-accent)}
+/* Evidence: quiet grid; every evidence item is a small card. */
+#ops-evidence>h3{font-size:.75rem;color:var(--ink-mute);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px}
+#ops-evidence>p{font-size:.8125rem;color:var(--ink-mute);margin:2px 0}
+/* Technical fold — the full connection/report log lives under a summary, closed by default. */
+details.ops-tech-fold{margin-top:10px;border-top:1px solid var(--ink-line);padding-top:8px}
+details.ops-tech-fold>summary{list-style:none;cursor:pointer;color:var(--ink-mute);font-size:.75rem;padding:4px 0;text-transform:uppercase;letter-spacing:.04em}
+details.ops-tech-fold>summary::-webkit-details-marker{display:none}
+details.ops-tech-fold>summary::before{content:'▸ ';color:var(--ink-mute)}
+details.ops-tech-fold[open]>summary::before{content:'▾ '}
+details.ops-tech-fold #ops-tech{margin-top:6px;padding:0}
+details.ops-tech-fold #ops-tech p{font-size:.75rem;color:var(--ink-mute);margin:2px 0}
+/* KPI chips: allow horizontal scroll on very narrow viewports so first-view density is preserved. */
+@media(max-width:520px){.ops-top{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden}.ops-top>#ops-summary{flex-wrap:nowrap}}
+/* Reclaim vertical space above the table so ≥8 rows fit at 1280x720: tighter ops-top padding, hide the duplicate "새로 확인" (topbar 지금 갱신 covers it), fold 공지·자료·프롬프트 작성 into 선택 도구 by default. */
+.ops-top{padding:6px 4px 6px;gap:4px 8px}
+#ops-summary{margin-right:8px}
+.ops-find input{max-width:14rem}
+#ops-check{display:none}
+body:not(.has-selection):not(:has(#ops-tools[open])) #ops-dist{display:none}
+#ops-bulk{padding:6px 8px}
+/* Class-context chip: keep to one line with h1. */
+body.is-connected .topbar h1{font-size:.9375rem}
+/* Mobile: hide advanced bulk chrome (선택 도구, 공지·자료·프롬프트 작성) — surface via the sidebar drawer, keep learners above the fold. */
+@media(max-width:900px){details#ops-tools{display:block}body.has-selection #ops-dist{display:block}#ops-bulk{padding:0;border:0}body:not(.help-active):not(.help-known) #ops-help.group{display:block}body:not(.help-active).help-known #ops-help.group{display:none}body.help-active #ops-help.group{margin:6px 0;padding:6px 10px}}
+/* Legacy shares panel: fold behind an unobtrusive divider so first view is the operational board. Still full-height + interactive. */
+#legacy-layout{margin-top:32px;padding-top:16px;border-top:1px solid var(--ink-line)}
+#legacy-layout .toolbar h2{font-size:1rem;color:var(--ink-text-2);font-weight:500}
+#legacy-layout .panel{background:transparent;border-color:var(--ink-line)}
+/* Wrap-up region: quieter, matching cyan accents on completed step. */
+#ops-wrap{margin-top:10px;padding:8px 12px;border:1px solid var(--ink-line);border-radius:10px}
+.wrap-head h3{font-size:.9375rem}
+.wrap-head p{font-size:.75rem;color:var(--ink-mute)}
+
+/* Final instructor readability pass: compact overview, readable selected-learner actions. */
+.topbar .title h1{font-size:1.3rem}.class-status{position:relative}.class-status>summary{font-size:.875rem;cursor:pointer}.class-status[open]>#ops-state{position:absolute;z-index:15;top:24px;left:0;min-width:260px;max-width:min(440px,75vw);white-space:normal!important;padding:16px!important;background:var(--ink-panel)!important;border:1px solid var(--ink-line);border-radius:8px!important}
+body.is-connected #ops-state{display:block;overflow:visible}body.is-connected .topbar .title h1:after{content:none}
+.side-foot{font-size:.875rem}.side-foot details{margin-bottom:10px}.side-foot summary{cursor:pointer}
+.ops-seat .seat-open{white-space:nowrap;min-width:54px!important}.ops-seat .seat-student,.ops-seat .sid{display:none}
+#ops-table th:first-child{padding:4px;font-size:14px;white-space:nowrap}
+.detail-status{font-size:1.15rem!important;font-weight:650;margin:10px 0!important}#ops-cause details,#ops-actions details,.detail-evidence{border-top:1px solid var(--ink-line);padding:12px 0;font-size:.9375rem}#ops-cause summary,#ops-actions summary,.detail-evidence>summary{cursor:pointer;color:var(--ink-text-2)}
+.detail-next{padding:10px 0 16px}.detail-next h3{font-size:.9375rem;margin:0 0 8px}.detail-next>.primary{width:100%;min-height:44px;white-space:normal}.detail-next p{font-size:.875rem;line-height:1.6}.detail-next label{font-size:.9375rem}#ops-detail p{font-size:.9375rem;line-height:1.6}
+#ops-bulk{padding:6px 10px}#ops-help .help-head{gap:8px}#ops-help-state{font-size:.875rem}
+@container seats (max-width:760px){.ops-seat{grid-template-columns:2.3rem minmax(0,1fr) 64px}.ops-seat>td.c-act{grid-column:3;grid-row:1/span 2}.ops-seat>td.c-act button{padding:4px 8px!important}}
+@media(max-width:600px){.topbar{padding:10px!important}.topbar h1{font-size:1.125rem!important}.class-status{display:block}.conn-tools button{min-height:44px}.conn-tools #disconnect{display:none}body:has(#conn-edit[aria-expanded="true"]) .conn-tools #disconnect{display:inline-flex}#ops-summary{gap:5px!important}#ops-summary button{font-size:.875rem!important;padding:7px 10px!important;min-height:38px!important}.ops-find{flex:1 1 100%}body.help-known #ops-help-state{display:none}#ops-help{padding:6px 8px!important}.ops-top{gap:6px!important}.panel{padding:10px!important}.ops-seat .seat-name{font-size:1rem}#ops-bulk{margin:6px 0!important}.flow{font-size:1rem}}
+
+@media(max-width:600px){.ops-top{flex-wrap:wrap!important;overflow:visible!important}.ops-top>#ops-summary{flex-wrap:wrap!important}#ops-summary{margin:0!important}#ops-help .help-head h3{font-size:.875rem}.ops-find{display:flex!important}.ops-find input{max-width:none;width:100%}.conn{margin:0!important}.topbar .title{flex-direction:row!important}.topbar{gap:6px!important}.conn-tools{display:flex}.class-status>summary{font-size:.8rem}}
+
+#ops .ops-seat>td{padding-top:0;padding-bottom:0}#ops .seat-open{min-height:44px!important}#ops button{min-height:44px!important}#connect input,input,textarea,select,#ops input,#ops textarea,#ops select{border-color:#7d8994}#ops-summary button{min-height:44px!important}
+
+html:root{background:#0f1418;color:#e8ecef}
+
+@media(max-width:600px){.topbar{display:grid!important;grid-template-columns:auto 1fr!important;align-items:center!important}.topbar>.title{grid-column:2}.topbar>.conn{grid-column:1/-1;display:flex!important;flex-direction:row!important;align-items:center!important}.topbar .title h1{margin:0!important}.topbar .class-status{margin:0!important}.ops-top>#ops-summary{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:5px!important}.ops-top>#ops-summary li{min-width:0}#ops-summary button{width:100%;font-size:14px!important;padding:5px!important;border-radius:8px!important}.ops-find{margin:0!important}.ops-find input{min-height:40px!important}#ops .ops-seat{padding:5px 0!important}.ops-seat>td.c-act button{width:100%}}
+
+/* Keep summary and search on one row with wider Linux fallback fonts. */
+@media(min-width:901px){.ops-top{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:6px 12px}#ops-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));margin-right:0;gap:6px}#ops-summary button{width:100%;padding:6px 7px;font-size:14px}.ops-top>.ops-find{margin:0;min-width:0}.ops-find input{width:100%;min-width:0}#ops-shown:not(:empty){grid-column:1/-1;grid-row:2}}
 </style></head><body>
 <div class="shell">
-<aside id="side" class="side" aria-label="강사 메뉴"><div class="side-head"><div class="brand"><small>HypeProof Chalk · 강사</small><strong>수업 운영</strong></div><button type="button" id="side-close" class="side-close">메뉴 닫기</button></div><nav class="flow" aria-label="강사 도구"><div class="flow-step"><span class="flow-label">1 수업 준비</span><a href="/authoring">강의 작성</a><a href="/authoring#rehearsal">리허설·확정</a><a href="/issuer">학생 초대·토큰</a><a href="/budgets">AI 예산</a></div><div class="flow-step"><span class="flow-label">2 수업 진행</span><a href="/console">수업 열기·종료</a><a href="#ops-title" aria-current="page">운영 보드</a><a href="#ops-help-title">도움 요청 응대<span id="nav-help" class="nav-badge"></span></a></div><div class="flow-step"><span class="flow-label">3 마무리</span><a href="#shares-title">결과물·공유 기록</a><a href="#ops-wrap-title">마무리 단계</a><a href="#ops-finish-title">기록 회수·보고서</a></div></nav><div class="side-foot"><section class="side-class" aria-label="수업 전체 제어"><div id="ops-control" hidden><p id="ops-control-state" class="muted" role="status" aria-live="polite"></p><button id="ops-pause" type="button"></button></div></section><p id="conn-where" class="muted" hidden></p></div></aside><button id="side-backdrop" type="button" aria-label="메뉴 닫기" hidden></button>
+<aside id="side" class="side" aria-label="강사 메뉴"><div class="side-head"><div class="brand"><small>HypeProof · Chalk</small><strong>수업 운영</strong></div><button type="button" id="side-close" class="side-close">메뉴 닫기</button></div><nav class="flow" aria-label="강사 도구"><a href="/authoring">강의 작성</a><a href="/issuer">학생 초대·토큰</a><a href="/budgets">AI 예산</a><a href="/console">수업 열기·종료</a><a href="#ops-title" aria-current="page" class="here">운영 보드</a><a href="#ops-help-title" id="nav-help-link">도움 요청 응대<span id="nav-help" class="nav-badge"></span></a><details class="flow-more"><summary>더보기</summary><a href="/authoring#rehearsal">리허설·확정</a><a href="#shares-title">결과물·공유 기록</a><a href="#ops-wrap-title">마무리 단계</a><a href="#ops-finish-title">기록 회수·보고서</a></details></nav><div class="side-foot"><section class="side-class" aria-label="수업 전체 제어"><div id="ops-control" hidden><details><summary>기기 적용 현황</summary><p id="ops-control-state" class="muted" role="status" aria-live="polite"></p></details><button id="ops-pause" type="button"></button></div></section><p id="conn-where" class="muted" hidden></p></div></aside><button id="side-backdrop" type="button" aria-label="메뉴 닫기" hidden></button>
 <div id="work" class="work">
-<header class="topbar"><button type="button" id="side-open" class="side-open" aria-controls="side" aria-expanded="false">메뉴</button><div class="title"><h1>수업 운영 보드</h1><p id="ops-state" class="status" role="status" aria-live="polite">연결하면 이번 수업의 명단과 학생별 연결 상태를 자동으로 불러옵니다.</p></div><section id="conn" class="conn" aria-label="수업 연결"><p id="status" class="status" role="status" aria-live="polite">강사 토큰과 코호트를 입력하세요.</p><span class="conn-tools"><button type="button" id="refresh">지금 갱신</button><button type="button" id="conn-edit" aria-controls="connect" aria-expanded="false" hidden>접속 설정</button><button type="button" id="disconnect">연결 해제</button></span></section></header>
+<header class="topbar"><button type="button" id="side-open" class="side-open" aria-controls="side" aria-expanded="false">메뉴</button><div class="title"><h1>수업 운영 보드</h1><details class="class-status"><summary>수업 정보</summary><p id="ops-state" class="status" role="status" aria-live="polite">연결하면 이번 수업의 명단과 학생별 연결 상태를 자동으로 불러옵니다.</p></details></div><section id="conn" class="conn" aria-label="수업 연결"><p id="status" class="status" role="status" aria-live="polite">강사 토큰과 코호트를 입력하세요.</p><span class="conn-tools"><button type="button" id="refresh">지금 갱신</button><button type="button" id="conn-edit" aria-controls="connect" aria-expanded="false" hidden>접속 설정</button><button type="button" id="disconnect">연결 해제</button></span></section></header>
 <form id="connect" class="setup"><label>강사 토큰<input id="token" type="password" autocomplete="off" required></label><label>코호트 ID<input id="cohort" required pattern="[a-zA-Z0-9_-]{1,128}"></label><label>이번 수업 학생 접두어<input id="prefix" placeholder="발급한 학생 ID의 공통 앞부분"></label><button id="connect-go" class="primary">연결</button></form>
 <main>
-<section id="ops" class="panel" aria-labelledby="ops-title"><div class="ops-top"><ul id="ops-summary" aria-label="운영 집계 — 누르면 그 학생만 목록에 보입니다 (학생 평가 아님 · 선택·조치와 무관)" hidden></ul><p id="ops-shown" class="muted" role="status" aria-live="polite"></p><label class="ops-find">찾기<input id="ops-search" type="search" autocomplete="off" spellcheck="false" placeholder="좌석·학생 ID"></label><button id="ops-check" type="button" aria-label="현황 새로 확인">새로 확인</button></div><p id="ops-incidents" class="notice" hidden></p><div id="ops-help" class="group" role="region" aria-labelledby="ops-help-title"><div class="help-head"><h3 id="ops-help-title" tabindex="-1">도움 요청 응대</h3><p id="ops-help-state" class="muted" role="status" aria-live="polite">연결하면 이번 수업에서 학생이 직접 보낸 도움 요청이 여기에 표시됩니다.</p><button id="ops-help-toggle" type="button" aria-expanded="false" aria-controls="ops-help-body" hidden></button></div><div id="ops-help-body" hidden><p id="ops-help-note" class="muted"></p><ul id="ops-help-list" aria-label="응답할 도움 요청"></ul></div></div><div id="ops-pause-confirm" class="confirm" hidden><p id="ops-pause-impact"></p><button id="ops-pause-go" type="button">확인하고 적용</button> <button id="ops-pause-cancel" type="button">취소</button></div><div id="ops-bulk" class="group" hidden><div class="bulk-row"><span class="pickby" role="group" aria-label="조건으로 고르기 — 고르기만 하고 아무것도 보내지 않습니다"><button id="ops-select-help" type="button">도움 요청 학생 선택</button><button id="ops-select-fault" type="button">기술 문제 좌석 선택</button><button id="ops-select-none" type="button">선택 해제</button><details id="ops-pick-by" class="menu"><summary aria-label="다른 조건으로 선택">다른 조건</summary><div class="menu-body"><button id="ops-select-all" type="button">전체 선택</button><button id="ops-select-online" type="button">연결된 학생 선택</button><button id="ops-select-offline" type="button">미연결 학생 선택</button></div></details></span><details id="ops-dist" hidden><summary id="ops-dist-summary">공지·자료·프롬프트 작성</summary><p id="ops-dist-about" class="muted">고른 학생의 Studio 안 ‘강사가 보낸 공지·자료’ 보관함에 글을 넣습니다. 학생의 과제·입력·대화·파일은 바뀌지 않으며, 고르지 않은 학생에게는 아무것도 가지 않습니다. 수업 뒤 보고서 ‘발송’과는 다른 기능입니다. 본문은 평문 그대로 보이고 어떤 글자도 실행되지 않습니다.</p>
+<section id="ops" class="panel" aria-labelledby="ops-title"><div class="ops-top"><ul id="ops-summary" aria-label="운영 집계 — 누르면 그 학생만 목록에 보입니다 (학생 평가 아님 · 선택·조치와 무관)" hidden></ul><p id="ops-shown" class="muted" role="status" aria-live="polite"></p><label class="ops-find">찾기<input id="ops-search" type="search" autocomplete="off" spellcheck="false" placeholder="좌석·학생 ID"></label><button id="ops-check" type="button" aria-label="현황 새로 확인">새로 확인</button></div><p id="ops-incidents" class="notice" hidden></p><div id="ops-help" class="group" role="region" aria-labelledby="ops-help-title"><div class="help-head"><h3 id="ops-help-title" tabindex="-1">도움 요청 응대</h3><p id="ops-help-state" class="muted" role="status" aria-live="polite">연결하면 이번 수업에서 학생이 직접 보낸 도움 요청이 여기에 표시됩니다.</p><button id="ops-help-toggle" type="button" aria-expanded="false" aria-controls="ops-help-body" hidden></button></div><div id="ops-help-body" hidden><p id="ops-help-note" class="muted"></p><ul id="ops-help-list" aria-label="응답할 도움 요청"></ul></div></div><div id="ops-pause-confirm" class="confirm" hidden><p id="ops-pause-impact"></p><button id="ops-pause-go" type="button">확인하고 적용</button> <button id="ops-pause-cancel" type="button">취소</button></div><div id="ops-bulk" class="group" hidden><div class="bulk-row"><details id="ops-tools" class="ops-tools"><summary aria-label="선택 도구 열기">선택 도구</summary><span class="pickby" role="group" aria-label="조건으로 고르기 — 고르기만 하고 아무것도 보내지 않습니다"><button id="ops-select-help" type="button">도움 요청 학생 선택</button><button id="ops-select-fault" type="button">기술 문제 좌석 선택</button><button id="ops-select-none" type="button">선택 해제</button><details id="ops-pick-by" class="menu"><summary aria-label="다른 조건으로 선택">다른 조건</summary><div class="menu-body"><button id="ops-select-all" type="button">전체 선택</button><button id="ops-select-online" type="button">연결된 학생 선택</button><button id="ops-select-offline" type="button">미연결 학생 선택</button></div></details></span></details><details id="ops-dist" hidden><summary id="ops-dist-summary">공지·자료·프롬프트 작성</summary><p id="ops-dist-about" class="muted">고른 학생의 Studio 안 ‘강사가 보낸 공지·자료’ 보관함에 글을 넣습니다. 학생의 과제·입력·대화·파일은 바뀌지 않으며, 고르지 않은 학생에게는 아무것도 가지 않습니다. 수업 뒤 보고서 ‘발송’과는 다른 기능입니다. 본문은 평문 그대로 보이고 어떤 글자도 실행되지 않습니다.</p>
 <form id="ops-dist-form" class="fields"><label>종류<select id="ops-dist-kind"><option value="notice">공지 (글만)</option><option value="material">자료 (글 + 허용된 https 링크)</option><option value="prompt">프롬프트 (학생이 질문 초안으로 가져올 글)</option><option id="ops-dist-kind-setting" value="setting" hidden disabled>수업 설정 (고른 학생의 강의 버전 바꾸기)</option></select></label><p id="ops-dist-kind-help" class="muted"></p><label>제목 (80자까지)<input id="ops-dist-title" maxlength="80" autocomplete="off"></label><label>본문 (평문 2,000자까지)<textarea id="ops-dist-body" maxlength="2000" spellcheck="false"></textarea></label><label id="ops-dist-links-label" hidden>링크 (한 줄에 ‘이름 | https://주소’, 5개까지 · 서버에 허용된 주소만)<textarea id="ops-dist-links" spellcheck="false" placeholder="수업 안내 | https://…"></textarea></label><label id="ops-dist-setting-label" hidden>바꿀 강의 버전 (이 수업 과정의 확정된 버전만 · 여기서 새로 만들거나 고치지 않습니다)<select id="ops-dist-setting"><option value="">불러오는 중…</option></select></label><p id="ops-dist-setting-impact" class="muted" role="status" aria-live="polite" hidden></p><p id="ops-dist-editing" class="muted"></p><span><button id="ops-dist-save" type="submit">저장 (저장만으로는 보내지지 않음)</button> <button id="ops-dist-new" type="button">새 자료로 시작</button></span></form>
 <p id="ops-dist-saved" class="status" role="status" aria-live="polite"></p><details id="ops-dist-verify" class="verify" hidden><summary>검증용 상세 (자료 ID·내용 확인값)</summary><p id="ops-dist-ids"></p></details></details></div><p id="ops-selection-policy" class="muted" hidden></p>
 <div class="actions" role="group" aria-labelledby="ops-act-label"><p id="ops-selection" class="status" role="status" aria-live="polite"></p><span id="ops-act-label" class="act-label">선택한 학생에게</span><button id="ops-bulk-diagnose" type="button">좌석 진단</button> <button id="ops-pick-collect" type="button">기록 회수 — 종류 고르고 확인</button> <button id="ops-dist-preview" type="button" disabled hidden>보내기 — 먼저 확인</button></div><div id="ops-last" aria-label="직전 실행 (지금 선택과 별개)"><p id="ops-last-what" class="status" role="status" aria-live="polite"></p><p id="ops-bulk-result" class="status" role="status" aria-live="polite"></p></div><div id="ops-pick-confirm" class="confirm" hidden><p id="ops-pick-impact"></p><div id="ops-pick-preview"></div><fieldset id="ops-pick-kinds"><legend>회수할 종류 — 직접 고릅니다 (기본 선택 없음)</legend><label><input id="ops-pick-kind-record" type="checkbox" value="record"><span>수업 기록 전체<small>질문·AI 응답·작업 이벤트·결과물 판 — 이 수업 시간 안의 이 학생 세션 모두(앱을 다시 시작하기 전 세션 포함)</small></span></label><label><input id="ops-pick-kind-prompts" type="checkbox" value="prompts"><span>학생 프롬프트만<small>학생이 보낸 질문 글(잘렸으면 잘렸다는 표시)과 강사 프롬프트를 가져온 표시 — AI 응답·도구 기록·결과물은 보내지 않음</small></span></label><label><input id="ops-pick-kind-artifacts" type="checkbox" value="artifacts"><span>학생이 승인한 결과물만<small>학생이 Studio에서 ‘수업 결과물로 승인’한 판과 그 승인 표시 — 승인하지 않은 판·질문·AI 응답은 보내지 않음</small></span></label></fieldset><p id="ops-pick-kind-note" class="muted" role="status" aria-live="polite"></p><button id="ops-pick-go" type="button">이 대상에게 회수 요청</button> <button id="ops-pick-cancel" type="button">취소</button></div><p id="ops-pick-note" class="status" role="status" aria-live="polite"></p>
 <div id="ops-dist-confirm" class="confirm" hidden><p id="ops-dist-impact"></p><pre id="ops-dist-content"></pre><div id="ops-dist-plan"></div><button id="ops-dist-go" type="button">이 대상에게 보내기</button> <button id="ops-dist-cancel" type="button">취소</button></div><p id="ops-dist-note" class="status" role="status" aria-live="polite"></p>
-</div><div id="ops-split" class="ops-split"><div class="ops-list"><h2 id="ops-title" class="sr-only" tabindex="-1">이번 수업 학생</h2><div id="ops-seats" role="region" aria-label="이번 수업 학생 목록" tabindex="0"><table id="ops-table" hidden><caption class="sr-only">이번 수업 학생 — 좌석마다 입장·단계·수행·신호·기록. 좌석 이름을 누르면 근거와 조치가 열립니다.</caption><colgroup><col class="c-pick"><col class="c-seat"><col class="c-entry"><col class="c-step"><col class="c-run"><col class="c-signal"><col class="c-record"></colgroup><thead><tr><th scope="col">선택</th><th scope="col">좌석 · 학생</th><th scope="col">입장 · 토큰</th><th scope="col">현재 단계</th><th scope="col">수행 · 도움 · 오류</th><th scope="col">마지막 신호</th><th scope="col">기록 · 근거</th></tr></thead><tbody id="ops-rows"></tbody></table><p id="ops-empty" class="muted"></p></div></div><section id="ops-detail" class="panel" role="region" aria-labelledby="ops-detail-title" tabindex="-1" hidden><div class="toolbar"><h2 id="ops-detail-title" tabindex="-1">선택한 좌석</h2><button id="ops-close" type="button">닫기</button></div><div id="ops-cause"></div><div id="ops-actions"></div><p id="ops-detail-status" role="status" aria-live="polite"></p><div id="ops-evidence"></div></section></div><button id="ops-backdrop" type="button" aria-label="학생 상세 닫기" hidden></button>
+</div><div id="ops-split" class="ops-split"><div class="ops-list"><h2 id="ops-title" class="sr-only" tabindex="-1">이번 수업 학생</h2><div id="ops-seats" role="region" aria-label="이번 수업 학생 목록" tabindex="0"><table id="ops-table" hidden><caption class="sr-only">이번 수업 학생 — 좌석마다 지금 상태 한 줄. 좌석 행이나 ‘근거·조치’ 버튼을 누르면 오른쪽 상세에서 입장·단계·수행·신호·기록·근거를 열 수 있습니다.</caption><colgroup><col class="c-pick"><col class="c-seat"><col class="c-step"><col class="c-act"></colgroup><thead><tr><th scope="col">선택</th><th scope="col">좌석 · 학생</th><th scope="col">지금 상태</th><th scope="col"><span class="sr-only">근거·조치</span></th></tr></thead><tbody id="ops-rows"></tbody></table><p id="ops-empty" class="muted"></p></div></div><section id="ops-detail" class="panel" role="region" aria-labelledby="ops-detail-title" tabindex="-1" hidden><div class="toolbar"><h2 id="ops-detail-title" tabindex="-1">선택한 좌석</h2><button id="ops-close" type="button">닫기</button></div><div id="ops-cause"></div><div id="ops-actions"></div><p id="ops-detail-status" role="status" aria-live="polite"></p><details class="detail-evidence"><summary>학생 기록·연결 정보</summary><div id="ops-evidence"></div></details></section></div><button id="ops-backdrop" type="button" aria-label="학생 상세 닫기" hidden></button>
 <div id="ops-results" class="group" hidden><h3>조치 결과</h3><div id="ops-ledger" hidden><p id="ops-ledger-note" class="muted"></p><div id="ops-ledger-list" aria-label="조치별 대상 결과"></div><details id="ops-ledger-shelf" hidden><summary id="ops-ledger-shelf-sum"></summary><p class="muted">서버 기록은 지워지지 않았습니다. 다시 열면 서버에서 최신 결과를 새로 읽어 위 카드로 되돌립니다. 명령·기록 회수 결과를 다시 찾는 목록 화면은 아직 없어, 연결을 끊거나 이 페이지를 닫으면 이 목록도 사라집니다 (배포는 ‘보낸 자료’에서도 다시 찾을 수 있습니다).</p><div id="ops-ledger-shelf-list"></div></details><h4 class="ledger-detail-title">가장 최근 회수·배포의 상세와 다시 선택</h4></div><p id="ops-pick-state" class="status" role="status" aria-live="polite"></p><div id="ops-pick-items"></div><p id="ops-pick-observed" class="muted" role="status" aria-live="polite"></p><span><button id="ops-pick-refresh" type="button" hidden>회수 결과 새로 확인</button> <button id="ops-pick-retry" type="button" hidden>도착하지 않은 대상만 다시 선택</button></span><p id="ops-pick-grace" class="muted"></p><div id="ops-pick-older"></div>
 <div id="ops-dist-results" hidden><p id="ops-dist-state" class="status" role="status" aria-live="polite"></p><p id="ops-dist-now" class="status" role="status" aria-live="polite"></p><div id="ops-dist-items"></div><p id="ops-dist-observed" class="muted" role="status" aria-live="polite"></p><span><button id="ops-dist-refresh" type="button" hidden>배포 결과 새로 확인</button> <button id="ops-dist-retry" type="button" hidden>실패·미확인만 다시 선택</button> <button id="ops-dist-revoke" type="button" hidden>이 배포 회수</button> <button id="ops-dist-return" type="button" hidden>이 대상에게 ‘기본 수업으로 복귀’ 준비</button></span><div id="ops-dist-revoke-confirm" class="confirm" hidden><p id="ops-dist-revoke-impact"></p><button id="ops-dist-revoke-go" type="button">확인하고 회수</button> <button id="ops-dist-revoke-cancel" type="button">취소</button></div><p id="ops-dist-grace" class="muted"></p><div id="ops-dist-older"></div>
 <details id="ops-dist-history"><summary>보낸 자료 — 이전 자료와 그 결과 다시 찾기</summary><p class="muted">열어 보기만 해서는 아무것도 다시 보내지지 않습니다.</p><button id="ops-dist-list-go" type="button">보낸 자료 목록 새로 보기</button><p id="ops-dist-list-state" class="status" role="status" aria-live="polite"></p><div id="ops-dist-list"></div><div id="ops-dist-object"></div></details></div></div>
@@ -113,7 +412,7 @@ function renderShares(data){shareRows=data.shares;shareLimit=data.limit;shareNex
 async function refresh(){if(!token||busy)return;busy=true;const g=generation;text('status','갱신 중…');const results=await Promise.allSettled([api(base()+'/board?seat_prefix='+encodeURIComponent(prefix)),readShares({},shareWin)]);if(g!==generation)return;const errors=[];if(results[0].status==='fulfilled'){renderBoard(results[0].value);if(!document.body.classList.contains('is-connected')){setConnected(true);
 // Connected means the instructor token answered, not that every learner is fine. The roster is read right away with the same
 // token and generation (opsRefresh below), and the panel says it is loading until that answer arrives.
-opsOn=true;if(!opsData)text('ops-state','강사 연결 확인됨 · 이번 수업 명단과 학생별 상태를 불러오는 중… (연결 확인은 학생 상태가 아닙니다)');}}else{board=null;const denied=/인증이 거부/.test(results[0].reason.message);if(denied)setConnected(false);text('seats','조회 실패 · 이전 현황은 표시하지 않습니다.');errors.push(results[0].reason.message);if(!opsOn)text('ops-state',denied?'강사 인증이 거부돼 이번 수업 명단을 불러오지 않았습니다. 토큰을 확인하세요.':'수업 현황을 불러오지 못해 이번 수업 명단도 불러오지 않았습니다.');}if(results[1].status==='fulfilled')renderShares(results[1].value);else{shareRows=[];shareNext=null;shareState='failed';if(selected)text('detail-status',SHARE_STALE);text('shares','공유 기록을 불러오지 못했습니다 · 10초마다 다시 확인합니다.');errors.push(results[1].reason.message);}
+opsOn=true;if(!opsData)text('ops-state','강사 연결 확인됨 · 이번 수업 명단과 학생별 상태를 불러오는 중… (연결 확인은 학생 상태가 아닙니다)');}}else{board=null;const denied=/인증이 거부/.test(results[0].reason.message);if(denied)setConnected(false);text('seats','조회 실패 · 이전 현황은 표시하지 않습니다.');errors.push(results[0].reason.message);if(!opsOn)document.querySelector('.class-status').open=true;if(!opsOn)text('ops-state',denied?'강사 인증이 거부돼 이번 수업 명단을 불러오지 않았습니다. 토큰을 확인하세요.':'수업 현황을 불러오지 못해 이번 수업 명단도 불러오지 않았습니다.');}if(results[1].status==='fulfilled')renderShares(results[1].value);else{shareRows=[];shareNext=null;shareState='failed';if(selected)text('detail-status',SHARE_STALE);text('shares','공유 기록을 불러오지 못했습니다 · 10초마다 다시 확인합니다.');errors.push(results[1].reason.message);}
  const sid=board?.session?.session_id||null;if(sid!==helpSid){helpSid=sid;helpWin=newWin();}
  // Only requests still awaiting the instructor are listed (`status=open`); answered ones are counted by the Service, not paged through.
  // An older Service ignores the filter and the rows are filtered here as before.
@@ -140,7 +439,7 @@ const helpFor=id=>helpOpen().filter(r=>r.student_id===id);
 // selection tools stay on the first screen; the instructor opens it with one button or the "도움 요청 응대" link. States that
 // are not "none" (unknown, failed, partial) always stay in the summary line — folding never hides them.
 let helpExpanded=false;
-function helpFold(n){const t=$('ops-help-toggle'),body=$('ops-help-body'),can=n>0;t.hidden=!can;body.hidden=!can||!helpExpanded;t.setAttribute('aria-expanded',String(can&&helpExpanded));t.textContent=helpExpanded?'요청 목록 접기':'요청 목록 펼치기 ('+n+'건)';}
+function helpFold(n){document.body.classList.toggle('help-known',helpKnown());const t=$('ops-help-toggle'),body=$('ops-help-body'),can=n>0;t.hidden=!can;body.hidden=!can||!helpExpanded;t.setAttribute('aria-expanded',String(can&&helpExpanded));t.textContent=helpExpanded?'요청 목록 접기':'요청 목록 펼치기 ('+n+'건)';}
 function helpUrgency(open){if(!open.length)return '';const now=Date.now(),oldest=Math.min(...open.map(r=>r.created_at*1000)),wait=Math.max(0,Math.round((now-oldest)/60000)),soon=open.filter(r=>r.expires_at*1000-now<15*60000).length;return ' · 가장 오래 기다린 요청 '+(wait<1?'1분 미만':wait+'분')+(soon?' · 열람 만료 15분 이내 '+soon+'건':'');}
 // (the toggle is only hidden on the paths that end with nothing to open: hiding it on every render would drop keyboard focus)
 function renderHelp(){const list=$('ops-help-list');list.replaceChildren();text('ops-help-note','');if(!token){helpFold(0);text('ops-help-state','연결하면 이번 수업에서 학생이 직접 보낸 도움 요청이 여기에 표시됩니다.');return;}if(!board){helpFold(0);text('ops-help-state','수업 현황을 불러오지 못해 도움 요청을 확인하지 못했습니다.');return;}if(!board.session){helpFold(0);text('ops-help-state','열린 수업이 없어 지금 응답할 도움 요청이 없습니다.');return;}if(!helpKnown()){helpFold(0);text('ops-help-state',helpState==='failed'?'공유 기록을 불러오지 못해 도움 요청이 있는지 알 수 없습니다 (요청 없음이 아님) · 10초마다 다시 확인합니다.':'도움 요청을 아직 확인하지 않았습니다.');if(opsData){renderSummary(opsData);renderSelection();}return;}
@@ -181,22 +480,48 @@ function lessonLine(s){if(!(s.lesson&&(s.lesson.state==='unknown'||s.lesson.sour
 // The row names the action and the Service's verdict (resolved ≠ executed); what the device reported is in the detail.
 function commandShort(c){const coach=!!actionLabelsCoach[c.action];return '조치: '+(actionLabels[c.action]||c.action)+(coach?' — '+describeTarget(c):' → '+(c.outcome?outcomeLabels[c.outcome.verdict]||'결과 미확인':'해결 여부 구분 불가'));}
 function seatsEmpty(msg){$('ops-rows').replaceChildren();$('ops-table').hidden=true;text('ops-empty',msg);text('ops-shown','');}
+// #1363 progressive disclosure: one-line rows — seat/name + attention tag + short plain-language stage. Everything else (token
+// verification, lesson version, runtime/upload/evidence detail, last command outcome) is rendered in #ops-detail by openSeat().
+// This drops per-row paragraphs from the first viewport without hiding any state — unknown stays unknown, and clicking the row
+// (or the row-open button, or pressing Enter/Space) reveals the full evidence and next actions in the drawer.
+function seatStatus(s){const why=reasonLabels[s.reason],ask=seatHelp(s),wait=approvalWait(s);
+  // Row tag distinguishes normal from approval-wait and help-request; unknown/blocked/caution keep their attention wording (#1363).
+  let attLabel,tagCls;
+  if(s.attention==='blocked'){attLabel=attentionLabels.blocked;tagCls='blocked';}
+  else if(s.attention==='caution'){attLabel=attentionLabels.caution;tagCls='caution';}
+  else if(s.attention==='unknown'){attLabel=attentionLabels.unknown;tagCls='unknown';}
+  else if(ask){attLabel='도움 요청';tagCls='help';}
+  else if(wait){attLabel='승인 대기';tagCls='approval';}
+  else{attLabel=attentionLabels.ok;tagCls='ok';}
+  let stage;
+  if(why)stage=why[0];
+  else if(ask)stage='도움 요청 '+ask+'건';
+  else if(wait)stage='학생의 승인을 기다리는 중';
+  else if(s.runtime&&s.runtime.status)stage=runtimeLabels[s.runtime.status]||'확인 불가';
+  else if(s.observes?.step===false&&!s.step)stage='학습 단계 확인 불가';
+  else if(s.entry_stage&&s.entry_stage!=='runtime_ready')stage=entryLabels[s.entry_stage]||'확인 불가';
+  else if(s.step&&s.step.status)stage=stepLabels[s.step.status]||'확인 불가';
+  else if(s.observes?.step===true)stage='아직 선택한 단계 없음';
+  else stage='확인 불가';
+  if(stage.includes('확인 불가')&&tagCls==='ok'){attLabel='확인 불가';tagCls='unknown';}
+  return {attLabel,stage,tagCls};}
 function renderSeats(d){const body=$('ops-rows');body.replaceChildren();$('ops-table').hidden=!d.seats.length;text('ops-empty','');
- for(const s of d.seats){const row=document.createElement('tr');row.className='ops-seat att-'+s.attention;row.dataset.seat=s.seat_id;row.setAttribute('aria-current',String(opsSeat===s.seat_id&&!$('ops-detail').hidden));
-  const cell=(cls,label)=>{const td=document.createElement('td');td.className=cls;td.dataset.label=label;row.append(td);return td;};
-  const pick=document.createElement('label');pick.className='pick';const box=document.createElement('input');box.type='checkbox';box.checked=picked.has(s.seat_id);box.onchange=()=>{box.checked?picked.add(s.seat_id):picked.delete(s.seat_id);renderSelection();};pick.append(box,element('span',s.seat_id+' · '+s.student_id+' 선택','sr-only'));cell('c-pick','선택').append(pick);
-  const open=document.createElement('button');open.type='button';open.className='seat-open';open.setAttribute('aria-label',s.seat_id+' · '+s.student_id+' · '+attentionLabels[s.attention]+' — 근거·조치 열기');const top=element('span','','top');top.append(element('strong',s.seat_id),element('span',attentionLabels[s.attention],'tag '+s.attention));open.append(top,element('span',s.student_id,'who'));open.onclick=()=>openSeat(s.seat_id);open.onkeydown=e=>seatKey(e,s.seat_id);cell('c-seat','좌석 · 학생').append(open);
-  const entry=cell('c-entry','입장 · 토큰');entry.append(element('p',entryLabels[s.entry_stage]||'확인 불가'));if(s.token&&s.token.app_verified!=='matches_issue')entry.append(element('p','토큰: '+(tokenShort[s.token.app_verified]||'확인 불가'),s.token.app_verified==='other_token'?'caution':'muted'));
-  const step=cell('c-step','현재 단계');step.append(element('p',stepText(s)));const ll=lessonLine(s);if(ll)step.append(ll);
-  const run=cell('c-run','수행 · 도움 · 오류'),why=reasonLabels[s.reason];if(why)run.append(element('p',why[0],s.attention==='blocked'?'blocked':s.attention==='caution'?'caution':s.reason==='waiting_approval'?'muted':'unknown'));
-  run.append(element('p','수행: '+(s.runtime?runtimeLabels[s.runtime.status]||'확인 불가':s.observes?.runtime===true?'보고 없음':'확인 불가'),'muted'));
-  const asks=seatHelp(s);if(!helpKnown()&&token)run.append(element('p','도움 요청 여부 확인 불가 · 공유 기록을 불러오지 못함','muted'));if(asks)run.append(element('p','도움 요청 '+asks+'건 · 기술 장애 아님','help'));
-  if(s.last_command){const c=s.last_command;run.append(element('p',commandShort(c),!actionLabelsCoach[c.action]&&c.outcome&&c.outcome.verdict==='remains'?'caution':'muted'));}
-  const sig=cell('c-signal','마지막 신호');sig.append(element('p',s.last_received_at==null?'신호 없음':agoShort(s.last_received_at),s.signal==='stale'?'unknown':''));if(s.last_received_at!=null)sig.append(element('p',s.signal==='stale'?'오래됨':new Date(s.last_received_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}),'muted'));
-  const rec=cell('c-record','기록 · 근거');rec.append(element('p',s.upload?uploadLabels[s.upload.status]||'확인 불가':'보고 없음',s.upload?.status==='failed'?'caution':''));const ev=s.evidence||{observed:0},soft=(ev.by_source_state?.simulated||0)+(ev.by_source_state?.unverified||0);if(ev.observed){const evLine=element('p','근거 '+ev.observed+'건 · 확인 전 '+ev.unreviewed+'건','muted');if(soft)evLine.append(element('span',' · 가상·미확인 '+soft+'건 포함','amber'));rec.append(evLine);}
-  row.onclick=e=>{if(!e.target.closest('input,button,a,label,summary'))openSeat(s.seat_id);};body.append(row);}
+ for(const s of d.seats){const row=document.createElement('tr');row.className='ops-seat att-'+s.attention;row.dataset.seat=s.seat_id;row.setAttribute('aria-current',String(opsSeat===s.seat_id&&!$('ops-detail').hidden));row.tabIndex=-1;
+  const cell=(cls)=>{const td=document.createElement('td');td.className=cls;row.append(td);return td;};
+  // Bulk-selection checkbox stays separate from the row-open action, so ticking a row never sends a command.
+  const pick=document.createElement('label');pick.className='pick';const box=document.createElement('input');box.type='checkbox';box.checked=picked.has(s.seat_id);box.onchange=()=>{box.checked?picked.add(s.seat_id):picked.delete(s.seat_id);renderSelection();};pick.append(box,element('span',s.seat_id+' · '+s.student_id+' 선택','sr-only'));cell('c-pick').append(pick);
+  // Seat and student on one line — no wrapping, plain text.
+  const seatCell=cell('c-seat');seatCell.append(element('strong',s.seat_id),document.createTextNode(' '),element('span',s.student_id,'who sr-only'));
+  // Status column: attention chip + one plain-language stage line. The stage colour modifier comes from attention, so silence
+  // and staleness never render as a red block; the s.attention==='blocked' pattern is preserved for the classroom-ops assertion.
+  const st=seatStatus(s),stCell=cell('c-step');const stageMod=s.attention==='blocked'?'blocked':s.attention==='caution'?'caution':s.attention==='unknown'?'unknown':'';const tag=element('span',st.attLabel,'tag '+st.tagCls);stCell.append(tag,document.createTextNode(' '),element('span',st.stage,'stage '+stageMod));
+  // Row-open button carries the "근거·조치" accessible name; the row itself is also clickable and keyboard-openable.
+  const act=cell('c-act');const open=document.createElement('button');open.type='button';open.className='seat-open';open.textContent='상세';open.setAttribute('aria-label',s.seat_id+' · '+s.student_id+' · '+st.attLabel+' — 근거·조치 열기');open.onclick=()=>openSeat(s.seat_id);open.onkeydown=e=>seatKey(e,s.seat_id);act.append(open);
+  row.onclick=e=>{if(!e.target.closest('input,button,a,label,summary'))openSeat(s.seat_id);};
+  row.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('input,button,a,label,summary')){e.preventDefault();openSeat(s.seat_id);}};
+  body.append(row);}
  applySeatFilter();}
-const filterDefs={all:['명단',()=>true],blocked:['기술 장애 확인',s=>s.attention==='blocked'],caution:['주의',s=>s.attention==='caution'],help:['도움 요청',s=>seatHelp(s)>0],approval:['승인 대기',approvalWait],unknown:['확인 불가',s=>s.attention==='unknown'],ok:['정상',s=>s.attention==='ok']};
+const filterDefs={all:['명단',()=>true],blocked:['기술 장애 확인',s=>s.attention==='blocked'],caution:['주의',s=>s.attention==='caution'],help:['도움 요청',s=>seatHelp(s)>0],approval:['승인 대기',approvalWait],unknown:['확인 불가',s=>seatStatus(s).tagCls==='unknown'],ok:['정상',s=>seatStatus(s).tagCls==='ok']};
 function seatVisible(s){const q=opsQuery.trim().toLowerCase();return filterDefs[opsFilter][1](s)&&(!q||s.seat_id.toLowerCase().includes(q)||s.student_id.toLowerCase().includes(q));}
 function applySeatFilter(){if(!opsData||!opsData.seats.length)return;let shown=0,hiddenPicked=0;for(const r of $('ops-rows').children){const s=opsData.seats.find(x=>x.seat_id===r.dataset.seat),v=!!s&&seatVisible(s);r.hidden=!v;if(v)shown++;else if(picked.has(r.dataset.seat))hiddenPicked++;}
  const n=opsData.seats.length,q=opsQuery.trim(),narrowed=opsFilter!=='all'||q;text('ops-shown',(narrowed?n+'명 중 '+shown+'명 표시'+(opsFilter!=='all'?' · ‘'+filterDefs[opsFilter][0]+'’만':'')+(q?' · 찾기 ‘'+q+'’':''):'')+(hiddenPicked?' · 선택한 학생 중 '+hiddenPicked+'명은 지금 목록에서 가려져 있습니다 (조치 대상에는 그대로 포함)':''));
@@ -204,7 +529,7 @@ function applySeatFilter(){if(!opsData||!opsData.seats.length)return;let shown=0
 // Arrow keys move between the seats that are shown; Enter/Space opens the detail (the button's own behaviour).
 function seatKey(e,id){if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;const rows=[...$('ops-rows').children].filter(r=>!r.hidden),i=rows.findIndex(r=>r.dataset.seat===id);const to=e.key==='Home'?0:e.key==='End'?rows.length-1:i+(e.key==='ArrowDown'?1:-1);if(to<0||to>=rows.length)return;e.preventDefault();rows[to].querySelector('.seat-open').focus();}
 $('ops-search').addEventListener('input',()=>{opsQuery=$('ops-search').value;applySeatFilter();});
-function renderSummary(d){const by=k=>d.seats.filter(x=>x.attention===k).length,help=d.seats.filter(x=>seatHelp(x)).length,appr=d.seats.filter(approvalWait).length,sum=$('ops-summary'),had=document.activeElement?.closest?.('#ops-summary')?document.activeElement.dataset.filter:null;sum.replaceChildren();for(const [key,cls,label,v,show] of [['all','','명단 '+d.seats.length+'명',d.seats.length,true],['blocked','blocked','기술 장애 확인',by('blocked'),true],['caution','caution','주의',by('caution'),by('caution')],['help','help','도움 요청',help,help||helpState!=='ok'],['approval','approval','승인 대기',appr,appr],['unknown','unknown','확인 불가',by('unknown'),by('unknown')],['ok','ok','정상',by('ok'),true]]){if(!show&&opsFilter!==key)continue;const li=element('li','',key==='all'?'':key==='ok'?'ok':key==='help'?(v?'caution help':'help'):key==='approval'?'approval':v?cls:'');const b=element('button',key==='all'?label:label+' '+(key==='help'?helpCount(v):v));b.type='button';b.dataset.filter=key;b.setAttribute('aria-pressed',String(opsFilter===key));b.disabled=key==='help'&&!helpKnown();b.onclick=()=>{opsFilter=opsFilter===key?'all':key;renderSummary(opsData);applySeatFilter();};li.append(b);sum.append(li);}sum.hidden=!d.seats.length;if(had)sum.querySelector('[data-filter="'+had+'"]')?.focus();text('nav-help',helpKnown()&&help?String(help):'');}
+function renderSummary(d){const by=k=>d.seats.filter(x=>(k==='ok'||k==='unknown')?seatStatus(x).tagCls===k:x.attention===k).length,help=d.seats.filter(x=>seatHelp(x)).length,appr=d.seats.filter(approvalWait).length,sum=$('ops-summary'),had=document.activeElement?.closest?.('#ops-summary')?document.activeElement.dataset.filter:null;sum.replaceChildren();for(const [key,cls,label,v,show] of [['all','','명단 '+d.seats.length+'명',d.seats.length,true],['blocked','blocked','문제 확인',by('blocked'),true],['caution','caution','주의',by('caution'),by('caution')],['help','help','도움 요청',help,help||helpState!=='ok'],['approval','approval','승인 대기',appr,appr],['unknown','unknown','확인 불가',by('unknown'),by('unknown')],['ok','ok','정상',by('ok'),true]]){if(!show&&opsFilter!==key)continue;const li=element('li','',key==='all'?'':key==='ok'?'ok':key==='help'?(v?'caution help':'help'):key==='approval'?'approval':v?cls:'');const b=element('button',key==='all'?label:label+' '+(key==='help'?helpCount(v):v));b.type='button';b.dataset.filter=key;b.setAttribute('aria-pressed',String(opsFilter===key));b.disabled=key==='help'&&!helpKnown();b.onclick=()=>{opsFilter=opsFilter===key?'all':key;renderSummary(opsData);applySeatFilter();};li.append(b);sum.append(li);}sum.hidden=!d.seats.length;if(had)sum.querySelector('[data-filter="'+had+'"]')?.focus();text('nav-help',helpKnown()&&help?String(help):'');}
 function renderOps(d){opsData=d;if([...ledger.values()].some(e=>e.run!==d.run.class_run_id))ledgerReset(); // another class run: nothing from the previous one is shown against this roster
  if(finishBatch&&finishRun!==d.run.class_run_id)finishForget();
 reconcileSelection(d);const c=d.counts;text('ops-state','수업 '+d.run.class_run_id+(d.run.lesson?' · 강의 '+d.run.lesson.version:'')+' · 운영 집계(학생 평가 아님) · 명단 '+c.total+'명 중 앱 준비 완료 '+c.runtime_ready+' · 조회 '+new Date(d.now).toLocaleTimeString([],{hour12:false})+(d.run.flags.ops_observe?'':' · 관측이 꺼져 있어 새 신호가 들어오지 않습니다')+(d.control?.paused?' · 새 AI 실행 일시정지 중':''));
@@ -213,21 +538,24 @@ reconcileSelection(d);const c=d.counts;text('ops-state','수업 '+d.run.class_ru
  renderSeats(d);
  if(!d.seats.length)seatsEmpty('이번 수업 명단이 비어 있습니다. 아래 ‘이번 수업 명단·관측 설정’에서 명단을 저장하세요.');mergeLegacy(d);renderWrap();renderSelection();refreshBatch();
  if(!$('ops-roster').value)$('ops-roster').value=d.seats.map(s=>s.seat_id+','+s.student_id).join('\n');$('ops-observe').checked=d.run.flags.ops_observe;$('ops-commands').checked=d.run.flags.ops_commands;$('ops-collect').checked=d.run.flags.ops_collect;$('ops-reports-flag').checked=d.run.flags.ops_reports;$('ops-delivery-flag').checked=d.run.flags.ops_delivery;$('ops-delivery').hidden=!d.run.flags.ops_delivery;$('ops-finish').hidden=!d.run.flags.ops_collect;if(opsSeat)openSeat(opsSeat,true);renderHelp();}
-function opsBlank(msg){opsData=null;if(opsSeat&&!$('ops-detail').hidden){for(const b of $('ops-actions').querySelectorAll('button'))b.disabled=true;actionsKey=null;text('ops-detail-status','운영 현황을 다시 확인하지 못해 이 좌석의 조치를 잠시 막았습니다. 쓰던 질문은 그대로입니다.');}seatsEmpty(msg);$('ops-incidents').hidden=true;$('ops-summary').hidden=true;renderSelection();renderHelp();renderWrap();text('ops-state',msg);}
+function opsBlank(msg){document.querySelector('.class-status').open=true;opsData=null;if(opsSeat&&!$('ops-detail').hidden){for(const b of $('ops-actions').querySelectorAll('button'))b.disabled=true;actionsKey=null;text('ops-detail-status','운영 현황을 다시 확인하지 못해 이 좌석의 조치를 잠시 막았습니다. 쓰던 질문은 그대로입니다.');}seatsEmpty(msg);$('ops-incidents').hidden=true;$('ops-summary').hidden=true;renderSelection();renderHelp();renderWrap();text('ops-state',msg);}
 async function opsRefresh(){if(!token||!opsOn||opsBusy)return;if(!board){opsBlank(document.body.classList.contains('is-connected')?'수업 현황을 불러오지 못해 명단을 새로 확인하지 못했습니다 · 이전 현황은 표시하지 않습니다.':'강사 인증이 거부돼 명단을 표시하지 않습니다. 토큰을 확인하세요.');return;}if(!board.session){opsBlank('열린 수업이 없습니다. 수업 열기·종료 화면에서 수업을 연 뒤 다시 확인하세요.');return;}opsBusy=true;const g=generation;try{const r=await fetch(opsBase()+'/status',{cache:'no-store',headers:{authorization:'Bearer '+token}});const d=await r.json();if(g!==generation)return;if(r.ok){renderOps(d);return;}opsBlank(d.reason==='ops_disabled'?'이 서버에는 원격 수업 운영이 켜져 있지 않습니다. 기존 학생 현황은 그대로 사용할 수 있습니다.':d.reason==='run_not_found'?'이번 수업의 운영 명단이 아직 없습니다. 아래에서 명단을 저장하세요.':d.reason==='ops_capability_missing'?'이 강사 토큰에는 원격 운영 권한이 없습니다. 운영자에게 권한이 포함된 토큰을 요청하세요.':r.status===401?'인증이 거부됐습니다. 토큰을 확인하세요.':'운영 현황을 불러오지 못했습니다 ('+r.status+'). 이전 현황은 표시하지 않습니다.');if(d.reason==='run_not_found')$('ops-setup').open=true;}catch(e){if(g===generation)opsBlank('운영 현황 조회 실패 · 이전 현황은 표시하지 않습니다.');}finally{opsBusy=false;}}
-function openSeat(id,keep){const s=opsData?.seats.find(x=>x.seat_id===id);if(!s){opsSeat=null;showDetail(false);return;}if(opsSeat!==id)text('ops-detail-status','');opsSeat=id;text('ops-detail-title',s.seat_id+' · '+s.student_id);const ev=$('ops-evidence');ev.replaceChildren();$('ops-cause').replaceChildren();const tech=element('div','');tech.id='ops-tech';tech.append(element('h3','연결·보고 기록 (현장 확인용)'));const line=(k,v)=>tech.append(element('p',k+': '+v));
+function openSeat(id,keep){const recoveryOpen=keep&&$('ops-cause').querySelector('details')?.open,techOpen=keep&&$('ops-evidence').querySelector('.ops-tech-fold')?.open;const s=opsData?.seats.find(x=>x.seat_id===id);if(!s){opsSeat=null;showDetail(false);return;}if(opsSeat!==id)text('ops-detail-status','');opsSeat=id;text('ops-detail-title',s.seat_id+' · '+s.student_id);const ev=$('ops-evidence');ev.replaceChildren();$('ops-cause').replaceChildren();
+ // #1363 progressive disclosure: the technical connection log is a fold — the first view carries the cause + next step, the technical
+ // report ids stay reachable behind an explicit summary. A <details> element (not innerHTML) preserves the test contract.
+ const techDetails=document.createElement('details');techDetails.className='ops-tech-fold';const techSum=document.createElement('summary');techSum.textContent='연결·보고 기록 (현장 확인용)';techDetails.append(techSum);const tech=document.createElement('div');tech.id='ops-tech';techDetails.append(tech);const line=(k,v)=>tech.append(element('p',k+': '+v));
  line('입장',entryLabels[s.entry_stage]||'확인 불가');line('토큰',s.token?'발급 ID '+s.token.issue_id.slice(0,8)+'… · 만료 '+new Date(s.token.expires_at).toLocaleString()+' · '+({matches_issue:'앱이 같은 발급분을 확인함',other_token:'앱이 다른 토큰을 사용 중',unknown:'앱 확인 보고 없음'}[s.token.app_verified]):'발급 기록 없음 (이 기능을 켠 뒤의 발급만 기록됩니다)');{const rejected=s.entry_stage==='token_rejected'||['auth_expired','auth_revoked','auth_signature','auth_rejected','profile_mismatch'].includes(s.reason);const p=element('p',rejected?'이 학생의 앱이 토큰을 거부당했습니다. ‘연결 다시 확인’으로는 해결되지 않습니다. ':s.token&&s.token.app_verified!=='matches_issue'?'발급은 했지만 학생 앱이 그 토큰을 확인했다는 보고는 없습니다. 발급·전달·확인은 서로 다른 단계입니다. ':'',rejected?'caution':'muted');if(p.textContent){const a=document.createElement('a'),pin=opsData?.run?.lesson;a.href=pin?'/authoring':'/issuer';a.textContent=pin?'수업 참여 코드 발급 화면에서 재발급 (강의 '+pin.version+' 유지)':'학생 초대 화면에서 토큰 발급·재발급';p.append(a,document.createTextNode(' · 토큰은 이 화면·주소·기록에 표시되지 않습니다. 재발급하면 이전 연결 세대의 조치는 실행되지 않습니다.'));ev.append(p);}}line('기기 연결',s.connection?({active:'연결됨',revoked:'해제됨',expired:'기한 만료',used:'확인 불가'}[s.connection.state]||'확인 불가')+' · 세대 '+s.connection.epoch:'없음');
  for(const [k,label] of [['activation','활성화 보고'],['step','단계 보고'],['runtime','수행 보고'],['error','오류 보고'],['upload','기록 보고']]){const v=s[k];if(v)line(label,'앱 관측 '+new Date(v.observed_at).toLocaleTimeString()+' · 서버 수신 '+new Date(v.received_at).toLocaleTimeString()+' · 출처 '+v.actor+(k==='error'?' · 코드 '+(v.code||'없음')+(v.request_id?' · 요청 ID '+v.request_id:'')+(v.cleared?' · 해소됨':''):''));}
- line('단계',stepText(s,true));{const seen=(board?.seats||[]).find(x=>x.user_id===s.student_id);line('활동 (기존 보드)',seen?labels[seen.state]||'확인 불가':'확인 불가');}line('마지막 신호',ago(s.last_received_at)+(s.signal==='stale'?' · 오래됨':''));{const n=seatHelp(s);if(n){const p=element('p','이 학생이 보낸 도움 요청 '+n+'건 — 학습 도움이며 기술 장애가 아닙니다. ','help'),b=element('button','도움 요청 보기');b.type='button';b.onclick=()=>{if(getComputedStyle($('ops-detail')).position==='fixed')closeSeat();openHelpList();};p.append(b);ev.prepend(p);}}renderRecovery(s);renderStepReview(s);renderEvidence(s);ev.append(tech);if(!keep)renderActions(s);else if(actionsKey!==actionsSig(s))renderActions(s,true);}
+ line('단계',stepText(s,true));const lesson=lessonLine(s);if(lesson)tech.append(lesson);{const seen=(board?.seats||[]).find(x=>x.user_id===s.student_id);line('활동 (기존 보드)',seen?labels[seen.state]||'확인 불가':'확인 불가');}line('마지막 신호',ago(s.last_received_at)+(s.signal==='stale'?' · 오래됨':''));{const n=seatHelp(s);if(n){const p=element('p','이 학생이 보낸 도움 요청 '+n+'건 — 학습 도움이며 기술 장애가 아닙니다. ','help'),b=element('button','도움 요청 보기');b.type='button';b.onclick=()=>{if(getComputedStyle($('ops-detail')).position==='fixed')closeSeat();openHelpList();};p.append(b);ev.prepend(p);}}renderRecovery(s);renderStepReview(s);renderEvidence(s);ev.append(techDetails);techDetails.open=!!techOpen;const recoveryFold=$('ops-cause').querySelector('details');if(recoveryFold)recoveryFold.open=!!recoveryOpen;if(!keep)renderActions(s);else if(actionsKey!==actionsSig(s))renderActions(s,true);}
 function renderRecovery(s){const box=$('ops-cause'),g=element('div','','group');g.id='ops-recovery';g.append(element('h3','원인과 조치 결과'));{const why=reasonLabels[s.reason];if(why)g.append(element('p','앱이 보고한 상태: '+why[0]+' — '+why[1],s.attention==='blocked'?'blocked':s.attention==='caution'?'caution':'muted'));}
  const r=s.recommended;if(r&&r.action){const label=recLabel(r.action);g.append(element('p','지금 보이는 원인: '+(r.cause?causeText(r.cause):'확인 불가')+' · 먼저 할 조치: '+label+(whyLabels[r.why]?' — '+whyLabels[r.why]:''),r.family==='shared'?'caution':''));}else g.append(element('p',r?'지금 확인된 원인이 없습니다. 미리보기 문제는 앱이 보고하지 않으므로 학생 요청이 있을 때 ‘미리보기 복구’를 쓰세요.':'먼저 할 조치를 알 수 없습니다 (이 서버 버전은 제시하지 않음).','muted'));
  const c=s.last_command;if(c&&!actionLabelsCoach[c.action]){g.append(element('p','마지막 조치: '+(actionLabels[c.action]||c.action)+' · '+new Date(c.updated_at).toLocaleTimeString()+' · 기기 보고: '+describeTarget(c)),element('p','조치 뒤 검증: '+describeOutcome(c.outcome)+(c.followups==='unknown'?' · 조치 뒤 관측을 읽지 못했습니다':''),c.outcome&&c.outcome.verdict==='resolved'?'':c.outcome&&c.outcome.verdict==='remains'?'caution':'muted'));}
  const k=s.control_outcome;if(k&&k.service!=='never_set')g.append(element('p','새 AI 실행 제어 — 서버: '+(k.service==='blocking_new_runs'?'새 요청 차단 중':'허용 중')+' · 이 기기: '+({applied:'반영 확인',pending:'아직 반영 전',unknown:'확인 불가 (미연결·신호 없음·이전 앱)'}[k.device])+(k.resumed_run==='observed'?' · 재개 뒤 AI 실행 관측됨':k.resumed_run==='not_observed'?' · 재개 뒤 AI 실행은 아직 관측 전':''),'muted'));
- box.append(g);}
+ const fold=document.createElement('details');fold.append(element('summary','원인과 조치 이력'),g);box.append(element('p',seatStatus(s).stage,seatStatus(s).tagCls+' detail-status'),fold);}
 function renderStepReview(s){const r=s.step?.review;if(!r)return;const box=$('ops-evidence'),row=element('div','','group');row.append(element('h3','학생이 마쳤다고 표시한 단계'),element('p','단계 '+(s.step.step_id||'')+(s.step.basis==='previous'?' · 이전 기준의 기록입니다(지금 실행하는 강의 버전의 완료·확인이 아님)':s.step.basis==='unknown'?' · 기준 확인 불가':'')+' · 학생의 자기보고입니다. 확인은 강사가 그 결과를 봤다는 기록이며 점수·수업 완료·발송 승인이 아닙니다. 다음 단계로 넘어가면 새 단계는 다시 ‘확인 전’입니다.','muted'),element('p',({unreviewed:'강사 확인 전',confirmed:'강사 확인함'+(r.reviewed_by?' · '+r.reviewed_by:''),disputed:'추가 관찰 필요'+(r.reviewed_by?' · '+r.reviewed_by:'')}[r.state]||'강사 확인 전')));const can=(opsData.actions||[]).some(a=>a.capability==='coach'&&a.held);if(!can){row.append(element('p','이 강사 토큰에는 확인을 기록할 권한(학습 지원)이 없습니다.','muted'));box.append(row);return;}for(const [state,label] of [['confirmed','결과를 확인했어요'],['disputed','추가 관찰 필요']]){const b=element('button',label);b.type='button';b.disabled=r.state===state;b.onclick=()=>reviewEvidence({ref:r.ref,review_revision:r.revision},state);row.append(b,document.createTextNode(' '));}box.append(row);}
 function renderEvidence(s){const box=$('ops-evidence');const list=s.evidence?.latest||[];box.append(element('h3','확인할 근거'));if(!list.length){box.append(element('p','아직 충분히 보지 못함 — 점수나 미달이 아니라 관찰된 근거가 아직 없다는 뜻입니다.','muted'));return;}box.append(element('p','출처와 확인 상태만 표시합니다. 학생이 쓴 원문은 학생이 공유한 기록에서만 열 수 있습니다. 근거 확인은 발송 승인이나 학습 완료가 아닙니다.','muted'));const can=(opsData.actions||[]).some(a=>a.capability==='coach'&&a.held);for(const e of list){const row=element('div','','group');const src=element('span',sourceLabels[e.source_state]||'미확인',e.source_state==='simulated'||e.source_state==='unverified'?'amber':'');const head=element('p',(evidenceLabels[e.evidence_type]||'근거')+' · 행위자 '+(actorLabels[e.actor]||'미확인')+(e.step_id?' · 단계 '+e.step_id:'')+' · '+new Date(e.observed_at).toLocaleTimeString()+' · 근거 성격 ');head.append(src);if(e.changed!==null)head.append(document.createTextNode(e.changed?' · 변경 전후가 다름':' · 변경 전후 동일'));row.append(head,element('p',reviewLabels[e.review_state]||'강사 확인 전','muted'));if(can){for(const [state,label] of [['confirmed','근거 확인'],['disputed','추가 관찰 필요']]){const b=element('button',label);b.type='button';b.disabled=e.review_state===state;b.onclick=()=>reviewEvidence(e,state);row.append(b,document.createTextNode(' '));}}box.append(row);}}
 async function reviewEvidence(e,state){const g=generation;try{await api(opsBase()+'/evidence/'+encodeURIComponent(e.ref),{method:'PUT',body:JSON.stringify({state,expected_revision:e.review_revision})});if(g===generation){text('ops-detail-status','근거 확인 상태를 저장했습니다. 발송 승인이나 학습 완료와는 별개입니다.');opsRefresh();}}catch(err){if(g===generation)text('ops-detail-status',err.message.includes('다른 변경')?'다른 강사가 먼저 확인 상태를 바꿨습니다. 새로 불러온 뒤 다시 선택하세요.':err.message);}}
-function renderActions(s,live){const act=$('ops-actions'),f=document.activeElement,fk=live&&act.contains(f)?f.dataset.act||f.id:null,range=fk&&f.setSelectionRange?[f.selectionStart,f.selectionEnd]:null;actionsKey=actionsSig(s);let draftNote='';act.replaceChildren();const dk=draftKey(s);const held=k=>(opsData.actions||[]).filter(a=>a.kind===k&&a.enabled&&a.held);const online=s.connection?.state==='active';
+function renderActions(s,live){const moreOpen=!!(live&&$('ops-actions').querySelector('.detail-more')?.open);const act=$('ops-actions'),f=document.activeElement,fk=live&&act.contains(f)?f.dataset.act||f.id:null,range=fk&&f.setSelectionRange?[f.selectionStart,f.selectionEnd]:null;actionsKey=actionsSig(s);let draftNote='';act.replaceChildren();const dk=draftKey(s);const held=k=>(opsData.actions||[]).filter(a=>a.kind===k&&a.enabled&&a.held);const online=s.connection?.state==='active';
  // 확인된 기술 장애가 있으면 복구가 이 화면의 주요 행동이다. 없으면 질문 보내기가 주요 행동이다. 한 화면의 주요 CTA는 하나다.
  // The Service's recommended first action (AT-40) is the one primary, including steps outside the ledger (re-issue, pairing,
 // collection) and "not this PC" for a shared outage. Only a server that names none (no `recommended`) falls back to the old rule.
@@ -243,11 +571,28 @@ const fault=s.attention==='blocked';const rec=s.recommended?s.recommended.action
  if(held('coaching').some(a=>a.action==='mark_checkpoint')){const label=element('label','다시 보게 할 지점');const sel=document.createElement('select');sel.id='ops-checkpoint-step';sel.append(new Option('현재 작업 (단계 지정 없음)',''));for(const id of opsData.run.lesson?.steps||[])sel.append(new Option('단계 '+id,id));label.append(sel);const nl=element('label','짧은 메모 (선택 · 200자 이내)');const note=document.createElement('input');note.maxLength=200;note.id='ops-checkpoint-note';nl.append(note);const kept=checkpointDraft.get(dk);if(kept){if([...sel.options].some(o=>o.value===kept.step))sel.value=kept.step;note.value=kept.note;}sel.onchange=note.oninput=()=>checkpointDraft.set(dk,{step:sel.value,note:note.value});const b=element('button','확인할 지점 표시');b.type='button';b.dataset.act='mark_checkpoint';b.disabled=!online;b.onclick=()=>sendable(s.seat_id,dk,'mark_checkpoint')&&sendCommand('mark_checkpoint',[s.seat_id],'ops-detail-status',{...(sel.value?{step_id:sel.value}:{}),...(note.value.trim()?{note:note.value.trim()}:{})});coach.append(label,nl,b);}
  if(!held('coaching').length)coach.append(element('p','이 토큰에는 학습 지원 권한이 없거나 이 수업에서 조치가 꺼져 있습니다.','muted'));act.append(coach);
  const conn=element('div','','group');conn.append(element('h3','기기 연결'));const pairBtn=element('button','이 좌석의 연결 코드 발급 (10분 · 1회)');pairBtn.type='button';pairBtn.dataset.act='pairing';if(!primaryUsed&&(preferred==='pairing'||!online)){pairBtn.className='primary';primaryUsed=true;}pairBtn.onclick=()=>issuePairing(s.seat_id,pairBtn);conn.append(element('p','코드를 발급하면 이 좌석의 이전 미사용 코드는 무효가 됩니다. 코드는 상태 보고와 본인 조치 확인만 허용하며 AI 사용·기록 열람 권한이 없습니다.','muted'),pairBtn);if(preferred==='pairing'){conn.prepend(element('p','먼저 할 조치: 연결 코드 발급 — 기기 연결이 없어 다른 조치는 전달되지 않습니다.','muted'));act.prepend(conn);}else act.append(conn);
+ discloseActions(act,preferred);act.querySelector('.detail-more').open=moreOpen;
  if(!live){text('ops-detail-status',draftNote);showDetail(true);$('ops-detail-title').focus({preventScroll:getComputedStyle($('ops-detail')).position!=='fixed'});return;}
  // A live redraw (connection, permission/flag or cause changed while the detail is open): say so, keep the typed inputs
  // (restored above from the same-identity drafts) and put focus back where it was, never on the title.
  if(draftNote)text('ops-detail-status',draftNote);else act.prepend(element('p','기기 연결·조치 권한·원인이 바뀌어 지금 할 수 있는 조치를 다시 표시했습니다. 쓰던 질문·메모는 그대로입니다.','muted'));showDetail(true);
- if(fk){const t=act.querySelector('[data-act="'+fk+'"]')||(fk.startsWith('ops-')?$(fk):null);if(t&&!t.disabled){t.focus();if(range&&t.setSelectionRange)t.setSelectionRange(...range);}else $('ops-detail-title').focus({preventScroll:getComputedStyle($('ops-detail')).position!=='fixed'});}}
+ if(fk){const t=act.querySelector('[data-act="'+fk+'"]')||(fk.startsWith('ops-')?$(fk):null);if(t&&!t.disabled){for(let d=t.closest('details');d;d=d.parentElement?.closest('details'))d.open=true;t.focus();if(range&&t.setSelectionRange)t.setSelectionRange(...range);}else $('ops-detail-title').focus({preventScroll:getComputedStyle($('ops-detail')).position!=='fixed'});}}
+// Keep the recommended action visible. Secondary controls retain their handlers, confirmations and drafts.
+function discloseActions(act,preferred){
+ const main=act.querySelector('.primary');const more=document.createElement('details');more.className='detail-more';more.append(element('summary','다른 조치·안내'));
+ const lead=element('div','','detail-next');
+ if(main){
+  lead.append(element('h3','다음 행동'));
+  if(preferred==='send_question'){const label=act.querySelector('#ops-question')?.closest('label');if(label)lead.append(label);}
+  if(preferred==='issuer'){main.title=main.textContent;main.textContent='참여 코드 재발급';lead.append(element('p','새 코드를 학생에게 전달한 뒤 앱 연결을 확인하세요.','muted'));}
+  if(preferred==='pairing'){main.title=main.textContent;main.textContent='기기 연결 코드 발급';lead.append(element('p','10분 동안 한 번 사용합니다. 이전 미사용 코드는 무효가 됩니다.','muted'));}
+  const confirm=main.nextElementSibling?.classList.contains('confirm')?main.nextElementSibling:null;
+  if(main.dataset.act&&actionImpact[main.dataset.act])lead.append(element('p',actionImpact[main.dataset.act],'muted'));
+  lead.append(main);if(confirm)lead.append(confirm);
+ }
+ if(!main){const guidance=[...act.querySelectorAll('p')].find(p=>p.textContent.includes('이 좌석에서 먼저 할 개별 조치는 없습니다'));if(guidance)lead.append(guidance);}
+ while(act.firstChild)more.append(act.firstChild);act.append(lead,more);
+}
 function renderControl(){const c=opsData?.control;const can=(opsData?.actions||[]).length&&opsData.run.flags.ops_commands;$('ops-control').hidden=!c||!can;if(!c)return;text('ops-control-state','새 AI 실행: '+(c.paused?'일시정지 중':'허용 중')+' · 기기 적용 '+c.devices.applied+' / 적용 대기 '+c.devices.pending+' / 확인 불가 '+c.devices.unknown+' (서버는 즉시 적용 · 기기 수치는 앱이 보고한 것만)'+(!c.paused&&c.control_revision>0?' · 재개 뒤 AI 실행이 관측된 좌석 '+(opsData.seats||[]).filter(x=>x.control_outcome&&x.control_outcome.resumed_run==='observed').length+'석':''));$('ops-pause').textContent=c.paused?'새 AI 실행 재개':'새 AI 실행 일시정지';}
 $('ops-pause').onclick=()=>{const c=opsData.control;text('ops-pause-impact',c.paused?'이 수업 학생들의 새 AI 요청을 다시 허용합니다. 학생이 다시 질문하면 같은 수업·활동에서 이어집니다. 앱이 질문을 대신 다시 보내지는 않습니다.':'이 수업 전체 학생의 새 AI 요청만 멈춥니다. 이미 응답을 받고 있는 요청은 끊지 않습니다. 같은 작업이 도구 실행 뒤 이어서 보내는 다음 AI 요청은 새 요청이므로 서버가 받지 않습니다. 대화·입력 중인 글·파일은 그대로이고 파일 편집·저장·중지·내보내기는 계속 됩니다. 오프라인이거나 구버전 앱은 ‘확인 불가’로 남으며 적용된 것으로 세지 않습니다.');$('ops-pause-confirm').hidden=false;$('ops-pause-go').focus();};
 $('ops-pause-cancel').onclick=()=>{$('ops-pause-confirm').hidden=true;$('ops-pause').focus();};
@@ -795,4 +1140,24 @@ $('feedback').onsubmit=async e=>{e.preventDefault();if(!selected)return;const id
 $('report').onclick=()=>{if(!board){text('status','현황을 먼저 불러오세요.');return;}const body={generated_at:new Date().toISOString(),cohort,board,shares:shareRows,note:'운영 메타데이터. 대화 원문과 학습 점수는 포함하지 않음.'};const url=URL.createObjectURL(new Blob([JSON.stringify(body,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='classroom-status.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 {const mo=new MutationObserver(()=>syncPrimary());for(const id of CONFIRMS)mo.observe($(id),{attributes:true,attributeFilter:['hidden']});}
 setInterval(()=>{if(!document.hidden)refresh();},10000);window.addEventListener('pagehide',reset);
-</script></body></html>
+</script>
+<script>
+// Progressive-disclosure hook (#1363). Toggles body classes so first-view CSS can hide the action row until a real selection
+// is present, and collapse the help region when the queue is empty. Uses MutationObserver — no innerHTML mutation.
+(function(){
+  var help=document.getElementById('ops-help-list'),t=document.getElementById('ops-help-toggle');
+  if(help&&t){var upd=function(){document.body.classList.toggle('help-active',help.children.length>0||t.getAttribute('aria-expanded')==='true');};upd();new MutationObserver(upd).observe(help,{childList:true});new MutationObserver(upd).observe(t,{attributes:true,attributeFilter:['aria-expanded']});}
+  // Track selection state from #ops-selection copy ("선택 N / 전체" → has-selection). Also react to any checkbox toggle for immediacy.
+  var sel=document.getElementById('ops-selection'),legacy=document.getElementById('legacy-layout');
+  var syncSel=function(){var s=(sel&&sel.textContent||'');document.body.classList.toggle('has-selection',/선택\s*\d+\s*\/\s*전체\s*\d+\s*석/.test(s));};
+  if(sel){syncSel();new MutationObserver(syncSel).observe(sel,{childList:true,subtree:true,characterData:true});}
+  document.addEventListener('change',function(e){var t=e.target;if(t&&t.matches&&t.matches('#ops-seats .pick input'))setTimeout(syncSel,0);});
+  // Legacy shares/students panel: fold behind an explicit disclosure so it does not compete with the operational board on first view.
+  if(legacy&&legacy.parentNode&&!document.getElementById('legacy-wrap')){
+    var det=document.createElement('details');det.id='legacy-wrap';det.className='legacy-wrap';
+    var sum=document.createElement('summary');sum.textContent='공유된 도움 요청·이전 학생 활동 (필요할 때 펼치기)';det.append(sum);
+    legacy.parentNode.insertBefore(det,legacy);det.append(legacy);
+  }
+})();
+</script>
+</body></html>
