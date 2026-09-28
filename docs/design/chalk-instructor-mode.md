@@ -4,6 +4,7 @@
 - 이슈: #1296 (상위 #1283)
 - 요구: SUB-01~11 · UX-04 · UX-05 · RH-02 · GEN-06
 - 입력: T0 확인(2026-09-24), [E2-1 설계](chalk-generator-and-tools.md)
+- 규칙: plan.md R1(2026-09-28) — 스택 파일 최소 수정. 스택 줄 삭제 0. 스택 파일 수정 PR 은 TJ 알림 코멘트(서명 포함)
 
 ---
 
@@ -11,7 +12,7 @@
 
 | # | 사실 | 출처 |
 |---|---|---|
-| F1 | 구독 실행(`localRuntime`)은 세 조건이 모두 맞아야 켜진다: 앱 이름 `HypeProof Studio Dev` · `HPS_DEV_RUNTIME=1` · 서버 주소가 `http://localhost` 계열(아니면 오류). 셋 다 PR #1041 에서 왔다 | T0-c, `localRuntime/index.ts:18-30` |
+| F1 | 구독 실행(`localRuntime`)은 세 조건이 모두 맞아야 켜진다: 앱 이름 `HypeProof Studio Dev` · `HPS_DEV_RUNTIME=1` · 서버 주소가 `http://localhost` 계열(아니면 오류). 셋 다 PR #1041 에서 왔다 | T0-c, `localRuntime/index.ts:19-39` |
 | F2 | 구독 경로에서 앱 기록(spool)에 **남는 것**: 질문(`recordPrompt`), 응답(`recordResponse`). **안 남는 것**: 모델 이름·사용량(`recordUsage` 미호출), 도구 호출·결과(관측 기록에만 감) | T0-a `[코드 추적]` |
 | F3 | `claudeClient` 는 턴이 끝나면 `{model, usage}` 를 돌려준다. 지금은 메모리(`sdkTurnTotal`)에만 둔다 | T0-a, `claudeClient.mjs:105` |
 | F4 | 로컬 서버는 Cloudflare 로그인 없이 돈다. 서버 모델 호출은 `ANTHROPIC_PROXY_URL` 을 로컬 가짜 서버로 돌리면 키 없이 `completed` 가 된다 | T0-b · T0-e |
@@ -25,6 +26,7 @@
 
 - 강사 모드 = **서버가 확인한 강사**일 때만. 앱 쪽 `canAuthor()`(서명 검증 없는 해석)는 버튼을 보일지 정하는 데만 쓰고, 강사 모드를 여는 결정은 서버 확인 뒤에 한다
 - 서버 확인: issuer 토큰으로 `GET /admin/chalk/whoami` (새 경로, issuer 전용, 인증은 `instructor-auth.ts` 의 `authorizeIssuer` 만 쓴다). 200 이면 강사 모드를 열 수 있다. 학생 토큰은 401/403 이다
+- 강사 자격(issuer 토큰)은 `ISSUER_TOKEN_KEY`(`context.secrets`)에 저장한다. `TOKEN_KEY` 는 학생 토큰 전용이다(JY 2026-09-28). 리허설 중에는 `TOKEN_KEY` 에 학생 리허설 토큰이 앉고 `ISSUER_TOKEN_KEY` 는 그대로 있다
 - 🔴 학생 토큰(`TOKEN_KEY` 에 학생 코드만 있음)으로는 강사 모드 UI·Chalk 도구·구독 연결이 **하나도** 열리지 않는다
 
 ### 1-2. 무엇이 달라지나
@@ -69,7 +71,7 @@
 | 내 Codex 구독 | Codex `model/list` 응답 | 같은 방식 |
 | 서버 | 서버가 허용한 목록(서버 AI 강사용 경로가 돌려줌) | 목록 밖이면 서버가 거부 → 오류 + 이전 모델 |
 
-- UI: 기존 `<select>`(`ChatPanel.tsx:731`)는 그대로 두고 **옆에 입력 칸을 더한다.** 강사 모드에서는 `<select>` 목록 출처를 연결별로 바꾼다(학생 모드는 지금처럼 `model_selection.choices`). 두 입구는 같은 설정 한 칸을 바꾼다. 구현 E4-3(#1298)
+- UI: 기존 `<select>`(`ChatPanel.tsx:939`)는 그대로 두고 **옆에 입력 칸을 더한다.** 강사 모드에서는 `<select>` 목록 출처를 연결별로 바꾼다(학생 모드는 지금처럼 `model_selection.choices`). 두 입구는 같은 설정 한 칸을 바꾼다. 구현 E4-3(#1298)
 - `/model` 슬래시 명령은 만들지 않는다
 - 채팅창 위 띠에 늘 보인다: `연결: 내 Claude 구독 · 모델: sonnet`
 - 턴마다 쓴 모델을 기록에 남긴다(4절 `model`). 구독이 돌려준 실제 모델 이름(F3)을 우선하고, 없으면 요청한 이름
@@ -88,11 +90,12 @@ F2 대로 지금 spool 에는 모델·도구 호출이 없다. **새로 잡아�
 
 ### 4-2. 올리는 곳
 
-- `POST /admin/chalk/transcripts` (issuer 전용, 새 경로). 한 번에 턴 한 개
+- `POST /admin/chalk/transcripts` (issuer 전용, 새 경로). 인증은 `ISSUER_TOKEN_KEY`(보관된 강사 자격) — 리허설 중 `TOKEN_KEY` 에는 학생 리허설 토큰이 있다. 한 번에 턴 한 개
 - 본문: `{ turn_id, course_id?, rehearsal_id?, mode: 'design'|'rehearsal', connection: 'claude-sub'|'codex-sub', model, usage?, user_text, assistant_text, tools: [{name, input_sha256, input_len, status}], at }`
 - 서버는 받은 기록에 **"앱이 올린 기록"** 표시를 붙여 저장한다. 서버가 직접 본 요청 기록(스택의 `authoring_rehearsal_turns`)과 구별된다. 결정 8 (나)로 이 기록도 확정 근거가 된다(E6-6)
 - 올리기 실패 시: 앱이 로컬에 쌓아 두었다가 다시 보낸다(spool 과 같은 폴더의 대기열). 강사 모드를 끌 때 남은 것이 있으면 알린다
 - 🔴 학생 모드 대화는 이 경로로 올리지 않는다(학생 기록은 기존 서버 경로가 남긴다)
+- **서버 경로 리허설**: 스택 `authoring_rehearsal_turns`는 본문을 저장하지 않는다(`0026:7-8`). `messages.ts:310` · `chat.ts:669`의 `recordRehearsalRequest` 옆에서 본문을 함께 저장한다(E4-7 ②, 개정 R1). 🔴 **리허설 입력은 강사가 한다(아동 대화가 아니다, JY 2026-09-28).** 보관 기간·접근 권한은 스택 기록 규칙을 따른다
 
 ### 4-3. 저장
 
