@@ -2,6 +2,7 @@ import { registerLocalReview } from "./localReviewPanel";
 import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
 import { callChalkTool, chalkToolsEnabled } from "./chalk/tools";
 import { fetchProfileResult } from './proxyClient';
+import { ClassroomHelpHost } from './classroomHelpHost';
 import { ClassroomOpsHost } from './classroomOpsHost';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
 import { imageAttachPrompt } from "./coachIdentity.ts";
@@ -43,6 +44,7 @@ import type { ResolvedProfile } from "./protocol";
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
 let providerRef: ChatPanelProvider | null = null;
+let spoolRef: SessionSpool | null = null;
 /** #596 — re-entry lock on the upload command (banner + palette clicked at once → no double upload). */
 let uploadInFlight = false;
 
@@ -131,6 +133,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // On shutdown, flush the last events left in the queue (best-effort — a crash is
     // covered by the line-at-a-time append).
     context.subscriptions.push({ dispose: () => void spool.flush() });
+    spoolRef = spool;
     // #596 — leftovers banner at startup (once per activation). The session-end
     // banner only fires on the proxy runtime's session_window, but the main runtime
     // is agent-sdk (session 1 review F6), so that path alone never reaches anyone —
@@ -189,10 +192,22 @@ export async function activate(context: vscode.ExtensionContext) {
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
     readSpool: (sinceMs) => provider.opsReadSpool(sinceMs),
+    readCollection: (sinceMs, identity) => provider.opsReadCollection(sinceMs, identity),
     recoverPreview: () => provider.opsRecoverPreview(),
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
+  // #751 native help: the learner's help requests to the instructor of their live class connection (ADM-03/05, AT-47).
+  // Drafts and requests live one file family per record under globalStorageUri (shared by every window; globalState is one
+  // object per window and loses records written in two windows at once). globalState is only read to move the old store.
+  provider.helpSource = new ClassroomHelpHost(context.globalState, path.join(context.globalStorageUri.fsPath, "classroom-help"), {
+    token: async () => (await context.secrets.get(TOKEN_KEY)) ?? "",
+    connection: () => classroomOps.helpConnection(),
+    base: () => vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1").replace(/\/$/, ""),
+    history: () => provider.getHistorySnapshot(),
+    post: (view) => provider.postHelp(view),
+    log: (line) => console.log(line),
+  });
   context.subscriptions.push(classroomOps.onInboxChanged(() => { void provider.postInbox(); startPage.inboxChanged(); }));
   void classroomOps.resume();
   context.subscriptions.push(
@@ -212,6 +227,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.classroomDisconnect", () => classroomOps.disconnectInteractively()),
     vscode.commands.registerCommand("hypeproof-chat.classroomNotes", () => classroomOps.showCoachingNotes()),
     vscode.commands.registerCommand("hypeproof-chat.classroomCollectionConsent", () => classroomOps.collectionConsentInteractively()),
+    vscode.commands.registerCommand("hypeproof-chat.classroomApproveArtifact", () => provider.approveArtifactInteractively()),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
@@ -1035,6 +1051,10 @@ async function applyTestBackdoors(
 
 export function deactivate() {
   providerRef = null;
+  // #751 U1b — a normal shutdown ends the session with a `session_close` line, so a later collection can prove where it ended.
+  // VS Code waits for this promise (bounded); a crash leaves the session without it, and that end stays unproven.
+  const s = spoolRef; spoolRef = null;
+  return s?.close("shutdown");
 }
 
 export { TOKEN_KEY };

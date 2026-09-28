@@ -45,8 +45,8 @@ export interface ChalkToolDefinition {
 
 // ─── 강사 모드 판정 ────────────────────────────────────────────────────────
 
-// #1297 (E4-2): issuer 토큰 존재 + 클레임 해석으로 판정한다.
-// E4-3 (#1296)에서 GET /admin/chalk/whoami 서버 확인으로 교체한다.
+// #1297 (E4-2): first-pass filter — token presence + unverified claim.
+// Final gate is server-verified whoami in chatPanelProvider (#1298, E4-3).
 import { ISSUER_TOKEN_KEY } from "../mintStudentTokenHelpers.ts";
 import { looksLikeIssuerTokenUnverified } from "../chatPanelHelpers.ts";
 

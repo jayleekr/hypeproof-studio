@@ -2363,6 +2363,42 @@
         },
         {
           "path": "e2e/classroom/mac-window.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom.ts"
+        },
+        {
+          "path": "worker/test/classroom-help.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomHelp.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomHelpHost.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomHelpStore.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/HelpRequest.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-help.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-help-host.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-help-store.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/fixtures/help-store-writer.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-help.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-help-windows.mjs"
         }
       ]
     },
@@ -3156,6 +3192,33 @@
           "path": "docs/design/chalk-instructor-mode.md",
           "section": "## 6. 디자인 기준 (UX-04 · UX-05)"
         }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-INSTRUCTOR-MODE",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-DES-CHALK-INSTRUCTOR"
+      ],
+      "sources": [
+        { "path": "worker/src/routes/chalk-instructor.ts" },
+        { "path": "extensions/hypeproof-chat/src/chalk/instructorMode.ts" }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-INSTRUCTOR-MODE",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-INSTRUCTOR",
+        "ST-IMP-CHALK-INSTRUCTOR-MODE"
+      ],
+      "sources": [
+        { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
+        { "path": "worker/test/chalk-instructor-brief.test.mjs" },
+        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" }
       ]
     },
     {

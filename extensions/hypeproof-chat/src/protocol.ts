@@ -106,6 +106,15 @@ export interface ChatConfig {
   coach: CoachInfo;
   profile: ResolvedProfile | null;
   update?: UpdateOffer | null;             // #72 — auto-update banner state
+  // #1298 — true when the active token verified as an issuer via GET /admin/chalk/whoami.
+  // Drives rendering of InstructorChatPanel (header band + unrestricted model select).
+  isInstructor?: boolean;
+  // #1298 — versioned instructor system prompt text from GET /admin/chalk/instructor-brief.
+  // Injected as system prompt for instructor-mode chat turns. Absent = use no extra system prompt.
+  instructorBrief?: string;
+  // #1298 — human-readable connection label shown in the instructor band.
+  // "내 Claude 구독" | "내 Codex 구독" (local runtime) or "서버" (proxy/worker path).
+  instructorConnection?: string;
 }
 
 /**
@@ -350,6 +359,8 @@ export type WebviewMessage = (
   | StartRequest
   | { type: "ready" }
   | { type: "selectModel"; alias: string }
+  // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
+  | { type: "selectModelDirect"; modelId: string }
   | { type: "selectEffort"; value: CourseEffort }
   | { type: "refreshEffort" }
   | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[]; /** #751 U3 — instructor prompts imported into the draft this message was sent from (bodiless). */ imports?: Array<{ object_id: string; revision: number; hash16: string }> }
@@ -387,6 +398,16 @@ export type WebviewMessage = (
   | { type: "inboxRequest" }
   | { type: "inboxOpen"; objectId: string; generation: number }
   | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
+  // #751 native help — every message names the learner-in-class key the view was drawn under; the host ignores a mismatch.
+  | { type: "helpRequest" }
+  | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
+  | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
+  | { type: "helpCancel"; key: string }
+  | { type: "helpSend"; key: string; requestId: string; consent: boolean }
+  | { type: "helpRetry"; key: string }
+  | { type: "helpDiscard"; key: string }
+  | { type: "helpConfirm"; key: string; id: string; revision: number }
+  | { type: "helpWithdraw"; key: string; id: string }
   | { type: "traceTrialStart"; taskLabel?: string }
   | { type: "traceTrialEnd"; trialId: string }
   | {
@@ -434,6 +455,7 @@ export type HostMessage = (
   | { type: "config"; config: ChatConfig }
   /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
   | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
+  | { type: "helpState"; help: import("./classroomHelp").HelpView }
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }

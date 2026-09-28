@@ -140,6 +140,8 @@ npm --prefix chalk run typecheck
 | AT-46 | ADM-10/11 · RM-3/5 · ADM-13 · AE-09/12/26/33 · VER-01 · INT-CO-04(제안) | 수업 **설정**(확정 강의 버전)의 대상 배포: 선택/비선택, 실행 중 변경과 두 번 연속 변경·다른 창의 다중 요청, 옛 key·옛 turn id 재사용, 헤더 없는 App, 두 runtime, 전환 커밋 경계의 경합, 재발급·좌석 교체·늦은 응답, OFF·전역 OFF·읽기 장애(전환 전/후/도중)·종료·권한 폐기·정책 축소, 실행 전에 거절된 요청, 기준 변경과 보고서 경로, 회수와 복귀, 미지원 App | 진행 중 turn은 **Service가 승인한 snapshot**으로 끝나고(이후 전환 횟수와 무관 · 수명 30분 · 연장 불가) 새 turn은 현재 binding으로만 승인됨, App(`/v1/profile`)·Service(gate)·turn 행·요청 헤더가 같은 key, `적용됨`은 **정규화된 wire가 upstream 응답을 받은 기록**뿐(gate 통과·`/v1/profile`·preflight·`count_tokens`·거절된 요청은 아님 · 시도/상류 실패/미확인을 구분), OFF와 장애가 좁혀진 설정을 넓히지 않고 모르는 상태에서는 보류(실행 전이면 입력 복원 · 일부 실행됐으면 부분 실행 표시 · 자동 재전송 0), 비선택 학생의 실행·profile 불변, 이전 기준의 자기보고·강사 확인을 새 기준 완료로 상속 0, **섞인 기준의 회수 입력이 평가·승인·전달되지 않음**(단일 기준은 그대로 처리), 회수가 설정을 되돌리지 않고 복귀는 새 요청+새 적용 증거 | Service + App + 합성 upstream + 로컬 workerd D1 + UI e2e + 실제 Mac ([시나리오 S1~S19·M2](#remote-management-u3-plan-20260921)) |
 | AT-40 | ADM-10 · RM-4/5 | 원인(토큰·연결·runtime·preview·업로드·일시정지) × 먼저 할 조치, Chalk에서 눌러 실제 창으로 확인. 깨뜨릴 가정: 기기의 `succeeded`·HTTP 2xx·`all_succeeded`가 해결이다 / 진단 완료가 해결이다 / profile 재확인이 SDK 복구다 / 서버 health가 미리보기 복구다 / 미연결·구버전·만료·거절·중복·지연·관측 불가도 성공 수에 든다 / 다른 좌석·다른 연결·옛 로그인 세대·조치 전의 정상 신호가 근거가 된다 | 원인마다 허용 목록의 조치 하나(또는 원장 밖의 기존 강사 절차, 또는 ‘이 PC가 아님’)가 먼저 제시됨. 판정은 해결 확인·문제 남음·실행만 됨·미확인·실행 안 됨 중 하나이고 `resolved`는 그 명령에 연결된 근거로만. 선택 좌석만 적용·비선택 불변. 대화·미전송 초안·첨부·예약 문장·파일 보존(기준값은 조치 **전**), 자동 모델 호출·자동 재전송 0 | 순수 함수 + Service + 기기 host + workerd D1 + UI e2e + 실제 Mac |
 | AT-41 | ADM-10 · RM-5 | 회수·배포·복구의 결과를 한 화면에서 같은 단계 어휘로 표시, 부분 결과 | `접수 → 수신 확인 전 → 기기 수신 → 적용 / 실패 / 미확인 / 만료·대상 변경`이 세 흐름에 공통, ‘서버 검증됨’·‘보관함 반영’·복구 결과 코드를 한 성공 수로 합치지 않음, `leased`/`offered`를 수신으로 표시하지 않음 | UI e2e + 실제 Mac |
+| AT-47 | ADM-03/05/07/14 · DES-04/09 | Studio 도움 요청: 수신자 도출(연결 없음·배정 강사·다른 강사 입력·강사 KV 철회·D1 fence·읽기 장애), 학생이 쓴 질문만/고른 한 턴, 동의 전 미리보기, 응답 유실 재시도·기간/내용이 바뀐 재시도, 수업 A 종료 뒤 B에서 A의 id 재사용, 이전 수업 공유 철회, 오래된 revision, 좌석 교체·학습자 교체, 만료, 미성년 코호트, 비선택 학생 A2 · **U4(Codex 재현 F1~F3):** 응답 대기 중 학습자·연결 교체(정리 저장·미리보기·보내기·확인·철회), 같은 학습자의 응답 순서 역전, 미리보기 뒤 늦은 전송·같은 id 재시도·토큰 재발급/만료·이미 지난 동의 시각·늦춘 시각, 배정 확인과 INSERT 사이의 연결 철회·좌석 교체·강사 fence·더 새 연결·D1 수업 종료·같은 id 동시 쓰기, 두 창·두 학습자의 기기 저장 · **U4 저장 보완:** 저장 전파 지연(0·50·150ms) 안의 두 창 동시 쓰기, 여러 프로세스의 동시 쓰기·같은 요청 동시 표시, 쓰기 경계에서 죽은 창·늦게 깬 창, 확장 호스트 재시작·앱 재시작, 24시간 정리, globalState 이관(동시·반복·부분 실패) | 수신자는 Service가 활성 수업·살아 있는 좌석·활성 연결의 발급 강사로만 도출(학생이 입력하지 않음 · 자격 증명 비노출), 배정과 다른 수신자·회차·연결은 쓰기 전 409, 같은 id는 같은 동의 범위에서만 같은 결과, A의 기록이 B의 새 요청이 되지 않음, 미리보기·동의 전 저장 0, 강사 답변≠해결(학생만 확인), 피드백은 대화·모델에 들어가지 않음, 읽기 실패는 확인 불가, 다른 학생·수업·연결의 초안·요청·피드백 노출 0, A2의 내용·상태·열람 0, 미성년은 모든 도움 경로 403 · **U4:** 교체 뒤 앞선 학습자의 그림·알림이 한 번도 게시되지 않음, 저장 만료 = 미리보기에 보인 서명 시각(또는 더 이른 토큰 만료), 시각이 지난 동의·서명 없는 시각 저장 0, 배정이 쓰기 순간에 바뀌면 403/409·저장 0, 동의하지 않은 요청이 `sending`/`unknown`이 되거나 POST되지 않음, ‘보냈습니다’가 답변 옆에 남지 않음 · **저장 보완:** 다른 학생·회차·창의 초안과 prepared/sending/unknown 요청 손실 0, 응답 불명 요청은 id·정확한 내용·동의한 종료 시각 그대로 같은 요청으로만 재시도, 옛 저장 이관 뒤 옛 값 제거·새 기록 덮어쓰기 0 | Service(`worker/test/classroom-help.test.mjs`) + App 단위(`classroom-help.smoke.mjs`) + **실제 host(`classroom-help-host.smoke.mjs`)** + **기기 저장(`classroom-help-store.smoke.mjs`, 실제 디렉터리·자식 프로세스)** + workerd D1(`classroom-ops-d1.test.mjs`) + 실제 Mac(`e2e/classroom/mac-help.mjs` · 두 창 `e2e/classroom/mac-help-windows.mjs`) ([실행 기록](#native-help-run-20260922) · [U4 보완](#native-help-u4-20260922) · [저장 보완](#native-help-storage-20260922)) |
+| AT-48 | ADM-03/06/13/14 · RM-2 | 회수 **종류**(수업 기록 / 학생 프롬프트 / 학생이 승인한 결과물)와 같은 학생·같은 회차 창의 **재시작 전 세션**: 한 학생·여러 학생 선택, 정상 종료·강제 종료·확장 호스트 재시작, 쓰이던 마지막 줄, 잘린 프롬프트, 못 읽은 세션, 같은 PC 다른 학생·앞 수업 기록, 승인/미승인 판, 이전 앱, 요청 밖 줄을 보내는 기기, 부분 실패 후 재시도, 중복 확인, 철회, 현재 선택 vs 직전 실행 | 요청한 종류의 원래 줄만 저장(요청 밖 원문 0, 위반은 격리 + 삭제), 세션마다 자기 session_id·seq 유지, 끝·시작이 증명된 경우만 `complete`, 모든 사유 표시, 다른 학생·앞 수업 0, 이전 앱은 거절(전체 기록 0), 비선택 0, 평가·모델·메일 0, 철회 뒤 저장 0, 직전 실행은 대상·시각과 함께 현재 선택과 분리 | Service + App + workerd D1 + UI e2e + 실제 Mac 1대 ([실행 기록](#remote-management-u1b-run-20260922)) |
 
 | ID | 뜻 | 상태 (2026-09-21 현재) | 근거 위치 |
 |---|---|---|---|
@@ -155,6 +157,8 @@ npm --prefix chalk run typecheck
 | AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 로컬 인수(2026-09-21)** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려 → 수정(`9d85718`)·회귀 추가 → **조율 측(Codex)이 독립 경합 재현과 실제 Chalk→Mac A1 선택 배포·회수·기기 회수 확인·초안 보존을 직접 확인해 로컬 범위를 인수**(그 증거는 조율 측 소유의 공통 git-dir `remote-classroom-evidence/management-20260921/u2-codex-reaccept-*-bdebdd3.*`·`u2-deferred-boundary-check-9d85718.log`에 있고 이 문서 작성 세션이 다시 실행한 것이 아니다). `bdebdd3`은 그 위의 문서·추적 커밋. **인수 범위 밖으로 남은 NOT RUN:** 같은 grant의 자동 재연결, Windows, 학교망, staging/production D1, 실제 기기 2대 이상, owner의 INT-CO-04 승인·운영 활성화. 로컬 인수는 PR 병합·운영 승인이 아니다 | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
 | AT-45 | 수업 프롬프트 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·브라우저·실제 Mac(실제 마우스 입력). 독립 검토 뒤 P2~P5·P7을 브라우저와 실제 host에서 마무리. 운영·Windows·학교망 NOT RUN | [실행 기록](#remote-management-u3-run-20260921) · [검토 보완 기록](#remote-management-u3-review-20260921) |
 | AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac(agent-sdk 창 2개 + proxy-runtime 창). 독립 검토의 Service 결함 6건·화면 결함 보완, S3·S4·S9·S10·S13ⓒ를 실제 경로로 마무리. S15의 구 App 실물·p95·plan NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) · 기준 판정은 [요청 단위의 식별 연결](#remote-management-u3-basis-identity-20260921)로 다시 닫음 | 같은 곳 |
+| AT-47 | Studio 도움 요청 → Chalk 응답 → 학생 확인 | **구현 · 로컬 실행 PASS · 인수 전** — Service 11건·App 단위 7건·실제 Mac 창 H1~H9. U4 보완(Codex F1~F3 재현 수정): Service 16건·App 단위 7건·실제 host 11건·workerd D1·실제 Mac 재실행(`d82c695`, H1~H9+H9a PASS) — [U4 보완](#native-help-u4-20260922). 저장 보완(`fe37a72`): 기기 저장 13건·실제 host 18건(W-residual → 판정 S1)·실제 Mac 한 대 두 창 W0~W5·H1~H9+H9a 재실행 PASS — [저장 보완](#native-help-storage-20260922). Codex 재검토 전. Windows·학교망·hosted D1/R2·실제 아동/보호자 동의·운영 NOT RUN | [실행 기록](#native-help-run-20260922) |
+| AT-48 | 종류별 회수 · 재시작 전 세션 | **구현 · 로컬 실행 PASS · 인수 전(2026-09-22)** — Service+App+실제 spool 9 · workerd D1 · 브라우저(선택·결과 카드·명단·배포) · 실제 Mac 1대 M0~M9(정상 종료·강제 종료·확장 호스트 재시작, 한 학생·여러 학생). 여러 실제 PC·Windows·학교망·운영 D1/R2·실제 모델/메일·아동 동의 NOT RUN, 원문 열람·기준별 보고서 분할은 구현하지 않음 | [실행 기록](#remote-management-u1b-run-20260922) |
 
 **옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
 
@@ -1158,3 +1162,99 @@ NOT RUN: 앱의 도움 요청 입구, 실제 강사·학생, Windows, 학교망,
 **실제 Mac 창 (`HPS_U4_SCENARIOS=AT41`, R0 + AT41 + 수업 마무리) — PASS, 남겨 둠.** 소스 `441e185`(제공된 `/manage` 바이트 = 이 소스 파일, 러너가 대조), 확장 빌드 `9f54cc7`(이후 확장 소스 변경 없음 — 러너가 대조), 셸 0.1.56 복사본(이 브랜치가 나갈 판 아님), Agent SDK 0.3.207, APFS 복제 devhost `classroom-devhost-at41-u4c`, 새 프로필·HOME, 포트 18891/18892·debug 9491, 보이는 강사 Chromium. 진단·회수·공지 세 카드 뒤 수업 마무리: 미리 확인은 카드·요청 0, 실제 카드는 ‘명단 전체 4명’, A1은 실제 앱의 기록이 그 카드에서 `[적용 (서버 검증)]`, A2·A3·A4는 `제외 · 동의 없음`, A2 대상·실행 0, 앞선 선택 회수 카드 불변, 학생 작업 파일 변화 없음. 증거: 공용 git-dir `remote-classroom-evidence/management-20260921/instructor-ui-review/at41-u4c/`(`manifest.json` · `browser/` 합성 · `mac/` 실제 창).
 
 **NOT RUN.** 수업 설정(U3) 결과 카드의 실제 창(`mac-lesson-settings.mjs`는 있으나 결과 카드를 확인하지 않음) 및 브라우저 시험의 설정 배포 카드 · 숨은 탭·12건 초과는 브라우저에서만 · 실제 창의 여러 세션 회수 · Windows · 학교망 · 복수 실제 기기 · staging/운영 D1·R2 · 실제 모델 · 메일. 화면 문구는 사용자 시각 검토 전이며 이 기록은 승인이 아니다.
+
+
+<a id="remote-management-u1b-run-20260922"></a>
+
+### U1b — 종류별 회수와 재시작 전 세션 (AT-48) · 실행 기록 · 2026-09-22 (로컬 합성 + workerd D1 + 브라우저 + 실제 Mac 1대 · 인수 전 · 운영 아님)
+
+계약: [요구 문서 U1b 절](../requirements/classroom-admin.md#remote-management-u1b-20260922). 기준 `f32a262`(Draft #1241 head) 위의 브랜치 `feat/751-u1b-collection-kinds`. 증거 사본: 공용 git-dir `remote-classroom-evidence/management-20260921/u1b/`(`mac-run/`·`browser-before/`·`browser-after/`).
+
+**깨뜨릴 가정(AT-48).** 종류는 표시 이름일 뿐이다 / 선택하지 않은 종류의 원문도 같이 간다 / 재시작 전 세션은 버려지거나, 이어 붙여 하나의 완전한 seq처럼 보인다 / 같은 PC의 다른 학생·앞 수업 기록이 섞인다 / 강제 종료·찢어진 마지막 줄·잘린 프롬프트·못 읽은 세션도 `complete`다 / 종류를 모르는 이전 앱이 전체 기록을 보낸다 / 회수가 평가·모델 호출·메일로 이어진다 / 철회 뒤에도 남는다 / 현재 선택 밑의 문장이 이전 조치의 결과로 읽힌다.
+
+| 층 | 무엇을 실행했나 | 결과 |
+|---|---|---|
+| Service + 실제 App freezer/uploader + 실제 SessionSpool(임시 디렉터리) | `worker/test/classroom-ops-collect-kinds.test.mjs` — 정상 종료 1회로 나뉜 두 세션 + 같은 PC 다른 학생 세션 + 앞 수업 세션 + 수업 30분 전(이전 세션) 기록. 종류 계약·요청 해시(U1 해시 불변)·App/Service 종류 규칙 일치(행렬), prompts/artifacts/record의 실제 R2 내용(심은 문자열 대조), 비선택 0, 강제 종료(끝 미증명)·쓰이던 꼬리·잘린 프롬프트·못 읽은 세션, 요청 밖 줄을 보낸 기기 → `kind_violation` 격리 + 그 판의 R2 삭제(음성 대조: 삭제 전에는 저장돼 있음), 색인 위장 → `index_mismatch`, 종류 배치에 /2·U1 배치에 /3 거부, ts 없는 줄, 중복 재실행 전송 0, 업로드 중 철회 → 저장 0, 비용 계측 | 9/9 PASS |
+| 발견·수정 | 하네스를 /3에 맞추다 ts·seq 없는 줄(이전 spool)이 색인의 `null`과 줄의 `undefined` 비교로 **격리되는 결함**을 발견해 비교를 고치고 양성 대조를 추가 | 수정됨 |
+| 기존 Service | `npm --prefix worker run test:classroom-ops`(선택 회수 14 · 회수 9 · 기기 snapshot 4 · 보고서 · 삭제 · schema 등가 0011–0025 포함) · `test:classroom-ops:d1`(실제 로컬 workerd D1: 0025 포함 migration 재적용, **종류 행이 배치와 한 조건부 batch로 기록되고 거절된 요청은 종류 행 0**) | PASS |
+| App | 확장 `tsc --noEmit`, `npm test`(smoke 110개 파일 — spool 회전·봉인에 `session_close`가 붙는 새 계약으로 기존 3개 단언 갱신) | PASS |
+| 브라우저 (Chalk 실제 페이지) | `test:classroom-ops-selection` 8 · `-roster` 7(번들된 실제 host가 /3로 회수, 수업 마무리 → 평가 경로 회귀) · `-results` 18(AT-41 카드: /3 사유·세션 표시로 기대 갱신) · `-distribution` 7 · `ops` · `-help` · `-lesson-settings` 5, chalk `npm test`·typecheck | PASS |
+
+**선택 영역 화면 (합성 미리보기 24석, 1280×720 원본 뷰포트, `e2e/classroom/ui-review-preview.mjs`).** 같은 데이터·같은 동작으로 전후를 쟀다. 첫 학생 행의 문서상 y: 처음 728 → **722**, ‘A2 회수 뒤 A1 선택’ 상태 769 → **722**(직전 실행이 별도 줄로 옮겨 가 선택 영역 높이가 늘지 않음). 전: A1 선택 바로 아래 ‘요청을 접수했습니다…’(A2의 요청)가 대상 없이 붙어 있었다(`browser-before/02-…`). 후: ‘현재 선택 · … — 선택: A1’과 ‘직전 실행 · 시각 회수(학생 프롬프트) 요청 접수 → A2 (지금 선택과 다른 대상)’가 라벨·색으로 나뉜다(`browser-after/04-…`). 도움 요청 목록 등 선택 영역 밖은 바꾸지 않았다 — 사용자 보드의 y641은 도움 요청 수에 따라 달라지며 이번 변경의 몫은 위 차이뿐이다.
+
+**실제 Mac (`e2e/classroom/mac-collect.mjs`) — PASS.** 소스 `a35d700`(확장 소스는 reinject 기준 `34c5ea7`과 같음을 러너가 대조 · 이후 커밋은 문서만), 셸 0.1.56 복사본(이 브랜치가 나갈 판 아님), Agent SDK 0.3.207, 제공된 `/manage` 바이트 = 소스 파일(해시 대조), 앱 복사본은 도움 저장 보완의 멈춘 복사본을 **rename**해 reinject(셸 재복사 없음, 그쪽 증거는 제자리). 포트 18901/18902/9501, 새 HOME·user-data. 강사는 보이는 Chromium 1280×720에서 클릭.
+
+| # | 한 일 | 관측 |
+|---|---|---|
+| M0 | 실제 창 연결·앱에서 동의·Agent SDK 턴 1 | 연결·동의 토스트 |
+| M1 | 앱 명령으로 v1 승인, 파일을 v2로 고친 뒤 v2 ‘승인 취소’ | 두 판 모두 spool에 기록, 승인은 v1만 |
+| M2 | ⌘Q 정상 종료 → 재실행 → 재연결 → 턴 | 이전 세션 마지막 줄 `session_close`, 같은 학생 세션 2개 |
+| M3 | **한 학생** A1 · 학생 프롬프트 | 서버 검증 · `complete` · 세션 2개(둘 다 시작·끝 확인) · 받음 프롬프트 2 · 보내지 않음 AI 응답 2. R2에 두 프롬프트만, 응답·페이지·다른 학생(`OTHER-LEARNER-MAC-SECRET`)·앞 수업 기록 없음 |
+| M4 | **여러 학생** A1+A3+A4 · 승인 결과물 (A2는 동의·연결됐지만 미선택) | A1: 승인 결과물 1(v1) · 승인 안 된 결과물 1은 보내지 않음(v2 R2 없음) · A3(이전 앱): ‘기기가 거절함 (이 앱 버전은 종류별 회수를 모름 — 앱 업데이트 필요)’, 실행 0·객체 0 · A4: 제외 |
+| M5 | A1 · 수업 기록 전체 · ‘요청’ 더블클릭 | batch 1개. 기록에 두 세션의 응답·두 판 포함, 다른 학생·앞 수업 없음. 회수 중 모델 호출 0 |
+| M6 | R2 쓰기 1회 거절 → 확장 호스트 재시작(같은 연결) | ‘[미확인] 재전송 대기 … (offline_pending)’ → 재시작 뒤 **같은 동결 사본(revision 1)**이 같은 batch에서 서버 검증 |
+| M7 | 턴 1 → SIGKILL → 재실행 → 턴 → 프롬프트 회수 | 세션 4개, 강제 종료된 세션 ‘끝 미확인’, 결과 `range_unknown · earlier_session_end_unproven` — ‘수업 전체의 기록이 아님’ |
+| M8 | 선택을 A2로 바꿈 | ‘직전 실행 … → A1 (지금 선택과 다른 대상)’이 현재 선택 A2와 나뉘어 표시 |
+| M9 | 앱에서 동의 철회 → A1 회수 확인 | ‘학생이 철회함 · 회수하지 않음’, 요청 버튼 비활성, A1의 저장 객체 0 |
+| 음성 | 전체 실행 동안 | A2 실행·명령 대상·객체 0 · 평가 입력 0 · 발송 사건 0 |
+
+만든 것(실물 아님): 계정·수업·토큰, 모델 공급자 대역, 창의 spool 폴더에 심은 두 세션(같은 PC 다른 학생 / 이 학생의 앞 수업), R2 쓰기 1회 거절, 합성 좌석 A2/A3/A4.
+**NOT RUN:** 여러 실제 PC(한 Mac이다) · Windows(spool 읽기·파일 잠금) · 학교망 · staging/운영 D1·R2 · 실제 모델 · 메일 · Keychain 설치 앱 · 실제 학생·보호자 동의(#1175) · 이 Mac에서의 새 회차·기기 교체(in-process 시험으로만 — 앞 수업 창 배제, 이전 연결의 동결 사본 미전송) · 원문 열람(구현하지 않음) · 기준별 보고서 분할(구현하지 않음). 화면 문구는 사용자 시각 검토 전이다.
+
+## Studio 도움 요청 실행 기록 · 2026-09-22 (AT-47)
+
+<a id="native-help-run-20260922"></a>
+계약: [요구 문서](../requirements/classroom-admin.md#native-help-20260922). 합성 계정·합성 모델 공급자. 아래 PASS는 이 표에 적힌 범위만의 증거다.
+
+| 층 | 무엇을 실행했나 | 결과 |
+|---|---|---|
+| Service | `node --experimental-strip-types --experimental-sqlite worker/test/classroom-help.test.mjs` — 연결 전 수신자 없음·쓰기 0, 배정 강사 도출(자격 증명 비노출), 다른 수신자/회차/연결 409, 질문만 요청·비밀 가림·토큰 만료 상한, 응답 유실 재시도와 기간·내용·종류 변경 409, 강사 목록·열람·CAS·학생만 확인, **수업 A 종료 → B 시작 후 A의 id 재시도 409 `class_changed`**·B 큐에 A 없음·이력에서 A 철회, KV 철회·D1 fence·저장소 장애(503)·좌석 교체, 만료, 운영 OFF의 웹 동작 유지, 미성년 403 | 11/11 PASS. 음성 대조: 회차 일치·만료 범위·수신자 검사·fence 검사를 하나씩 빼면 해당 시험이 실패함을 확인 |
+| App 단위 | `extensions/hypeproof-chat/test/classroom-help.smoke.mjs` — 학습자 결속, 초안/요청 키, 내용 구성·자르기, 선택 가능한 턴(연결 이후만), 전송 가능 판정, POST 결과 분류, 카드(답변≠해결), 보관 정리 | 7/7 PASS |
+| 실제 Mac | `e2e/classroom/mac-help.mjs`(포트 18921/18922, 디버그 9521) — 공식 0.1.56 셸 복사본 + 현재 확장 + 실제 Agent SDK, 실제 Chalk `/manage`, Service router + SQLite. H1 입구·수신자, H2 동의 미리보기, H3 전송, H4 강사 큐·열람·응답(선택 유지·A2 불변), H5 같은 창의 피드백(대화·모델·초안·파일 불변), H6 학생 확인 → `학생 해결 확인`, H7 응답 유실 → 같은 id 확인·1행, H8 철회 → 강사 404, H9 좌석 교체 → 초안 숨김 → 학습자 3 재입장 시 초안·요청·피드백·이전 턴 0 | 결과·화면은 공통 git-dir 증거 폴더 `remote-classroom-evidence/management-20260921/native-help/` |
+
+만든 것(실물 아님): 계정·수업·토큰, 모델 공급자, A2의 요청(Service 학생 경로), 응답 유실 1건(로컬 HTTP 앞단이 저장 후 연결을 끊음), 학습자 3의 입장(개발 토큰 파일+앱 재시작 — 시작 화면 코드 입력은 이 실행에 없음).
+NOT RUN: 실제 모델, Windows, 학교망, hosted/staging/운영 D1·R2, 실제 아동과 보호자 동의(#1175), 여러 물리 기기, Keychain 기반 설치 앱, 두 창이 같은 학습자 초안을 동시에 편집하는 경우(기기 저장은 마지막 쓰기가 남음).
+
+### U4 보완 · 2026-09-22 (Codex 재현 F1~F3)
+
+<a id="native-help-u4-20260922"></a>
+기준 `6e5915e`(PR #1238 head)에서 Codex가 재현한 세 결함을 고친 보완 브랜치 `fix/751-native-help-u4-boundaries`. 계약은 [요구 문서](../requirements/classroom-admin.md#native-help-20260922)의 ‘쓰기 시점의 배정’·‘동의한 종료 시각’·‘늦은 응답·학습자 교체’·‘여러 창의 기기 저장’ 행.
+
+| 재현 | 수정 전 (`6e5915e`) | 수정 후 |
+|---|---|---|
+| F1 Codex `native-help-host-review.mjs`(실제 host, 정리 저장 지연 중 A→B 교체) | FAIL_REPRODUCED — B 그림 뒤 A의 `PRIVATE-A-FEEDBACK` 재게시 | PASS — B 그림 뒤 게시 0 (스크립트 무수정, 실행 위치만 새 worktree) |
+| F2 Codex `native-help-service-review.mjs` 첫 검사(미리보기 5분 뒤 전송) | FAIL_REPRODUCED — 저장 만료가 미리본 시각보다 300초 김 | PASS — 차이 0초. **스크립트 2줄 수정본**(`*.u4.mjs`): 새 계약에서 미리보기가 서명된 종료 시각을 받아 오는 호출(`?request_id&duration_minutes`)과 두 번째 요청 id의 서명 취득. 판정식은 그대로 |
+| F3 같은 스크립트 둘째 검사(배정 확인 뒤·INSERT 전 연결 철회) | FAIL_REPRODUCED — 201, 1행 | PASS — 403 `not_connected`, 0행 |
+
+| 층 | 무엇을 실행했나 | 결과 |
+|---|---|---|
+| 실제 host | `extensions/hypeproof-chat/test/classroom-help-host.smoke.mjs` — `classroomHelpHost.ts`를 esbuild로 묶어 VS Code 확장 globalState 모델(창별 캐시, 확장 전체 객체 쓰기, 다른 창으로 전파)과 합성 Service로 실행. C1 정상 흐름·N1 답변 뒤 ‘보냈습니다’ 제거·F1 정리 저장 지연 교체·F1-order 같은 학습자 응답 역전(+webview 수신 경계)·F1-send/preview/actions 교체 뒤 늦은 응답·W1 두 창 두 학습자·W2 같은 학습자 두 창의 동의 혼선·W3 같은 초안 두 창·W-residual 전파 지연 안 동시 쓰기(이 브랜치에서는 판정 없는 특성 기록이었다 — **assert를 넣으면 FAIL, 저장 보완에서 판정 S1로 바꾸고 해결**) | 수정 후 11/11 PASS. **같은 시험을 `6e5915e`의 host에 돌리면 3/11**(C1·W3·W-residual만 통과; F1-order는 host 부분은 통과하고 webview 수신 경계가 없어 실패) |
+| Service | `worker/test/classroom-help.test.mjs` — 기존 11건 + F2 4건(서명 시각 발급·토큰 상한, 5분 늦은 전송·재시도·같은 id 다른 기간 409·웹 호환, 늦춘 시각·다른 id/기간/학습자·envelope 없음·지난 시각·지난 뒤 재시도, 토큰 재발급 짧게/길게·만료 토큰 401) + F3 1건(연결 철회·좌석 교체·강사 fence·더 새 연결·D1 수업 종료를 마지막 읽기 직후 주입, 대조군 저장, 같은 id 동시 POST 1행) | 16/16 PASS. 음성 대조: INSERT guard를 `1 OR guard`로 바꾸면 F3가 `revoked: 201`로 실패, 저장 만료를 옛 식으로 되돌리면 F2가 `stored 300s past`로 실패 |
+| workerd D1 | `worker/test/classroom-ops-d1.test.mjs` — 서명 시각이 D1에 그대로 저장, 재시도 200, 늦춘 시각 400, **KV는 수업 중인데 D1 회차 창만 닫힌 상태에서 조건부 INSERT 자체가 403 `no_active_class`·0행** | PASS |
+| 영향 범위 | worker `npm test`(전체), `test:classroom:d1`, `test:classroom-ops:d1`, 확장 typecheck·`npm test`, e2e `test:classroom`·`test:classroom-ops`·`test:classroom-ops-help`·`test:classroom-ops-results` | 모두 PASS |
+
+| 실제 Mac | `e2e/classroom/mac-help.mjs` 재실행 — 이전 실행이 쓰던 생성 앱 복사본(공식 0.1.56 셸 복사, Agent SDK 0.3.207)을 **옮겨 재사용**하고 `mac-devhost.mjs reinject`로 현재 확장만 다시 넣음(셸 재복사 없음, 번들 해시 대조·ad-hoc 재서명·새 manifest). 소스 `d82c695`. H1~H9 기존 흐름 + **H2/H3 늦은 전송**(미리보기 66초 뒤 동의·전송 → 저장 만료 = 미리보기에 보인 서명 시각, 차이 0초) + **H5 화면 위 답변**(답변과 ‘해결됐어요’가 webview 뷰포트 안이고 중심점 최상위, ‘보냈습니다’ 알림 없음) + **H9a 인계 중 늦은 응답**(학습자 1의 철회 응답을 Service 처리 뒤 붙잡아 둔 사이 ‘수업 연결 끊기’ → 응답 도착 후 10초 동안 알림·카드·학습자 1 문자열 0, 철회 자체는 Service에 반영) | PASS. 시도 1은 러너 계측 오류(Node ICU ‘AM 09:15’ vs 앱 ‘오전 09:15’ — 값은 맞음)로 실패, 시도 2는 **실제 결함**을 잡음: 도움 패널(45vh 스크롤 상자)에서 답변 카드가 새 질문 양식 아래라 패널을 열어도 답변과 ‘해결됐어요’가 가려짐/화면 밖. 수정: 이번 수업의 요청 목록을 양식 위로(`d82c695`). 시도 3에서는 답변이 처음부터 화면 안이라 휠 조작이 필요 없었다(`wheel_steps: []`) — 캡처 `help-05-learner-feedback.png`. 두 시도의 실패 증거도 보존 |
+
+증거(공통 git-dir): `remote-classroom-evidence/management-20260921/native-help/u4fix/` — `before/`(수정 전 Codex 재현·host 시험 결과), Codex 재현 수정 후 결과, `host-checks-after.json`, `mac-run-d82c695/`(result.json·화면·manifest·run.log·시도 1/2), `takeover/`(인수 시 이전 runtime 기록).
+
+남은 한계(시험으로 확인한 것): 같은 학습자의 같은 초안을 두 창에서 고치면 글자는 마지막 저장이 남는다(요청·동의 내용은 불변, W3). ~~두 창이 저장 전파 지연 안에 동시에 쓰면 한쪽 쓰기가 사라질 수 있다~~ — 이 브랜치의 결함이었고 [저장 보완](#native-help-storage-20260922)에서 기록별 파일 저장으로 해결했다. KV 활성 세션·KV 강사 철회는 D1 INSERT와 원자적이지 않다.
+
+
+### 저장 보완 · 2026-09-22 (두 창의 기기 저장)
+
+<a id="native-help-storage-20260922"></a>
+기준 `bced496`(PR #1239 head) → 브랜치 `fix/751-native-help-storage`, 소스 `fe37a72`. 계약은 [요구 문서](../requirements/classroom-admin.md#native-help-20260922)의 ‘여러 창의 기기 저장’ 행. 결함: globalState는 창마다 확장 전체 객체를 쓰므로 두 창이 전파 지연 안에 쓰면 다른 학생의 초안이 사라졌다. 해결: 기록별 파일 + `link()` compare-and-swap(U2 보관함 index와 같은 방식).
+
+| 층 | 무엇을 실행했나 | 결과 |
+|---|---|---|
+| 수정 전 | Codex `native-help-storage-retention.mjs`(W-residual에 A·B 초안 보존 assert만 추가)를 `bced496` 실제 host로 | FAIL 10/11 — 전파 50ms에서 A 초안 소실 (재현 기록 보존) |
+| 기기 저장 | `extensions/hypeproof-chat/test/classroom-help-store.smoke.mjs` — 실제 디렉터리. M1 자식 프로세스 6개×25회 동시 쓰기, M2 한 프로세스 두 창, C1 5개 프로세스가 같은 요청을 동시에 `sending`으로(정확히 1개), C2 새 미리보기로 바뀐 요청은 표시 안 됨, K 임시 파일 뒤·link 뒤에서 SIGKILL, L1 늦게 깬 writer 재판단, R1 재시작 읽기, P1/P2 24시간 정리(지금 학습자·그 사이 고친 기록 보존·오래된 삭제 표시 제거), I1/I2 이관(최신·삭제 기록 덮어쓰기 0, 만료 제외, 반복·동시·부분 실패 후 재실행), F1 0600/0700·찢어진 최신 버전 건너뜀 | 13/13 PASS. 음성 대조: `link`를 덮어쓰는 `rename`으로 바꾸면 C1·P2 FAIL |
+| 실제 host | `classroom-help-host.smoke.mjs` — 같은 공유 디렉터리를 쓰는 창별 host + globalState 모델(전체 객체 쓰기·전파). 기존 C1·N1·F1류·W1~W3 + **S1(W-residual의 판정판, 전파 0·50·150ms)** · S2 A 보내는 중/응답 불명 + B 미리보기·초안 동시 · S3 새 창(재시작)에서 초안·응답 불명 요청 복원, 새 미리보기 거절, 재시도는 같은 id·같은 내용 1회 · S4 `sending` 상태로 죽은 창 → 다음 창이 같은 요청 1회, 죽은 창의 늦은 503은 무효 · MIG1 두 창 동시 이관·오래된 사본의 재이관이 새 초안을 덮지 않음·옛 값 제거·다른 globalState 키 유지·로그에 내용/키 없음 · MIG2 부분 실패 시 옛 값 유지 → 다음 새로고침에 완료 | 18/18 PASS (특성 기록 없음 — 모든 항목이 판정) |
+| 영향 범위 | 확장 `tsc --noEmit`, 확장 `npm test`(smoke 110개 파일 + review 테스트) | PASS |
+| 실제 Mac (기존 흐름) | `e2e/classroom/mac-help.mjs` 재실행 — 이전 검토 runner(64987/65567)의 증거를 보존·정지한 뒤 그 생성 앱 복사본(공식 0.1.56 셸, Agent SDK 0.3.207)을 옮겨 `reinject`(셸 재복사 없음). H1~H9+H9a, **H5 답변과 ‘해결됐어요’가 화면에 보임(캡처)** | PASS (`fe37a72`) |
+| 실제 Mac (두 창) | `e2e/classroom/mac-help-windows.mjs` — **한 Mac의 한 앱, 두 창**(확장 호스트 2개, 같은 user-data-dir·globalStorage), 학습자 A(A1)·B(A2)가 각 창 팔레트에서 연결. W1 두 창 동시 초안 5회(B가 0~120ms 늦게): 매회 두 초안 모두 디스크에, 확장의 `state.vscdb` 행에 도움 키 없음 · W2 A 동의·전송(POST를 Service 앞에서 붙잡음) 중 B 미리보기 → A `unknown`·정확한 내용·동의한 종료 시각, B 미리보기 유지, Service 저장 0 · W3 A 창 확장 호스트 재시작 → 응답 불명 요청 복원 → ‘다시 확인’이 같은 id·내용·종료 시각으로 1회 저장 · W4 B가 본 미리보기 그대로 저장 · W5 두 창 동시 초안 → 앱 완전 종료·재실행(두 좌석 새 연결) → 각 창에 자기 초안 복원 | PASS (`fe37a72`) |
+
+만든 것(실물 아님): 계정·수업·토큰, 두 번째 창의 학습자 B(이 하네스는 secret을 창별 메모리에 두므로 창마다 자기 학습 토큰을 읽는다 — 설치 앱은 Keychain 토큰 하나를 창들이 공유, NOT RUN), Service 앞에서 붙잡았다가 503으로 답한 POST 1건. 앱 완전 재시작 뒤에는 연결 자격 증명이 메모리에만 있어 두 좌석을 새로 연결했다 — 그래서 **응답 불명 요청의 복원은 확장 호스트 재시작(W3)과 host S3/S4로**, 앱 재시작은 초안 복원(W5)으로 확인했다.
+NOT RUN: 여러 물리 PC(한 Mac 두 창이다), Windows(link/rename·백신), 학교망, hosted D1/R2, 실제 모델·메일, Keychain 기반 설치 앱, 정전 중 쓰기, 미성년·보호자 동의(#1175).
+
+증거(공통 git-dir): `remote-classroom-evidence/management-20260921/native-help/storage/` — `before/`(수정 전 재현), `store-checks.log`·`host-checks.{log,json}`·`extension-npm-test-fe37a72.log`, `mac-run-fe37a72/`(`help/` H1~H9 결과·화면, `help-windows/` 두 창 결과·화면, manifest·run log), `takeover-u4fix-runner/`(정지 전 이전 runner 기록).

@@ -18,7 +18,7 @@ import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth'
 import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
 import { COMMAND_TTL_MS, ID_RE, MAX_SEATS, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
-import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, collectRequestCanonical, collectStatus, normalizeCollectRequest, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
+import { CONSENT_BASES, PURPOSES, SNAPSHOT_SCHEMA_V3, V3_FILE_RE, collectRequestCanonical, collectStatus, normalizeCollectRequest, normalizeKinds, snapshotFileSpec, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest, verifyCollection, type CollectKind } from '../lib/classroom-collect';
 import { collectOutcome } from '../lib/classroom-recovery';
 import { ERASURE_RETRY_STEPS_MS, MAX_ERASURE_ATTEMPTS, eraseLearnerCollection } from '../lib/classroom-erasure';
 import { opsEnabled } from './classroom-ops';
@@ -148,9 +148,11 @@ async function ownItem(c: any, g: Grant, batchId: string, now: number) {
 
 classroomCollectApp.put('/snapshots/:batch/:revision/:filename', bodyLimit({ maxSize: 8 * 1024 * 1024 + 1024, onError: (c) => c.json({ error: 'file too large' }, 413) }), async (c) => {
   const g = c.get('grant'), now = Date.now(), db = c.env.HPS_DB, revision = Number(c.req.param('revision')), filename = c.req.param('filename');
-  const spec = Object.prototype.hasOwnProperty.call(SNAPSHOT_FILES, filename) ? SNAPSHOT_FILES[filename]! : null;
-  if (!spec || !Number.isSafeInteger(revision) || revision < 1 || revision > 1000) return c.json({ error: 'allowed file name and revision required' }, 400);
+  if (!(snapshotFileSpec(filename, false) || V3_FILE_RE.test(filename)) || !Number.isSafeInteger(revision) || revision < 1 || revision > 1000) return c.json({ error: 'allowed file name and revision required' }, 400);
   const item = await ownItem(c, g, c.req.param('batch'), now); if (item instanceof Response) return item;
+  // U1b — the names a batch accepts follow what it asked for: a kinds batch stores part files only, an older batch the two legacy files.
+  let asked: BatchScope; try { asked = await batchScope(db, item.batch_id); } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  const spec = snapshotFileSpec(filename, !!asked.kinds); if (!spec) return c.json({ error: 'this file is not part of what this collection asked for', reason: 'file_not_in_scope' }, 400);
   const body = await c.req.arrayBuffer();
   if (!body.byteLength || body.byteLength > spec.maxBytes) return c.json({ error: 'empty or oversized file' }, 413);
   const sha = await sha256Bytes(body), snap = await db.prepare('SELECT state,files_json FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<{ state: string; files_json: string }>();
@@ -180,11 +182,16 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   const g = c.get('grant'), now = Date.now(), db = c.env.HPS_DB, revision = Number(c.req.param('revision'));
   const item = await ownItem(c, g, c.req.param('batch'), now); if (item instanceof Response) return item;
   const m = validateManifest(await json(c)); if (!m.ok) return c.json({ error: m.error, reason: 'manifest_invalid' }, 400);
-  const snap = await db.prepare('SELECT state,receipt_id,manifest_digest,integrity,coverage FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<Record<string, string>>();
+  // U1b — a kinds batch is sealed only as schema /3 and an older batch only as /1–/2: a manifest never widens or narrows what was asked.
+  let asked: BatchScope; try { asked = await batchScope(db, item.batch_id); } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  const v3 = m.value.schema === SNAPSHOT_SCHEMA_V3;
+  if (!!asked.kinds !== v3) return c.json({ error: v3 ? 'this collection did not ask for kinds; the whole record is sealed as schema /2' : 'this collection asked for kinds; it is sealed as schema /3', reason: v3 ? 'schema_not_in_scope' : 'kinds_schema_required' }, 409);
+  const snap = await db.prepare('SELECT state,receipt_id,manifest_digest,integrity,coverage,files_json FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<Record<string, string>>();
   if (!snap) return c.json({ error: 'nothing was uploaded for this revision', reason: 'manifest_only' }, 409);
   // The binding is part of what was sealed: the same bytes under another binding are another manifest.
-  const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), m.value.binding ?? null]));
+  const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), (v3 ? m.value.collection : m.value.binding) ?? null]));
   if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, ...(item.state === 'verified' && item.receipt_id === snap.receipt_id && item.reason ? { coverage_reason: item.reason } : {}), replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
+  if (v3) return sealCollection(c, g, item, revision, m.value.files, m.value.collection!, digest, snap.files_json ?? "[]", asked, now);
   // Re-hash what the Service actually holds. The device's claim is only what it is compared against.
   let coverage = 'sequence_unavailable', coverageReason = '', problem = '', malformed = 0, metaText = '', sessionId = '';
   for (const f of m.value.files) {
@@ -219,7 +226,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   }
   const receipt = crypto.randomUUID(), inputRevision = (item.input_revision ?? 0) + 1;
   // A collect-only batch ends at the verified receipt: it queues no evaluation input, so collecting can never start an evaluation by itself.
-  let feedsEvaluation: boolean; try { feedsEvaluation = (await batchScope(db, item.batch_id)).mode === 'finish'; } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  const feedsEvaluation = asked.mode === 'finish';
   // #751 U3 — under how many lesson bases was this input made? Computed in SQL INSIDE the seal batch (atomic with it) wherever
   // the U3 tables exist. If they cannot be read the seal fails and the device retries: there is no seal without a basis row.
   // The outbox row is still written: the report pipeline turns a non-single basis into a HELD job that the reviewer can see.
@@ -237,6 +244,52 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   ]);
   return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}), input_revision: inputRevision }, 201);
 });
+
+/**
+ * U1b — seal a /3 snapshot. The Service re-hashes every part file it holds and reads the parts itself (verifyCollection):
+ * whose they are, whether every sent line is an indexed line of an asked kind, and how far each session's window is proven.
+ * A line of a kind that was NOT asked for is never kept: the revision's stored bytes are deleted and the item is quarantined.
+ * A collect-only batch never queues evaluation input, whatever it holds.
+ */
+async function sealCollection(c: any, g: Grant, item: Record<string, any>, revision: number, files: Array<{ name: string; bytes: number; sha256: string }>, col: import('../lib/classroom-collect').CollectionBinding, digest: string, storedJson: string, asked: BatchScope, now: number): Promise<Response> {
+  const db: Db = c.env.HPS_DB, key = (name: string) => snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, name), texts = new Map<string, string>();
+  let problem = '';
+  for (const f of files) {
+    const obj = await c.env.HPS_TRACES.get(key(f.name));
+    if (!obj) { problem = 'file_missing'; break; }
+    const bytes = await obj.arrayBuffer();
+    if (bytes.byteLength !== f.bytes || (await sha256Bytes(bytes)) !== f.sha256) { problem = 'hash_mismatch'; break; }
+    texts.set(f.name, new TextDecoder().decode(bytes));
+  }
+  const lesson = parseLesson(g.lesson_json);
+  const v = problem ? { problem } : await verifyCollection(texts, col, { student: g.student_id, cohort: g.cohort_id, profile: g.profile_id, class_run_id: g.class_run_id, batch_id: item.batch_id, seat_id: g.seat_id, purpose: item.purpose, notice_version: item.notice_version, activity: lesson ? { course_id: lesson.course_id, version: lesson.version } : null, run_starts_at: g.run_starts, upload_until: item.upload_until, kinds: asked.kinds! });
+  if ('problem' in v) {
+    const state = ['file_missing', 'hash_mismatch'].includes(v.problem) ? 'incomplete' : 'quarantined';
+    // Content that was not asked for is not held "for a person to look at": it is removed now. Everything else stays as before.
+    let removed = 0;
+    if (v.problem === 'kind_violation') {
+      for (const f of (JSON.parse(storedJson || '[]') as Array<{ name: string }>)) { await c.env.HPS_TRACES.delete(key(f.name)); removed++; }
+      await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(item.batch_id, g.student_id, revision).run();
+    }
+    await db.batch([
+      db.prepare("UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified'").bind(state, v.problem, now, item.batch_id, item.seat_id),
+      audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_' + state, { batch_id: item.batch_id, revision, problem: v.problem, ...(removed ? { removed_files: removed } : {}) }, now),
+    ]);
+    return c.json({ error: 'snapshot did not verify', reason: v.problem, state }, 422);
+  }
+  const receipt = crypto.randomUUID(), inputRevision = (item.input_revision ?? 0) + 1;
+  const u3 = await basisTables(db); if (u3 === 'unreadable') return c.json({ error: 'the lesson basis of this input cannot be established right now; nothing was sealed — retry', reason: 'lesson_basis_unreadable' }, 503, { 'retry-after': '30' });
+  const current = col.parts.find((p) => p.current) ?? col.parts[0]!;
+  await db.batch([
+    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now })] : []),
+    db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, v.coverage, receipt, now, item.batch_id, g.student_id, revision),
+    db.prepare("UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(v.reason, digest, v.coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
+    // range_json holds the extent the instructor view reads — numbers, times, flags and kinds. The parts' session ids stay in the part files.
+    db.prepare("INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'bound',?,?,0,?) ON CONFLICT DO NOTHING").bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', current.spool_session_id, JSON.stringify(col.activity ?? null), JSON.stringify(v.extent), now),
+    audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage: v.coverage, kinds: col.kinds, sessions: col.parts.length, lines: v.extent.lines, included: v.extent.included, ...(v.reason ? { coverage_reason: v.reason } : {}) }, now),
+  ]);
+  return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage: v.coverage, ...(v.reason ? { coverage_reason: v.reason } : {}), coverage_reasons: v.reasons, input_revision: inputRevision }, 201);
+}
 
 // ── instructor (collect capability) ──
 export const classroomCollectTeacher = new Hono<{ Bindings: Env }>();
@@ -265,17 +318,21 @@ async function teacher(c: any): Promise<{ auth: IssuerAuthz; run: Record<string,
  * collect-only batch queue an evaluation (reproduced 2026-09-21, management-20260921/scope-read-failure-check.mjs).
  */
 export class CollectScopeUnavailable extends Error { reason: 'scope_unavailable' | 'scope_invalid'; constructor(reason: 'scope_unavailable' | 'scope_invalid') { super(reason); this.reason = reason; } }
-export interface BatchScope { scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[]; request_hash: string }
+/** `kinds` absent = the batch did not ask for kinds (U1 or earlier): the whole record of the current session, schema /1–/2. */
+export interface BatchScope { scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[]; request_hash: string; kinds?: CollectKind[] }
 export async function batchScope(db: Db, batchId: string): Promise<BatchScope> {
-  let row: { scope: string; mode: string; targets_json: string; request_hash: string } | null;
-  try { row = await db.prepare('SELECT scope,mode,targets_json,request_hash FROM classroom_collect_scopes WHERE batch_id=?').bind(batchId).first(); }
+  let row: { scope: string; mode: string; targets_json: string; request_hash: string; kinds_json: string | null } | null;
+  try { row = await db.prepare('SELECT scope,mode,targets_json,request_hash,(SELECT k.kinds_json FROM classroom_collect_kinds k WHERE k.batch_id=classroom_collect_scopes.batch_id) AS kinds_json FROM classroom_collect_scopes WHERE batch_id=?').bind(batchId).first(); }
   catch (err) { console.error('collect scope lookup failed:', err); throw new CollectScopeUnavailable('scope_unavailable'); }
   if (!row) return { scope: 'roster', mode: 'finish', targets: [], request_hash: '' };
   let targets: unknown; try { targets = JSON.parse(row.targets_json); } catch { throw new CollectScopeUnavailable('scope_invalid'); }
   const seats = Array.isArray(targets) && targets.every((t) => typeof t === 'string' && ID_RE.test(t)) ? (targets as string[]) : null;
   const known = (row.scope === 'roster' && row.mode === 'finish' && seats?.length === 0) || (row.scope === 'targets' && row.mode === 'collect_only' && !!seats?.length);
   if (!known || !/^[a-f0-9]{64}$/.test(row.request_hash)) throw new CollectScopeUnavailable('scope_invalid');
-  return { scope: row.scope as BatchScope['scope'], mode: row.mode as BatchScope['mode'], targets: seats!, request_hash: row.request_hash };
+  // Kinds that do not parse, or kinds on the class wrap-up, are not guessed at: the batch is unreadable, not "the whole record".
+  let kinds: CollectKind[] | undefined;
+  if (row.kinds_json != null) { let k: unknown; try { k = JSON.parse(row.kinds_json); } catch { throw new CollectScopeUnavailable('scope_invalid'); } kinds = normalizeKinds(k) ?? undefined; if (!kinds || row.mode !== 'collect_only') throw new CollectScopeUnavailable('scope_invalid'); }
+  return { scope: row.scope as BatchScope['scope'], mode: row.mode as BatchScope['mode'], targets: seats!, request_hash: row.request_hash, ...(kinds ? { kinds } : {}) };
 }
 /** The single refusal every route gives when the scope cannot be read. No evaluation input, job or delivery is created on this path; the caller may retry. */
 export const scopeRefusal = (c: any, err: unknown) => err instanceof CollectScopeUnavailable ? c.json({ error: 'the scope of this collection batch cannot be read right now; retry', reason: err.reason }, 503, { 'retry-after': '30' }) : null;
@@ -297,15 +354,21 @@ async function batchView(db: Db, runId: string, id: string) {
     for (const r of ((await db.prepare("SELECT i.seat_id,g.range_json FROM classroom_collect_items i JOIN classroom_snapshots s ON s.batch_id=i.batch_id AND s.student_id=i.student_id AND s.receipt_id=i.receipt_id JOIN classroom_snapshot_bindings g ON g.batch_id=s.batch_id AND g.student_id=s.student_id AND g.revision=s.revision WHERE i.batch_id=? AND i.state='verified'").bind(id).all()).results ?? []) as Array<{ seat_id: string; range_json: string }>) {
       const r0 = JSON.parse(r.range_json) as Record<string, unknown> | null; if (!r0) continue;
       // Numbers and times only, under view names — the view never carries a spool session id or any content.
-      extents.set(r.seat_id, Object.fromEntries(([['lines', 'lines'], ['from_ts', 'from_ts'], ['to_ts', 'to_ts'], ['first_seq', 'first_seq'], ['last_seq', 'last_seq'], ['spool_last_seq', 'session_last_seq'], ['others_in_window', 'other_sessions_in_window']] as const).filter(([, k]) => r0[k] !== undefined).map(([v, k]) => [v, r0[k]])));
+      // U1b extents add kinds, per-session parts, what arrived / was not sent by category and every reason — still no session id.
+      extents.set(r.seat_id, Object.fromEntries(([['lines', 'lines'], ['from_ts', 'from_ts'], ['to_ts', 'to_ts'], ['first_seq', 'first_seq'], ['last_seq', 'last_seq'], ['spool_last_seq', 'session_last_seq'], ['others_in_window', 'other_sessions_in_window'], ['included', 'included'], ['kinds', 'kinds'], ['sessions', 'sessions'], ['parts', 'parts'], ['received', 'received'], ['not_sent', 'not_sent'], ['omitted', 'omitted'], ['reasons', 'reasons']] as const).filter(([, k]) => r0[k] !== undefined).map(([v, k]) => [v, r0[k]])));
     }
   } catch (err) { console.error('collect extent unavailable:', err); }
+  // U3 → U1b: under how many lesson bases the verified input was made (the Service's turn ledger, sealed with it). Absent = unknown.
+  const bases = new Map<string, { basis: string; lessons: number }>();
+  try {
+    for (const r of ((await db.prepare("SELECT i.seat_id,ib.basis,ib.lessons FROM classroom_collect_items i JOIN classroom_snapshots s ON s.batch_id=i.batch_id AND s.student_id=i.student_id AND s.receipt_id=i.receipt_id JOIN classroom_input_basis ib ON ib.batch_id=s.batch_id AND ib.student_id=s.student_id AND ib.revision=s.revision WHERE i.batch_id=? AND i.state='verified'").bind(id).all()).results ?? []) as Array<{ seat_id: string; basis: string; lessons: number }>) bases.set(r.seat_id, { basis: r.basis, lessons: r.lessons });
+  } catch { /* no U3 tables, or unreadable: the view says the basis is unknown */ }
   for (const i of items) {
     i.request = delivery.get(i.seat_id) ?? null;
     if (i.state !== 'not_selected') { i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); i.outcome = collectOutcome(i.status.phase); } // U4: the same verdict words as recovery; `resolved` = the Service verified the receipt, never the device's 'sent'
-    if (i.state === 'verified') { i.coverage_reason = i.reason ?? ''; const e = extents.get(i.seat_id); if (e) i.extent = e; }
+    if (i.state === 'verified') { i.coverage_reason = i.reason ?? ''; const e = extents.get(i.seat_id); if (e) i.extent = e; const bs = bases.get(i.seat_id); if (bs) i.basis = bs; }
   }
-  return { observed_at: now, batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets, upload_open: now < Number(b.upload_until), new_request_allowed: !closed, new_request_blocked_by: closed }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
+  return { observed_at: now, batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets, ...(sc.kinds ? { kinds: sc.kinds } : {}), upload_open: now < Number(b.upload_until), new_request_allowed: !closed, new_request_blocked_by: closed }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
     // "Collected" is only what the Service verified. Arrived bytes and complete behaviour coverage are separate counts.
     verified: by.verified ?? 0, verified_complete_coverage: items.filter((i) => i.state === 'verified' && i.coverage === 'complete').length, held: items.filter((i) => ['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(i.state)).length }, items };
 }
@@ -357,14 +420,15 @@ classroomCollectTeacher.post(root, bodyLimit({ maxSize: 16 * 1024 }), async (c) 
   const stmts = [
     db.prepare(`INSERT INTO classroom_collect_batches(id,class_run_id,cohort_id,profile_id,roster_revision,purpose,notice_version,dry_run,idempotency_key,created_by,created_at,upload_until) SELECT ?8,?1,?9,?10,?2,?11,?12,?13,?14,?15,?4,?16 WHERE ${guard}`).bind(run.class_run_id, req.roster_revision, req.scope === 'targets' ? 1 : 0, now, roster, askedConsents, askedStudents, id, run.cohort_id, run.profile_id, req.purpose, req.notice_version, req.dry_run ? 1 : 0, req.idempotency_key, auth.payload.u, Math.max(run.ends_at, now) + UPLOAD_GRACE_MS),
     db.prepare(`INSERT INTO classroom_collect_scopes(batch_id,class_run_id,scope,mode,targets_json,request_hash,created_at) SELECT ?,?,?,?,?,?,? WHERE ${committed}`).bind(id, run.class_run_id, req.scope, req.mode, JSON.stringify(req.targets), requestHash, now, id),
+    ...(req.kinds ? [db.prepare(`INSERT INTO classroom_collect_kinds(batch_id,class_run_id,kinds_json,created_at) SELECT ?,?,?,? WHERE ${committed}`).bind(id, run.class_run_id, JSON.stringify(req.kinds), now, id)] : []),
   ];
   for (const x of items) stmts.push(db.prepare(`INSERT INTO classroom_collect_items(batch_id,seat_id,seat_revision,student_id,state,reason,consent_id,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE ${committed}`).bind(id, x.s.seat_id, x.s.seat_revision, x.s.student_id, x.state, x.state === 'requested' ? '' : x.state, x.consentId, now, id));
   if (ask.length) {
     // The request to devices rides the existing command ledger: same lease, epoch, TTL and receipts. The batch id is set here, never by the instructor.
-    stmts.push(db.prepare(`INSERT INTO ops_commands(id,class_run_id,cohort_id,action,args_json,payload_hash,idempotency_key,issued_by,issuer_jti,reason_code,created_at,expires_at) SELECT ?,?,?,'retry_evidence_upload',?,?,?,?,?,'class_management',?,? WHERE ${committed}`).bind(commandId, run.class_run_id, run.cohort_id, JSON.stringify({ batch_id: id, purpose: req.purpose, notice_version: req.notice_version }), await sha256Hex(id), 'collect-' + id, auth.payload.u, auth.payload.jti ?? null, now, now + COMMAND_TTL_MS, id));
+    stmts.push(db.prepare(`INSERT INTO ops_commands(id,class_run_id,cohort_id,action,args_json,payload_hash,idempotency_key,issued_by,issuer_jti,reason_code,created_at,expires_at) SELECT ?,?,?,'retry_evidence_upload',?,?,?,?,?,'class_management',?,? WHERE ${committed}`).bind(commandId, run.class_run_id, run.cohort_id, JSON.stringify({ batch_id: id, purpose: req.purpose, notice_version: req.notice_version, ...(req.kinds ? { kinds: req.kinds, sessions: 'window' } : {}) }), await sha256Hex(id), 'collect-' + id, auth.payload.u, auth.payload.jti ?? null, now, now + COMMAND_TTL_MS, id));
     for (const s of ask) { const [grantId, epoch] = s.conn!.split('|'); stmts.push(db.prepare(`INSERT INTO ops_command_targets(command_id,class_run_id,seat_id,seat_revision,grant_id,connection_epoch,mutating,state,expires_at,updated_at) SELECT ?,?,?,?,?,?,0,'queued',?,? WHERE ${committed}`).bind(commandId, run.class_run_id, s.seat_id, s.seat_revision, grantId, Number(epoch), now + COMMAND_TTL_MS, now, id)); }
   }
-  stmts.push(db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,'','instructor',?,'collect_batch_created',?,? WHERE ${committed}`).bind(run.class_run_id, auth.payload.u, JSON.stringify({ batch_id: id, dry_run: req.dry_run, scope: req.scope, mode: req.mode, selected: chosen ? chosen.size : seats.length, requested: ask.length, roster: seats.length }), now, id));
+  stmts.push(db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,'','instructor',?,'collect_batch_created',?,? WHERE ${committed}`).bind(run.class_run_id, auth.payload.u, JSON.stringify({ batch_id: id, dry_run: req.dry_run, scope: req.scope, mode: req.mode, ...(req.kinds ? { kinds: req.kinds } : {}), selected: chosen ? chosen.size : seats.length, requested: ask.length, roster: seats.length }), now, id));
   try { await db.batch(stmts); } catch (err) {
     // Two clicks raced: the other one created the batch for this key. The loser gets that batch if it asked for the same thing.
     const won = await db.prepare('SELECT id FROM classroom_collect_batches WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, req.idempotency_key).first<{ id: string }>().catch(() => null);

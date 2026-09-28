@@ -1,4 +1,5 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import { InstructorModeManager } from './chalk/instructorMode';
 import { chalkToolsEnabled } from './chalk/tools';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
@@ -220,6 +221,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private profileGeneration=0;
+  // #1298 — instructor-mode state and server calls. Reset in invalidateProfile().
+  private _instructorMode = new InstructorModeManager();
   private nativeObservationError: string | null = null;
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
   private observationAssessment: AbortController | null = null;
@@ -731,6 +734,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
   inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
+  /** #751 native help — set by extension.ts. The provider only relays; the host adapter re-checks the learner on every call. */
+  helpSource: import("./classroomHelpHost").ClassroomHelpHost | null = null;
+  postHelp(help: import("./classroomHelp").HelpView): void { void this.post({ type: "helpState", help }); }
   /** Shared with the start page: one rule for what a click on an instructor link may do. */
   async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
     const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
@@ -767,6 +773,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   async opsReadSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null> {
     try { return (await this.spool?.readForSnapshot(sinceMs)) ?? null; } catch { return null; }
+  }
+  /** #751 U1b — this learner's sessions in the class window for a kinds collection. Reads only; the live spool is not sealed or moved. */
+  async opsReadCollection(sinceMs: number, identity: { u: string; c: string; p: string }): Promise<import("./sessionSpool").SpoolCollectionSource | null> {
+    try { return (await this.spool?.readForCollection(sinceMs, identity)) ?? null; } catch { return null; }
+  }
+  /**
+   * #751 U1b — the learner marks the CURRENT artifact version (workspace index.html) as their class result, or withdraws that
+   * mark. Only versions marked here travel in an "approved artifacts" collection; nothing is sent by this command itself.
+   */
+  async approveArtifactInteractively(): Promise<void> {
+    if (!this.spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    let content = "";
+    try { if (root) content = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8"); } catch { content = ""; }
+    if (!/<html[\s>]/i.test(content) && !/<!doctype html/i.test(content)) { void vscode.window.showInformationMessage("작업 폴더에 결과물(index.html)이 없습니다. 결과물을 만든 뒤 다시 해 주세요."); return; }
+    const sha256 = createHash("sha256").update(content, "utf8").digest("hex"), kb = Math.max(1, Math.round(Buffer.byteLength(content, "utf8") / 1024));
+    const pick = await vscode.window.showQuickPick([
+      { label: "이 결과물을 수업 결과물로 승인", detail: `index.html · ${kb}KB · 지문 ${sha256.slice(0, 8)}`, approved: true },
+      { label: "이 결과물의 승인 취소", detail: `index.html · 지문 ${sha256.slice(0, 8)}`, approved: false },
+    ], { title: "수업 결과물 승인", placeHolder: "승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어갑니다. 지금 바로 보내지는 않으며, 수업 기록 보내기에 동의한 경우에만 보냅니다." });
+    if (!pick) return;
+    this.spool.recordArtifactSnapshot({ source: "existing", path: "index.html", content });
+    this.spool.recordArtifactApproval({ sha256, path: "index.html", approved: pick.approved });
+    await this.spool.flush();
+    void vscode.window.showInformationMessage(pick.approved ? `이 판(지문 ${sha256.slice(0, 8)})을 수업 결과물로 승인했습니다. 나중에 고치면 새 판은 다시 승인해야 합니다.` : `이 판(지문 ${sha256.slice(0, 8)})의 승인을 취소했습니다.`);
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
@@ -893,6 +924,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
+    // #1298 — re-check instructor status + brief after token change.
+    this._instructorMode.reset();
   }
 
   /** #381 — cause of the most recent failed profile fetch, if any. */
@@ -2251,6 +2284,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "inboxRequest": await this.postInbox(); return;
       case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
       case "inboxLink": await this.handleInboxLink(msg); return;
+      case "helpRequest": await this.helpSource?.refresh(); return;
+      case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
+      case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
+      case "helpCancel": await this.helpSource?.cancel(msg.key); return;
+      case "helpSend": await this.helpSource?.send(msg.key, msg.requestId, msg.consent === true); return;
+      case "helpRetry": await this.helpSource?.retry(msg.key); return;
+      case "helpDiscard": await this.helpSource?.discard(msg.key); return;
+      case "helpConfirm": await this.helpSource?.confirm(msg.key, msg.id, msg.revision); return;
+      case "helpWithdraw": await this.helpSource?.withdraw(msg.key, msg.id); return;
       case "ready":
         await this.postInbox();
         await this.postConfig();
@@ -2316,6 +2358,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
               ? '모델이 바뀌어 수업 기본 처리 수준을 사용해요' : '이 모델은 처리 수준 조절을 지원하지 않아요';
           }
         }
+        await this.postConfig();
+        return;
+      }
+      // #1298 — instructor-only: free-form model id. Saved immediately; the first
+      // turn that runs with this model validates it (server rejects unknown models,
+      // CLI errors on first turn). revertModelOnTurnError() restores prevChoice.
+      case "selectModelDirect": {
+        if (!this._instructorMode.isInstructor) return;
+        const modelId = msg.modelId.trim();
+        if (!modelId) { await this.postConfig(); return; }
+        await this._instructorMode.selectModel(
+          modelId,
+          () => this.context.workspaceState.get('hps.modelChoice'),
+          c => Promise.resolve(this.context.workspaceState.update('hps.modelChoice', c)),
+        );
         await this.postConfig();
         return;
       }
@@ -2749,6 +2806,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         runtime,
         text,
         imagesCount: effectiveImages?.length ?? 0,
+        model, // #1298 — record which model this turn ran on
         ...(instructorPromptRefs?.length ? { instructorPromptRefs } : {}),
       });
       const onDelta = (delta: string) => {
@@ -3020,9 +3078,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
         const cwd=this.resolveCoachCwd();
         if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
-        // #1297 (E4-2): 강사 모드(issuer 토큰)일 때만 Chalk 도구를 붙인다(SUB-06).
+        // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+        // #1298 (E4-3): final gate is server-verified whoami (isInstructor === true).
         // #1295 (E2-6): cwd와 requestConfirmation 추가 — 작업 사본 파일 I/O 및 덮어쓰기 확인.
-        const chalkCtx = await chalkToolsEnabled(this.context.secrets)
+        const chalkCtx = (await chalkToolsEnabled(this.context.secrets) && this._instructorMode.isInstructor === true)
           ? {
               serverUrl: proxyUrl,
               secrets: this.context.secrets,
@@ -3038,6 +3097,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const result=await runLocalCoach({config:local,profile,cwd,
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
           signal:ctrl.signal,onDelta,onActivity,chalkCtx,
+          // #1298 — pass instructor brief as system prompt override when in instructor mode.
+          ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
           requestApproval:async action=>{
             let prompted=false;
             const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
@@ -3221,6 +3282,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const refused = bindingKey ? bindingRefusalCode(err) : null;
       if (refused && !ctrl.signal.aborted) await this.endRefusedTurn({ code: refused, streamId, proxyUrl, token, text, images });
       else if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
+      // #1298 — revert model choice if a direct-entry model caused this turn to fail.
+      await this._instructorMode.revertModelOnTurnError(c => Promise.resolve(this.context.workspaceState.update('hps.modelChoice', c)));
     } finally {
       // The host is the only party that knows a turn ended (an auxiliary request of the same turn ends with end_turn before
       // the main loop does). A closed turn id is refused by the Service from then on; best effort, bounded by the Service.
@@ -3232,6 +3295,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
+      // #1298 — clear pending model revert when the turn succeeded.
+      if (finalSpoolStatus === "ok") this._instructorMode.onTurnSuccess();
       await Promise.all(observationCaptures);
       if (assistantText) recordObservation('coach',assistantText);
       recordObservation('turn_end',finalSpoolStatus,{outcome:ctrl.signal.aborted?'cancelled':spoolStatus==='ok'?'success':'error'});
@@ -3728,10 +3793,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
+    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+    const isInstructor = await this._instructorMode.checkInstructorMode(token, proxyUrl);
+    const instructorBrief = (isInstructor && token)
+      ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
+      : undefined;
+    const instructorConnection = isInstructor
+      ? (local?.provider === "claude" ? "내 Claude 구독"
+        : local?.provider === "codex" ? "내 Codex 구독"
+        : "서버")
+      : undefined;
     await this.post({
       type: "config",
       config: {
-        proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
+        proxyUrl,
         model:local?.model??model,
         hasToken: !!token,
         ...(activity ? {activity:{id:activity.id,name:activity.name,kind:activity.kind,workspace:activity.workspace,verified:!!profile},
@@ -3741,6 +3816,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         coach: this.getCoach(),
         profile: profile ? { ...profile, model_selection: local?localModelSelection(local):selection } : null,
         update: local ? undefined : this.availableUpdate,
+        ...(isInstructor ? { isInstructor: true } : {}),
+        ...(instructorBrief ? { instructorBrief } : {}),
+        ...(instructorConnection ? { instructorConnection } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight

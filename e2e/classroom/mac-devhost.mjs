@@ -1,6 +1,7 @@
 // Isolated Mac host for checking the CURRENT remote-classroom-operations build in a real Studio shell (#751).
 //
 //   node e2e/classroom/mac-devhost.mjs prepare   # copy → inject current build → ad-hoc sign the COPY → verify → manifest
+//   node e2e/classroom/mac-devhost.mjs reinject  # the current build into an already prepared copy (no second shell copy)
 //   node e2e/classroom/mac-devhost.mjs launch    # start a local Service + open the prepared copy against it
 //
 // Why this exists: the Mac may have an installed HypeProof Studio that is OLDER than this branch (2026-09-19: v0.1.16).
@@ -77,6 +78,26 @@ function prepare() {
   const pre = preflight();
   rmSync(copy, { recursive: true, force: true }); mkdirSync(home, { recursive: true });
   cpSync(source, copy, { recursive: true, verbatimSymlinks: true }); // the original is only read
+  return inject(pre, { copied_from: source, version: pre.shell.version, commit: pre.shell.commit, date: pre.shell.date });
+}
+
+/**
+ * The CURRENT build into a copy prepared earlier, without copying the shell again (a nearly full disk, 2026-09-22). The shell
+ * record of the earlier manifest is carried over and checked against the copy; the extension, webview, SDK closure, the
+ * signature and the bundle hashes are all redone exactly as `prepare` does. The earlier manifest is kept beside the new one.
+ */
+function reinject() {
+  assert.ok(existsSync(path.join(home, 'manifest.json')) && existsSync(copy), 'no prepared copy here: run `prepare`');
+  for (const f of BUNDLES) assert.ok(existsSync(path.join(repo, 'extensions/hypeproof-chat', f)), `build first: missing ${f}`);
+  const earlier = json(path.join(home, 'manifest.json')), product = json(path.join(copy, 'Contents/Resources/app/product.json'));
+  assert.equal(product.commit, earlier.shell.commit, 'the copy is not the shell the earlier manifest names');
+  const dirty = execFileSync('git', ['status', '--porcelain', '--', 'extensions/hypeproof-chat/src', 'extensions/hypeproof-chat/webview-ui/src', 'worker/src', 'chalk/src'], { cwd: repo, encoding: 'utf8' }).trim();
+  const pre = { source_sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), source_dirty: !!dirty };
+  writeFileSync(path.join(home, 'manifest.before-reinject.json'), JSON.stringify(earlier, null, 2));
+  return inject(pre, { ...earlier.shell, reinjected: { at: new Date().toISOString(), earlier_prepared_at: earlier.prepared_at, earlier_extension_source_sha: earlier.extension?.source_sha } });
+}
+
+function inject(pre, shellRecord) {
   for (const dir of ['dist', 'webview-ui/dist', 'media']) { const from = path.join(repo, 'extensions/hypeproof-chat', dir); if (!existsSync(from)) continue; rmSync(path.join(ext, dir), { recursive: true, force: true }); cpSync(from, path.join(ext, dir), { recursive: true }); }
   // The shell stamps the extension with the product version; keep that field so the shell's own checks behave as shipped, take everything else from source.
   const shipped = json(path.join(ext, 'package.json')), current = json(path.join(repo, 'extensions/hypeproof-chat/package.json'));
@@ -86,7 +107,7 @@ function prepare() {
   const bundles = Object.fromEntries(BUNDLES.map((f) => { const a = sha(path.join(ext, f)), b = sha(path.join(repo, 'extensions/hypeproof-chat', f)); assert.equal(a, b, `${f} in the copy is not the current build`); return [f, a]; }));
   const manifest = { schema: 'hps-classroom-devhost/1', prepared_at: new Date().toISOString(), what_this_is: 'CURRENT extension + webview build inside a COPY of a Studio shell, isolated user data, local synthetic Service',
     what_this_is_not: ['the installed /Applications app', 'a current official release build', 'evidence about updater, signing, notarization or shell patches', 'a production Service, real learners, a school network or a real model'],
-    shell: { copied_from: source, version: pre.shell.version, commit: pre.shell.commit, date: pre.shell.date, note: pre.shell.version !== current.version ? 'the shell is NOT the version this branch would ship in; only extension-level behaviour may be read from it' : '' },
+    shell: { ...shellRecord, note: shellRecord.version !== current.version ? 'the shell is NOT the version this branch would ship in; only extension-level behaviour may be read from it' : '' },
     extension: { source_sha: pre.source_sha, source_dirty: pre.source_dirty, bundles, commands: current.contributes.commands.filter((c) => c.command.includes('classroom')).map((c) => c.command) },
     // HPS_DEVHOST_VENDOR_SDK=0 prepares a copy WITHOUT the SDK: agent-sdk turns then fall back to the proxy runtime, which is how the
     // SDK-fallback signal is observed. Results from such a copy are never evidence about SDK stop/reset behaviour.
@@ -121,6 +142,6 @@ async function launch() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  if (mode === 'prepare') prepare(); else if (mode === 'launch') await launch(); else if (mode === 'preflight') console.log(JSON.stringify(preflight(), null, 2));
-  else { console.error('usage: node e2e/classroom/mac-devhost.mjs preflight | prepare | launch'); process.exit(2); }
+  if (mode === 'prepare') prepare(); else if (mode === 'reinject') reinject(); else if (mode === 'launch') await launch(); else if (mode === 'preflight') console.log(JSON.stringify(preflight(), null, 2));
+  else { console.error('usage: node e2e/classroom/mac-devhost.mjs preflight | prepare | reinject | launch'); process.exit(2); }
 }

@@ -171,7 +171,9 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   assert.notEqual(second, first, "다른 신원 → 다른 세션 디렉토리");
   assert.deepEqual(readMeta(first).user, { u: "kid01", c: "cohort-a" });
   assert.deepEqual(readMeta(second).user, { u: "kid09", c: "cohort-a" });
-  assert.equal(readEvents(first).length, 1);
+  // #751 U1b: a rotation ends the previous learner's session with `session_close`, so its end can be proven later.
+  assert.deepEqual(readEvents(first).map((e) => e.type), ["prompt", "session_close"]);
+  assert.equal(readEvents(first)[1].reason, "identity_change");
   assert.equal(readEvents(second).length, 1);
   // 같은 신원 재통지는 회전하지 않는다.
   spool.noteIdentity({ u: "kid09", c: "cohort-a" });
@@ -196,7 +198,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   assert.deepEqual(readEvents(dirB).map((e) => e.text), ["B의 질문"]);
   const dirA = path.join(path.dirname(dirB), "session-1");
   assert.deepEqual(readMeta(dirA).user, { u: "kidA", c: "co" });
-  assert.deepEqual(readEvents(dirA).map((e) => e.text), ["A의 질문"]);
+  assert.deepEqual(readEvents(dirA).filter((e) => e.type !== "session_close").map((e) => e.text), ["A의 질문"]);
   console.log("✓ 인터리빙 — flush 없는 신원 전이에도 프롬프트가 제 세션으로");
 }
 
@@ -224,7 +226,8 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   const dirA = path.join(path.dirname(dirB), "session-1");
   assert.deepEqual(
     readEvents(dirA).map((e) => e.type),
-    ["prompt", "usage", "response", "artifact_snapshot", "turn_end"],
+    // The close marker written at the rotation is not the last line any more: a late turn makes that session's end unproven (U1b).
+    ["prompt", "session_close", "usage", "response", "artifact_snapshot", "turn_end"],
     "A 턴의 늦은 이벤트가 A 세션에 붙는다",
   );
   assert.deepEqual(readEvents(dirB).map((e) => e.type), ["prompt"], "B 세션은 오염되지 않는다");
@@ -464,7 +467,9 @@ console.log("session-spool.smoke.mjs — all green");
   const next = spool.currentSessionDir();
   assert.notEqual(next, sealed, "새 세션 디렉토리");
   assert.deepEqual(readMeta(next).user, { u: "kid01", c: "co" }, "신원 승계");
-  assert.deepEqual(readEvents(sealed).map((e) => e.text), ["수업 마지막 질문"]);
+  // #751 U1b: sealing ends the session with `session_close` (its end is then provable).
+  assert.deepEqual(readEvents(sealed).map((e) => e.type), ["prompt", "session_close"]);
+  assert.deepEqual(readEvents(sealed).filter((e) => e.type === "prompt").map((e) => e.text), ["수업 마지막 질문"]);
   // 빈 스풀 봉인은 null.
   const spool2 = makeSpool(tmp());
   assert.equal(await spool2.seal(), null);

@@ -78,6 +78,11 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   instructor step is a click on the Chalk page; the learner side is a real window. The faults, accounts and model provider
   are made locally and listed in `result.json` under `made_here`; what was not run is under `not_run`. It stays open
   afterwards (class and tokens last 12 hours); `recovery-session.json` has the URL, PID, ports and how to stop it.
+- Collection kinds and restarted sessions (#751 U1b, AT-48) on this Mac: `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u1b node e2e/classroom/mac-devhost.mjs reinject`
+  (or `prepare`), then `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u1b node --experimental-strip-types --experimental-sqlite --no-warnings e2e/classroom/mac-collect.mjs`
+  (ports 18901/18902, debug 9501, about 3 minutes). The real window approves one page version, quits with ⌘Q, is killed once and has its
+  extension host restarted; the instructor collects prompts / approved artifacts / the whole record from a visible 1280×720 Chalk page.
+  `result.json` lists `made_here` and `not_run`; `collect-session.json` has the PID and ports. It stays up until Control-C.
   `mac-window.mjs` holds the window-driving helpers this runner uses.
   `HPS_U4_SCENARIOS=AT41` runs R0 plus diagnosis → record collection → notice from the Chalk page to the real window (A3/A4 selected
   on purpose, A2 never) and checks that the three result cards coexist and each reaches the real app's own answer, then clicks the

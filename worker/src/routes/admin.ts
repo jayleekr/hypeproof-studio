@@ -38,6 +38,7 @@ import { classroomReportsTeacher } from "./classroom-reports";
 import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
 import { chalkKnowledge } from './chalk-knowledge';
+import { chalkInstructor } from './chalk-instructor';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
@@ -158,6 +159,7 @@ admin.route("/", classroomDeliveryOperator);
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
 admin.route('/', chalkKnowledge);
+admin.route('/', chalkInstructor);
 
 // ---- cohort list ------------------------------------------------------------
 

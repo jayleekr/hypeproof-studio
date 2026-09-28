@@ -13,7 +13,7 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
   // The deploy order is rehearsed here on real local D1, with the same checker the runbook uses against a remote target
   // (worker/scripts/classroom-ops-d1-check.mjs): nothing applied → half applied → all applied → applied again.
-  const { compare, expectedObjects } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings'];
+  const { compare, expectedObjects } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings', '0025-classroom-collect-kinds'];
   const chalkInChecker = expectedObjects().filter((m) => Number(m.file.slice(0, 4)) >= 30); assert.deepEqual(chalkInChecker, [], 'expectedObjects() must not include Chalk migrations (0030+)');
   const present = async () => (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => r.name);
   let seen = compare(await present()); assert.equal(seen.none, true); assert.deepEqual(seen.next, files.map((m) => m + '.sql'), 'the checker lists every migration file of this feature, in order');
@@ -37,6 +37,25 @@ try {
   assert.deepEqual(connects.map((r) => r.status).sort(), [201, 403, 403, 403]);
   assert.equal((await db.prepare("SELECT count(*) AS n FROM ops_grants WHERE kind='connection' AND state='active'").first()).n, 1);
   const credential = connects.find((r) => r.status === 201).json.credential, n = connects.findIndex((r) => r.status === 201) + 1;
+  // #751 AT-47 — the help-recipient join, the D1 fence probe and the re-checked share write, on actual local workerd/D1.
+  await apply(readFileSync(new URL('../migrations/0003-classroom-sharing.sql', import.meta.url), 'utf8'));
+  const who = (await db.prepare('SELECT student_id FROM class_run_seats WHERE seat_id=? AND replaced_at IS NULL').bind(seat).first()).student_id, st = await f.student(who);
+  const hr = await f.request('/v1/classroom/help-recipient', 'GET', undefined, st); assert.deepEqual([hr.status, hr.json.recipient_id, hr.json.seat_id], [200, 'teacher-a', seat], hr.raw);
+  // The preview's Service-signed end (help-recipient with request_id + duration) goes back with the POST and is what D1 stores.
+  const signed = async (id) => { const k = (await f.request(`/v1/classroom/help-recipient?request_id=${id}&duration_minutes=30`, 'GET', undefined, st)).json; return { id, recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 30, class_run_id: k.class_run_id, grant_id: k.grant_id, content: { question: 'q' }, consent_envelope: { expires_at: k.consent.expires_at, proof: k.consent.proof } }; };
+  const hb = await signed('d1-help');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, recipient_id: 'teacher-b' }, st)).status, 400, 'a consent is for its recipient');
+  const made = await f.request('/v1/classroom/shares', 'POST', hb, st); assert.equal(made.status, 201, made.raw); assert.equal(made.json.expires_at, hb.consent_envelope.expires_at, 'D1 stores the previewed end');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 200, 'same-envelope retry');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, consent_envelope: { ...hb.consent_envelope, expires_at: hb.consent_envelope.expires_at + 600 } }, st)).status, 400, 'a moved end is refused on D1 too');
+  // The conditional INSERT itself refuses on D1: the run's D1 window is closed while the KV session still says the class runs,
+  // so every earlier read passes and only the write's guard sees it. Nothing is stored.
+  const late = await signed('d1-help-ended'), runEnd = (await db.prepare('SELECT ends_at FROM class_run_ops WHERE class_run_id=?').bind(late.class_run_id).first()).ends_at;
+  await db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').bind(Date.now() - 1000, late.class_run_id).run();
+  const refused = await f.request('/v1/classroom/shares', 'POST', late, st); assert.deepEqual([refused.status, refused.json.reason], [403, 'no_active_class'], refused.raw);
+  assert.equal((await db.prepare("SELECT count(*) AS n FROM classroom_shares WHERE id='d1-help-ended'").first()).n, 0); await db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').bind(runEnd, late.class_run_id).run();
+  await db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) SELECT issuer_jti,'revoked','t','t',0,0 FROM ops_grants WHERE kind='connection' AND state='active'").run();
+  assert.equal((await f.request('/v1/classroom/help-recipient', 'GET', undefined, st)).json.reason, 'instructor_revoked'); await db.prepare('DELETE FROM ops_issuer_fences').run();
   const r1 = await f.sync(credential, [f.event(1, 'runtime', { status: 'running' }), f.event(2, 'error', { class: 'network', blocking: false })], n); assert.equal(r1.status, 200, r1.raw); assert.equal(r1.json.ack.contiguous_seq, 2);
   // Two syncs racing on the same seat state: events from both are kept, at most one loses the state CAS and is told to resend.
   const race = await Promise.all([f.sync(credential, [f.event(3, 'runtime', { status: 'idle' })], n), f.sync(credential, [f.event(4, 'runtime', { status: 'waiting_user' })], n)]);
@@ -60,5 +79,16 @@ try {
     const cost = await db.prepare("SELECT e.seat_id FROM json_each(?) j JOIN ops_events e ON e.class_run_id=? AND e.seat_id=json_extract(j.value,'$[0]') AND e.received_at>=json_extract(j.value,'$[1]') WHERE e.kind='recovery' AND e.disposition='applied'").bind(JSON.stringify([[seat, 0]]), f.run).all();
     const total = (await db.prepare('SELECT count(*) AS n FROM ops_events').first()).n, mine = (await db.prepare('SELECT count(*) AS n FROM ops_events WHERE seat_id=?').bind(seat).first()).n;
     console.log(`U4 follow-up read on local D1: rows_read=${cost.meta.rows_read} for ${mine} event(s) of the seat, ${total} in the run`); assert.ok(cost.meta.rows_read <= mine + 2, 'the read is bounded by the seat\'s own events, not the run\'s ledger'); }
+  // U1b on real D1: a kinds batch writes its kinds row inside the same conditional batch (and the device is told the kinds); a moved roster writes neither.
+  { const roster = live.map((id) => ({ seat_id: id, student_id: id === 'B1' ? 'student-c' : id === 'A1' ? 'student-a' : 'student-b' }));
+    assert.equal((await f.configure(roster, 2, { lesson: undefined, flags: { ops_commands: true, ops_collect: true } })).status, 200);
+    assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, credential)).status, 201);
+    const ask = (rev) => f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: rev, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, targets: [seat], kinds: ['prompts', 'artifacts'] });
+    const made = await ask(3); assert.equal(made.status, 201, made.raw); assert.deepEqual(made.json.batch.kinds, ['artifacts', 'prompts']);
+    assert.equal((await db.prepare('SELECT kinds_json FROM classroom_collect_kinds WHERE batch_id=?').bind(made.json.batch.id).first()).kinds_json, '["artifacts","prompts"]');
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT args_json FROM ops_commands WHERE idempotency_key=?').bind('collect-' + made.json.batch.id).first()).args_json).kinds, ['artifacts', 'prompts']);
+    const before = (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n, stale = await ask(2);
+    assert.deepEqual([stale.status, stale.json.reason, (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n], [409, 'revision_conflict', before]);
+    console.log('PASS actual local workerd/D1 (U1b): the kinds row commits with its batch; a refused request writes no kinds row'); }
   console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner, U4 linked follow-up + outcome + bounded follow-up read');
 } finally { f?.close(); await mf.dispose(); }

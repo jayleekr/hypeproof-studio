@@ -128,6 +128,12 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   ) return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
+  // #1298 — instructor-mode identity check. No cohort required: any valid issuer
+  // token gets 200. The client uses this to decide whether to open instructor mode.
+  if (path === "/admin/chalk/whoami" && method === "GET") return true;
+  // #1298 — instructor system prompt (brief). Returns versioned instruction text
+  // the client injects as system prompt for instructor-mode chat turns.
+  if (path === "/admin/chalk/instructor-brief" && method === "GET") return true;
   // #1288 — Chalk knowledge read-only endpoints. No cohort scope needed.
   if (method === 'GET' && /^\/admin\/chalk\/knowledge\/(?:versions|[0-9]+\/docs(?:\/[^/]+)?)$/.test(path)) return true;
   return false;
