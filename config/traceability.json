@@ -2363,6 +2363,27 @@
         },
         {
           "path": "e2e/classroom/mac-window.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom.ts"
+        },
+        {
+          "path": "worker/test/classroom-help.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomHelp.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomHelpHost.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/HelpRequest.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-help.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-help.mjs"
         }
       ]
     },

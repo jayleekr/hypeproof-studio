@@ -9,6 +9,8 @@ import { profileServesCohort } from '../lib/cohort-binding';
 import { getActiveSession, getRoster, isTokenRevoked } from '../lib/kv';
 import { scrubSecrets } from '../lib/scrub-secrets';
 import { isMinorCohort } from '../lib/moderation';
+import { opsEnabled } from './classroom-ops';
+import { NOT_FENCED } from '../lib/classroom-distribution-store';
 
 type Row = {id:string;cohort_id:string;profile_id:string;student_id:string;recipient_id:string;session_id:string;kind:string;content_json:string;revision:number;status:string;feedback:string;next_action:string;created_at:number;expires_at:number};
 type StudentEnv = {Bindings:Env;Variables:{student:TokenPayload}};
@@ -36,24 +38,74 @@ classroomStudent.use('*',async(c,next)=>{
  if(!roster?.users.includes(p.u))return c.json({error:'not in roster'},403);
  c.set('student',p);return next();
 });
+// #751 native help — who may receive this learner's help request NOW. Derived only from records the Service wrote: the active
+// class session of the token's cohort/profile, this learner's live seat in that class run, the seat's active operations
+// connection and the instructor who issued its pairing (not KV-revoked, not D1-fenced). The learner never names an instructor
+// and never receives an instructor credential. Anything unreadable is `unknown`, never "no instructor".
+type Assignment={recipient_id:string;class_run_id:string;seat_id:string;grant_id:string;class_ends_at:string;expires_cap:number};
+async function helpAssignment(env:Env,p:TokenPayload):Promise<Assignment|{reason:string}>{
+ if(!opsEnabled(env))return{reason:'ops_disabled'};
+ const session=await getActiveSession(env.HPS_KV,p.c);
+ if(!session||session.profile_id!==p.p||Date.parse(session.ends_at)<=Date.now()||Date.parse(session.starts_at)>Date.now())return{reason:'no_active_class'};
+ try{
+  const g=await env.HPS_DB.prepare(`SELECT g.id,g.seat_id,g.issuer_id,g.issuer_jti FROM ops_grants g JOIN class_run_ops o ON o.class_run_id=g.class_run_id AND o.cohort_id=g.cohort_id AND o.profile_id=g.profile_id
+ JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.student_id=g.student_id AND s.replaced_at IS NULL
+ WHERE g.class_run_id=? AND g.cohort_id=? AND g.profile_id=? AND g.student_id=? AND g.kind='connection' AND g.state='active' AND g.expires_at>? ORDER BY g.created_at DESC LIMIT 1`).bind(session.session_id,p.c,p.p,p.u,Date.now()).first<{id:string;seat_id:string;issuer_id:string|null;issuer_jti:string|null}>();
+  if(!g)return{reason:'not_connected'};
+  if(!g.issuer_id||!idOK(g.issuer_id))return{reason:'no_instructor'};
+  if(g.issuer_jti){
+   if(await isTokenRevoked(env.HPS_KV,g.issuer_jti))return{reason:'instructor_revoked'};
+   const open=await env.HPS_DB.prepare('SELECT 1 AS ok WHERE '+NOT_FENCED).bind(g.issuer_jti).first<{ok:number}>();
+   if(!open)return{reason:'instructor_revoked'};
+  }
+  return{recipient_id:g.issuer_id,class_run_id:session.session_id,seat_id:g.seat_id,grant_id:g.id,class_ends_at:session.ends_at,expires_cap:p.exp};
+ }catch(err){console.error('help assignment unreadable:',err);return{reason:'unknown'};}
+}
+classroomStudent.get('/help-recipient',async c=>{
+ const a=await helpAssignment(c.env,c.get('student'));
+ if('reason' in a)return c.json({available:false,reason:a.reason},a.reason==='unknown'?503:200);
+ return c.json({available:true,...a});
+});
+// Without `session_id`: this learner's unexpired history (every class), kept so an old share can still be withdrawn. With it:
+// only that class — the current help queue never labels an earlier class's request as this lesson's.
 classroomStudent.get('/shares',async c=>{
- const p=c.get('student');const rows=await c.env.HPS_DB.prepare('SELECT * FROM classroom_shares WHERE cohort_id=? AND student_id=? AND profile_id=? AND expires_at>? ORDER BY created_at DESC LIMIT 100').bind(p.c,p.u,p.p,now()).all<Row>();
- return c.json({shares:(rows.results??[]).map(studentView),limit:100});
+ const p=c.get('student'),sid=c.req.query('session_id');if(sid!==undefined&&!idOK(sid))return c.json({error:'invalid session_id'},400);
+ const rows=await c.env.HPS_DB.prepare('SELECT * FROM classroom_shares WHERE cohort_id=? AND student_id=? AND profile_id=? AND expires_at>?'+(sid===undefined?'':' AND session_id=?')+' ORDER BY created_at DESC LIMIT 100').bind(p.c,p.u,p.p,now(),...(sid===undefined?[]:[sid])).all<Row>();
+ return c.json({shares:(rows.results??[]).map(studentView),limit:100,filter:{session_id:sid??null}});
 });
 classroomStudent.post('/shares',async c=>{
  const p=c.get('student'),b=await json(c);
  if(!b||!idOK(b.id)||!idOK(b.recipient_id)||!['help','submission'].includes(b.kind)||b.consent!==true||!Number.isInteger(b.duration_minutes)||b.duration_minutes<5||b.duration_minutes>1440)return c.json({error:'id, recipient, kind, consent and duration (5–1440 minutes) required'},400);
- const keys=['prompt','response','tool_summary','artifact_url','verification'];
+ // `question` = the learner's own words to the instructor, so help can be asked without sharing any conversation. Stored only
+ // when sent: a request without it keeps the exact stored shape it had before (its retry still matches).
+ const keys=['question','prompt','response','tool_summary','artifact_url','verification'];
  if(!b.content||typeof b.content!=='object'||Array.isArray(b.content)||Object.keys(b.content).some(k=>!keys.includes(k)))return c.json({error:'select supported content fields'},400);
  const content:Record<string,string>={};
- for(const k of keys){const value=b.content[k]??'';if(typeof value!=='string'||value.length>8000)return c.json({error:'invalid or excessive field'},400);content[k]=scrubSecrets(value);}
+ for(const k of keys){if(k==='question'&&b.content.question===undefined)continue;const value=b.content[k]??'';if(typeof value!=='string'||value.length>8000)return c.json({error:'invalid or excessive field'},400);content[k]=scrubSecrets(value);}
  if(!Object.values(content).some(v=>v.trim()))return c.json({error:'select content to share'},400);
  if(content.artifact_url){try{const url=new URL(content.artifact_url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error();}catch{return c.json({error:'artifact must be an http(s) URL without credentials'},400);}}
+ if((b.class_run_id!==undefined&&!idOK(b.class_run_id))||(b.grant_id!==undefined&&!idOK(b.grant_id)))return c.json({error:'invalid class or connection id'},400);
  const session=await getActiveSession(c.env.HPS_KV,p.c);
- if(!session||session.profile_id!==p.p||Date.parse(session.ends_at)<=Date.now()||Date.parse(session.starts_at)>Date.now())return c.json({error:'active matching class required to share'},403);
+ if(!session||session.profile_id!==p.p||Date.parse(session.ends_at)<=Date.now()||Date.parse(session.starts_at)>Date.now())return c.json({error:'active matching class required to share',reason:'no_active_class'},403);
+ // The class the learner consented for must still be the class now; checked before anything is read or written.
+ if(b.class_run_id!==undefined&&b.class_run_id!==session.session_id)return c.json({error:'the class changed; review the request again',reason:'class_changed'},409);
+ // Recipient: where the Service knows this learner's class assignment (operations on and a run for this session), only the
+ // assigned instructor. A native request (it names its class) always needs that assignment. A class without operations keeps
+ // the earlier web behaviour: the recipient is syntax-checked only, and teacher reads stay recipient- and scope-bound.
+ let hasRun=b.class_run_id!==undefined;
+ if(!hasRun&&opsEnabled(c.env)){try{hasRun=!!(await c.env.HPS_DB.prepare('SELECT 1 AS ok FROM class_run_ops WHERE class_run_id=? AND cohort_id=?').bind(session.session_id,p.c).first());}catch{hasRun=true;}}
+ if(hasRun){
+  const a=await helpAssignment(c.env,p);
+  if('reason' in a)return c.json({error:'no instructor is assigned to this learner in this class',reason:a.reason},a.reason==='unknown'?503:403);
+  if(a.recipient_id!==b.recipient_id)return c.json({error:'recipient is not the instructor assigned to this class',reason:'recipient_not_assigned'},409);
+  if(b.grant_id!==undefined&&a.grant_id!==b.grant_id)return c.json({error:'the class connection changed; review the request again',reason:'connection_changed'},409);
+ }
  const prior=await c.env.HPS_DB.prepare('SELECT * FROM classroom_shares WHERE id=?').bind(b.id).first<Row>();
  const contentJson=JSON.stringify(content);
- if(prior){if(prior.cohort_id===p.c&&prior.student_id===p.u&&prior.profile_id===p.p&&prior.recipient_id===b.recipient_id&&prior.kind===b.kind&&prior.content_json===contentJson&&prior.expires_at>now())return c.json(studentView(prior));return c.json({error:'request ID conflict'},409);}
+ // A retried id is the same request only with the same consent envelope: learner, class, recipient, kind, exact content and the
+ // expiry that duration was granted at creation (capped by the token). Anything else is a conflict, so a retry can neither widen
+ // the granted expiry nor pass an earlier class's record off as this class's request.
+ if(prior){if(prior.cohort_id===p.c&&prior.student_id===p.u&&prior.profile_id===p.p&&prior.session_id===session.session_id&&prior.recipient_id===b.recipient_id&&prior.kind===b.kind&&prior.content_json===contentJson&&prior.expires_at===Math.min(p.exp,prior.created_at+b.duration_minutes*60)&&prior.expires_at>now())return c.json(studentView(prior));return c.json({error:'request ID conflict',reason:prior.student_id===p.u&&prior.session_id!==session.session_id?'class_changed':'request_id_conflict'},409);}
  const stamp=now(),expires=Math.min(p.exp,stamp+b.duration_minutes*60);
  const count=await c.env.HPS_DB.prepare('SELECT count(*) AS n FROM classroom_shares WHERE cohort_id=? AND student_id=? AND expires_at>?').bind(p.c,p.u,stamp).first<{n:number}>();
  if((count?.n??0)>=100)return c.json({error:'active share limit reached; withdraw old shares'},429);

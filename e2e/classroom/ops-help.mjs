@@ -34,7 +34,8 @@ try {
   let n = 0; for (const s of seats) { n++; if (s.seat_id === 'A3') continue; const c = (await local.pair(s.seat_id, 1, n)).conn.json; assert.equal((await local.sync(c.credential, plan[s.seat_id] ?? [local.event(1, 'activation', { stage: 'runtime_ready' })], n)).status, 200); }
   local.db.prepare("UPDATE ops_latest_state SET last_received_at=? WHERE seat_id='A4'").run(Date.now() - 25 * 60000);
   // Shares, addressed to the instructor that connects below. Only metadata decides what is open; the content is never read here.
-  const recipient = 'teacher-help', teacher = await local.teacher(recipient);
+  // Addressed to the instructor who paired these seats (local.pair → teacher-a): the Service accepts only the assigned recipient (AT-47).
+  const recipient = 'teacher-a', teacher = await local.teacher(recipient);
   const share = async (student, kind = 'help') => { const t = await local.student(student), id = crypto.randomUUID(); const r = await local.request('/v1/classroom/shares', 'POST', { id, recipient_id: recipient, kind, consent: true, duration_minutes: 480, content: { prompt: '[합성] ' + student + ' 질문' } }, t); assert.equal(r.status, 201, r.raw); return { id, t, revision: r.json.revision }; };
   const answer = (s, status = 'answered') => local.request(`/admin/cohorts/${local.cohort}/classroom/shares/${s.id}`, 'PUT', { expected_revision: s.revision, status, feedback: '[합성] 답변', next_action: '[합성] 다음' }, teacher);
   const b2 = await share('student-b'), d4 = await share('student-d'); assert.equal((await answer(d4, 'reviewing')).status, 200);
