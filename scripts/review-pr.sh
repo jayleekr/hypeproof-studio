@@ -66,6 +66,7 @@ cleanup() {
   pkill -f "wrangler dev.*--port $WRANGLER_PORT" 2>/dev/null || true
   pkill -f "HypeProof Studio Dev.app/Contents/" 2>/dev/null || true
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
+  [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
     echo "Removing worktree $WORKTREE_DIR..."
     git -C "$REPO" worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
@@ -255,15 +256,16 @@ if [[ -z "$TOKEN" ]]; then
   echo "$TOKEN_JSON" >&2
 else
   echo "Token issued."
-  # Copy to clipboard if pbcopy available
+  # Write token to file for HPS_DEV_ISSUER_TOKEN_FILE auto-seed in Dev app.
+  # Cleanup trap removes the file. Never print the token value in logs.
+  ISSUER_TOKEN_FILE="$WORKTREE_DIR/issuer-token.txt"
+  printf '%s' "$TOKEN" > "$ISSUER_TOKEN_FILE"
+  export HPS_DEV_ISSUER_TOKEN_FILE="$ISSUER_TOKEN_FILE"
+  echo "Instructor token written to worktree (auto-injected into Dev app)."
+  # Also copy to clipboard as fallback for manual paste.
   if command -v pbcopy >/dev/null 2>&1; then
     echo "$TOKEN" | pbcopy
-    echo "Token copied to clipboard."
-  else
-    echo ""
-    echo "── TOKEN (paste into the app) ──────────────────────"
-    echo "$TOKEN"
-    echo "────────────────────────────────────────────────────"
+    echo "Token also copied to clipboard."
   fi
 fi
 

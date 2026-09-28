@@ -416,6 +416,19 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
     }),
 
+    vscode.commands.registerCommand("hypeproof-chat.chalk.setInstructorToken", async () => {
+      const input = await vscode.window.showInputBox({
+        prompt: "강사 토큰을 입력하세요",
+        password: true,
+        placeHolder: "issuer 토큰",
+        ignoreFocusOut: true,
+      });
+      if (!input || input.trim().length === 0) return;
+      await context.secrets.store(ISSUER_TOKEN_KEY, input.trim());
+      provider.refreshConfig();
+      vscode.window.showInformationMessage("강사 토큰이 저장됐습니다.");
+    }),
+
     // #1297 (E4-2): 버튼과 AI가 같은 Chalk 도구 함수를 부른다(SUB-07).
     // 여기서 등록되는 명령은 명령 팔레트에서 수동으로 부를 수 있고,
     // AI 도구 호출도 chalk/tools.ts의 같은 execCheckPlan을 거친다.
@@ -994,6 +1007,22 @@ async function applyTestBackdoors(
   // Pre-seed issuer token for mint-flow tests (G5/G6).
   if (issuerToken && issuerToken.length > 0) {
     await context.secrets.store(ISSUER_TOKEN_KEY, issuerToken);
+  }
+  // Dev-only issuer token auto-seed: only in "HypeProof Studio Dev" with HPS_TEST_E2E unset.
+  // Release builds ignore this env var even if it happens to be set.
+  // Token value is never logged.
+  if (vscode.env.appName === "HypeProof Studio Dev" && !process.env.HPS_TEST_E2E) {
+    const devIssuerTokenFile = process.env.HPS_DEV_ISSUER_TOKEN_FILE;
+    if (devIssuerTokenFile) {
+      try {
+        if (fs.existsSync(devIssuerTokenFile)) {
+          const t = fs.readFileSync(devIssuerTokenFile, "utf8").trim();
+          if (t.length > 20) {
+            await context.secrets.store(ISSUER_TOKEN_KEY, t);
+          }
+        }
+      } catch { /* ignore — best effort */ }
+    }
   }
   return { testStateFileFound };
 }

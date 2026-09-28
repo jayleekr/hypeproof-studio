@@ -18,6 +18,7 @@ import {OBSERVATION_FORMATS, validateFindings, asCapabilityModel, type Observati
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
 import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
+import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
@@ -3783,9 +3784,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const isInstructor = await this._instructorMode.checkInstructorMode(token, proxyUrl);
-    const instructorBrief = (isInstructor && token)
-      ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
+    // Instructor auth always uses the issuer token slot, never the student token.
+    const issuerToken = await this.context.secrets.get(ISSUER_TOKEN_KEY);
+    const isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    const instructorBrief = (isInstructor && issuerToken)
+      ? await this._instructorMode.fetchInstructorBrief(issuerToken, proxyUrl)
       : undefined;
     const instructorConnection = isInstructor
       ? (local?.provider === "claude" ? "내 Claude 구독"

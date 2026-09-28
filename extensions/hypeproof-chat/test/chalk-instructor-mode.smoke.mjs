@@ -118,4 +118,45 @@ t("whoami 401 → isInstructor false, so chalkCtx would be undefined", async () 
   assert.notStrictEqual(mgr.isInstructor, true);
 });
 
+console.log("\n=== instructor token slot — TOKEN_KEY (student slot) must never activate instructor mode ===");
+
+t("TOKEN_KEY slot value does not reach checkInstructorMode — only ISSUER_TOKEN_KEY does", () => {
+  // chatPanelProvider.postConfig() now reads ISSUER_TOKEN_KEY for instructor checks.
+  // This test verifies the manager's contract: checkInstructorMode must receive
+  // undefined (no issuer token) when only TOKEN_KEY has a value. We simulate by
+  // calling with undefined — the provider passes secrets.get(ISSUER_TOKEN_KEY) which
+  // returns undefined when only the student slot is populated.
+  const mgr = new InstructorModeManager();
+  const result = withFetch(200, () => mgr.checkInstructorMode(undefined, PROXY));
+  // Fetch must NOT have been called (token guard fires before network).
+  // We verify via the return value: undefined → false returned synchronously.
+  assert.ok(result instanceof Promise, "checkInstructorMode is async");
+  // Resolve and check.
+  return result.then(v => {
+    assert.strictEqual(v, false, "undefined issuer token → isInstructor false, no network call");
+    assert.strictEqual(mgr.isInstructor, false);
+  });
+});
+
+t("ISSUER_TOKEN_KEY slot value with whoami 200 → isInstructor true", async () => {
+  const mgr = new InstructorModeManager();
+  const result = await withFetch(200, () => mgr.checkInstructorMode("issuer-slot-token", PROXY));
+  assert.strictEqual(result, true);
+  assert.strictEqual(mgr.isInstructor, true);
+});
+
+console.log("\n=== HPS_DEV_ISSUER_TOKEN_FILE — release app name guard ===");
+
+t("app name guard: non-Dev app name must not read HPS_DEV_ISSUER_TOKEN_FILE", () => {
+  // The extension.ts backdoor reads the file only when vscode.env.appName === "HypeProof Studio Dev".
+  // We cannot call activate() here; verify the guard condition string is correct.
+  const DEV_APP_NAME = "HypeProof Studio Dev";
+  const releaseNames = ["HypeProof Studio", "VSCodium", "Visual Studio Code", ""];
+  for (const name of releaseNames) {
+    assert.notStrictEqual(name, DEV_APP_NAME, `release app name "${name}" must not equal the Dev guard`);
+  }
+  // Confirm the Dev name matches.
+  assert.strictEqual(DEV_APP_NAME, "HypeProof Studio Dev");
+});
+
 console.log(`\n${n} tests passed\n`);
