@@ -2064,6 +2064,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-report-sessions.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/g4-journey.mjs"
         }
       ]
     },
@@ -2461,6 +2467,9 @@
         },
         {
           "path": "e2e/classroom/mac-help-windows.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-report-input.ts"
         }
       ]
     },
@@ -2533,6 +2542,9 @@
       "sources": [
         {
           "path": "docs/testing/classroom-admin.md"
+        },
+        {
+          "path": "e2e/classroom/ops-g1-layout.mjs"
         }
       ]
     },

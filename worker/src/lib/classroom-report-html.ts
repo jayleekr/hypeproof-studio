@@ -19,7 +19,7 @@ const ASSIST: Record<string, string> = { assisted: 'AI나 강사의 도움을 �
 function evidenceHtml(e: DraftEvidence): string {
   const who = ACTOR[e.actor ?? 'unknown'] ?? ACTOR.unknown, src = SOURCE[e.source_state ?? 'unverified'] ?? '';
   // Only the learner's own, non-simulated words carry the accent. AI output, other people and practice cases read as context.
-  return `<figure class="quote${e.actor === 'student' && e.source_state !== 'simulated' ? '' : ' context'}"><blockquote>${esc(e.quote)}</blockquote><figcaption>${esc([who, src].filter(Boolean).join(' · '))}</figcaption></figure>`;
+  return `<figure class="quote${e.actor === 'student' && e.source_state !== 'simulated' ? '' : ' context'}"><blockquote>${esc(e.quote)}</blockquote><figcaption>${esc([who, src, e.session_id ? `세션 ${e.session_id} · 줄 ${e.locator?.line ?? e.event_id ?? '?'}` : ''].filter(Boolean).join(' · '))}</figcaption></figure>`;
 }
 function sectionHtml(s: ReportSection, index: number): string {
   // "Not seen yet" for five capabilities is one sentence with five names, not the same phrase five times.

@@ -139,7 +139,7 @@ try {
   const steps = await page.locator('#ops-wrap-steps > li').evaluateAll((l) => l.map((x) => ({ cls: x.className, text: x.innerText })));
   assert.equal(steps.length, 4); assert.match(steps[0].text, /^1 기록 회수 ○ 시작 전\n[\s\S]*아직 시작 전/); assert.equal(steps[0].cls, 'wrap-idle');
   for (const i of [1, 2, 3]) { assert.equal(steps[i].cls, 'wrap-off', 'reports and delivery are off in this class: ' + steps[i].text); assert.match(steps[i].text, /^\d [^\n]+ 사용할 수 없음\n/, 'off is said in words'); }
-  assert.match(steps[1].text, /보고서 기능이 꺼져 있어 초안을 만들지 않습니다/); assert.match(steps[3].text, /발송 절차가 꺼져 있습니다/); assert.match(await page.locator('#ops-wrap-note').innerText(), /종류별 회수 기록\(\/3\)을 보고서 입력으로 쓰는 경로/);
+  assert.match(steps[1].text, /보고서 기능이 꺼져 있어 초안을 만들지 않습니다/); assert.match(steps[3].text, /발송 절차가 꺼져 있습니다/); const pendingPaths = await page.locator('#ops-wrap-note').innerText(); assert.match(pendingPaths, /여러 회차의 반복 패턴 본문/); assert.match(pendingPaths, /카카오·문자·QR 발송/); assert.doesNotMatch(pendingPaths, /종류별 회수 기록/);
   await page.locator('nav.flow a[href="#ops-wrap-title"]').click(); await page.screenshot({ path: path.join(out, 'g1-wrapup-1280x720.png') }); results.wrap_steps = steps;
   console.log('PASS wrap-up: four steps from the Service state; switched-off steps say unavailable and why; not-yet-connected paths named');
 

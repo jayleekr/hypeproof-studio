@@ -456,3 +456,15 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 **이 설계로 닫히지 않는 것.** 적용 시점의 운영 정책, INT-CO-04 승인 범위, class 개설 좌석 허용, `lesson_settings` 부여 대상, 학생 안내 문구(SX owner), spool 출처 필드의 고지 포함, Cloudflare plan — [요구 문서의 미결 표](../requirements/classroom-admin.md#remote-management-u3-20260921). 보고서가 기준 변경 구간을 turn 단위로 나눠 서술하는 일(그때까지 섞인 입력은 평가 보류), 학생 프롬프트·결과물의 대상 회수, U4(AT-40)·공통 결과 화면(AT-41)은 이 단위의 범위가 아니다. Windows·학교망·staging/production D1·실제 모델·메일은 계속 NOT RUN이다.
 
 (당시 #1119~#1169 스택의 범위 기준) 인수는 관제·보존형 복구·단일 회차 보고서다. 현재 사용자 목표인 원격관리 RM-1~5의 인수와 혼동하지 않는다 — 그쪽의 현황(2026-09-21 저녁): **U1은 구현·인수**, **U2(공지·자료 배포)는 구현되고 조율 측이 로컬 범위를 인수**(병합·운영 활성화·Windows·학교망·staging은 아님), **U3(프롬프트·설정)는 설계가 독립 검토 중이며 인수 전**(코드 없음), U4(AT-40)와 공통 결과 화면(AT-41)은 미착수다. 원래 요청의 누적 패턴/PDF 첨부/다른 전달 채널은 후속 범위를 유지하며 ‘제품 전체 개발 완료’로 표현하지 않는다. 현재 CI CLEAN은 비작성자 승인·최신 main 통합·실수업 가동을 대신하지 않는다.
+
+
+### 2026-09-24 completion slice (#1301)
+
+The user accepted the 2026-09-23 single-class completion proposal and requested
+implementation through the existing collaboration rules. G3 first closes /3 whole-
+record wrap-up into session-qualified reports and existing approved link delivery.
+Cross-week pattern interpretation and PDF attachments remain explicit follow-ups,
+not silently completed G3 requirements. G4 runs the same authored curriculum and
+classroom journey in an isolated real Mac shell with synthetic infrastructure.
+A successful local run will mean integrated rehearsal, not TJ's unassisted real
+classroom operation. Owner adoption and production flags are not inferred.

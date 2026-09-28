@@ -46,6 +46,8 @@ export async function runOnce({ service, credential, evaluate, legacyEvaluate, f
     // The legacy seven-axis report keeps its own engine (skills/hain7-report): this runner never converts between models.
     const engine = legacy ? legacyEvaluate : evaluate;
     if (!engine) throw new Error('legacy_engine_not_configured');
+    // This local-engine interface accepts a single spool only; it must not flatten /3 parts.
+    if (job.input?.files && !job.input.files.includes('events.jsonl')) throw new Error('multisession_requires_service_evaluator');
     const res = await call(`/jobs/${job.id}/input/events.jsonl?generation=${gen}`); if (!res.ok) throw new Error('input_unavailable');
     const bytes = await res.arrayBuffer(); if (bytes.byteLength > MAX_INPUT_BYTES) throw new Error('input_too_large');
     const events = new TextDecoder().decode(bytes);
