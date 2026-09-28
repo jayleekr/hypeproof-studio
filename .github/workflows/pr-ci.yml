@@ -56,6 +56,8 @@ jobs:
         run: |
           node e2e/unified-release/gate.test.mjs
           node scripts/test-unified-launcher.mjs
+      - name: review-pr.sh shell safety (#1302 SIGPIPE + ERR trap)
+        run: bash scripts/test/review-pr-shell.test.sh
 
   dev-channel-tag-classifier:
     name: dev-channel / tag-is-prerelease
