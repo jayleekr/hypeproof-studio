@@ -22,6 +22,7 @@ import {
 import { NOT_FENCED, coverageStatements, settleStatements } from '../lib/classroom-distribution-store';
 import { opsEnabled } from './classroom-ops';
 import { parseLesson } from '../lib/classroom-ops';
+import { confirmationRequired, readinessOf, versionUsable } from '../lib/lesson-rehearsal-store';
 import { readLesson } from '../lib/lesson-delivery';
 import { readOpening } from '../lib/cohort-binding';
 import { getProfile } from '../profiles';
@@ -91,6 +92,10 @@ async function settingAdmissible(c: any, run: Run, content: Content): Promise<Re
   if (!target) return c.json({ error: 'no confirmed version with this id resolves for the run profile (a draft, another cohort, or a policy that no longer fits)', reason: 'lesson_unavailable' }, 409);
   if (target.sha256 !== ref.sha256) return c.json({ error: 'the version differs from what was reviewed', reason: 'lesson_mismatch' }, 409);
   if (runtimeOf(target, run.profile_id) !== runtimeOf(base, run.profile_id)) return c.json({ error: 'this version runs on another runtime; a class does not switch runtime mid-session', reason: 'setting_runtime_change' }, 409);
+  // #1012 · #751 G2 — where confirmation is required, a switch goes only to a version confirmed on a passed rehearsal. The
+  // return to the run's own version ('base') is never blocked: it is what the class was opened with.
+  if (target.version !== base.version && !(await versionUsable(c.env, { cohort, course: ref.course_id, version: target.version, profileId: run.profile_id, lessonSha: target.sha256, content: target.content })))
+    return c.json({ error: 'confirm this version after a passed learner-condition rehearsal first', reason: 'version_not_confirmed' }, 409);
   return { pin, target, base };
 }
 const RUN_OPEN = "EXISTS (SELECT 1 FROM class_run_ops o WHERE o.class_run_id=? AND json_extract(o.flags_json,'$.ops_distribute')=1 AND o.ends_at>? AND NOT EXISTS (SELECT 1 FROM sessions z WHERE z.id=o.class_run_id AND z.ended_at IS NOT NULL))";
@@ -110,10 +115,13 @@ classroomDistributionTeacher.get(root + '/setting-options', async (c) => {
     const options = [];
     for (const r of (rows.results ?? []).slice(0, MAX_SETTING_OPTIONS)) {
       const l = r.version === base.version ? base : await readLesson(c.env, cohort, pin.course_id, r.version, run.profile_id);
-      const why = !l ? 'lesson_unavailable' : runtimeOf(l, run.profile_id) !== runtimeOf(base, run.profile_id) ? 'setting_runtime_change' : '';
-      options.push({ version: r.version, is_run_version: r.version === base.version, selectable: !why, reason: why, ...(l ? { sha256: l.sha256, title: l.content.title ?? '', impact: lessonImpact(base.content, l.content) } : {}) });
+      const ready = l ? await readinessOf(c.env, { cohort, course: pin.course_id, version: r.version, profileId: run.profile_id, lessonSha: l.sha256, content: l.content }) : null;
+      const confirmedNow = !!ready?.confirmed && ready.confirmation_current;
+      const why = !l ? 'lesson_unavailable' : runtimeOf(l, run.profile_id) !== runtimeOf(base, run.profile_id) ? 'setting_runtime_change'
+        : r.version !== base.version && confirmationRequired(c.env) && !confirmedNow ? 'not_confirmed' : '';
+      options.push({ version: r.version, is_run_version: r.version === base.version, selectable: !why, reason: why, rehearsal: ready?.state ?? 'not_run', confirmed: confirmedNow, ...(l ? { sha256: l.sha256, title: l.content.title ?? '', impact: lessonImpact(base.content, l.content) } : {}) });
     }
-    return c.json({ course_id: pin.course_id, run_version: base.version, options, truncated: (rows.results ?? []).length > MAX_SETTING_OPTIONS, applies: 'next_question' }, 200);
+    return c.json({ course_id: pin.course_id, run_version: base.version, options, truncated: (rows.results ?? []).length > MAX_SETTING_OPTIONS, applies: 'next_question', confirmation_required: confirmationRequired(c.env) }, 200);
   } catch (err) { console.error('setting options unreadable:', err); return c.json({ error: 'setting options cannot be read right now', reason: 'distribution_unavailable' }, 503); }
 });
 

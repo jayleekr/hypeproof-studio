@@ -1450,3 +1450,13 @@ html, body, #root {
 .hp-help-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
 .hp-help-feedback { border-left: 3px solid var(--hp-line); padding-left: 8px; margin: 6px 0; }
 .hp-help-status { font-weight: 600; }
+
+/* #751 G2 — the current step's help choice, work surface and rehearsal notice (quiet controls; region A keeps the Primary). */
+.hp-step-work { display: flex; flex-direction: column; gap: 8px; max-height: none; }
+.hp-help-modes { border: 1px solid var(--hp-line); border-radius: 8px; padding: 8px 10px; margin: 0; }
+.hp-help-modes legend { font-size: 13px; padding: 0 4px; }
+.hp-help-modes label { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+.hp-surface { display: flex; flex-direction: column; gap: 6px; }
+.hp-surface label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.hp-surface textarea, .hp-surface input { font: inherit; width: 100%; box-sizing: border-box; }
+.hp-rehearsal { border: 1px dashed var(--hp-line); border-radius: 8px; padding: 8px 10px; }
