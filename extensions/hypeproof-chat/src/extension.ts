@@ -433,10 +433,14 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       await context.secrets.store(ISSUER_TOKEN_KEY, trimmed);
       await provider.refreshConfig();
-      const isInstructor = provider.isInstructor;
-      if (isInstructor !== true) {
+      const whoamiStatus = provider.lastWhoamiStatus;
+      if (whoamiStatus === "rejected") {
         await context.secrets.delete(ISSUER_TOKEN_KEY);
-        vscode.window.showErrorMessage("강사 토큰이 유효하지 않습니다. 서버 인증에 실패했습니다.");
+        vscode.window.showErrorMessage("강사 토큰이 유효하지 않습니다. 서버가 인증을 거부했습니다.");
+        return;
+      }
+      if (whoamiStatus === "unreachable") {
+        vscode.window.showWarningMessage("서버에 연결하지 못했습니다. 토큰은 저장됐고, 연결되면 강사 모드가 열립니다.");
         return;
       }
       vscode.window.showInformationMessage("강사 토큰이 저장됐습니다.");

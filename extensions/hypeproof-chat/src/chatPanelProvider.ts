@@ -847,6 +847,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this._instructorMode.isInstructor;
   }
 
+  get lastWhoamiStatus() {
+    return this._instructorMode.lastWhoamiStatus;
+  }
+
   private clearingHistory = false;
   async clearHistory(): Promise<void> {
     if (this.clearingHistory || this.hasActiveStream()) return;

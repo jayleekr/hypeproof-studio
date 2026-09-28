@@ -168,4 +168,36 @@ t("localRuntimeConfig: Dev app name but HPS_DEV_RUNTIME unset → returns null �
   assert.strictEqual(result, null, "Dev app + runtime off → null → backdoor gate must not fire");
 });
 
+console.log("\n=== whoami status — unreachable must not delete token ===");
+
+t("network failure → lastWhoamiStatus = unreachable, isInstructor false", async () => {
+  const mgr = new InstructorModeManager();
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("network error"); };
+  try {
+    const result = await mgr.checkInstructorMode("issuer-token", PROXY);
+    assert.strictEqual(result, false, "network error → isInstructor false");
+    assert.strictEqual(mgr.lastWhoamiStatus, "unreachable", "network error → lastWhoamiStatus unreachable");
+    // Token must NOT be deleted by extension.ts when lastWhoamiStatus is unreachable.
+    // This test verifies the manager exposes the right status so the command can
+    // decide to keep the token and show a warning instead of deleting it.
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+t("rejected → lastWhoamiStatus = rejected, isInstructor false", async () => {
+  const mgr = new InstructorModeManager();
+  const result = await withFetch(401, () => mgr.checkInstructorMode("bad-token", PROXY));
+  assert.strictEqual(result, false);
+  assert.strictEqual(mgr.lastWhoamiStatus, "rejected");
+});
+
+t("ok → lastWhoamiStatus = ok, isInstructor true", async () => {
+  const mgr = new InstructorModeManager();
+  const result = await withFetch(200, () => mgr.checkInstructorMode("good-token", PROXY));
+  assert.strictEqual(result, true);
+  assert.strictEqual(mgr.lastWhoamiStatus, "ok");
+});
+
 console.log(`\n${n} tests passed\n`);

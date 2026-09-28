@@ -1,11 +1,14 @@
 // #1298 — instructor-mode state and server communication.
 // Isolated from chatPanelProvider.ts so instructor logic has a single home.
 
+export type WhoamiStatus = "ok" | "rejected" | "unreachable" | null;
+
 export class InstructorModeManager {
   private _isInstructor: boolean | null = null;
   private _isInstructorToken: string | undefined = undefined;
   private _instructorBrief: string | undefined = undefined;
   private _instructorBriefVersion: number | undefined = undefined;
+  private _lastWhoamiStatus: WhoamiStatus = null;
 
   // Model choice: remembered so first-turn error can revert to prevChoice.
   private _hasPendingModelRevert = false;
@@ -13,6 +16,8 @@ export class InstructorModeManager {
 
   get isInstructor(): boolean | null { return this._isInstructor; }
   get brief(): string | undefined { return this._instructorBrief; }
+  // "ok" = 2xx, "rejected" = 401/403, "unreachable" = network/timeout, null = not checked yet
+  get lastWhoamiStatus(): WhoamiStatus { return this._lastWhoamiStatus; }
 
   // Clears cached state on token change.
   reset(): void {
@@ -20,6 +25,7 @@ export class InstructorModeManager {
     this._isInstructorToken = undefined;
     this._instructorBrief = undefined;
     this._instructorBriefVersion = undefined;
+    this._lastWhoamiStatus = null;
   }
 
   // Stores modelId as the active model choice; remembers prevChoice for revert.
@@ -50,8 +56,14 @@ export class InstructorModeManager {
 
   // Checks GET /admin/chalk/whoami with the current token.
   // Caches result per token so we don't hammer the server on every postConfig.
+  // Sets lastWhoamiStatus: "ok" (2xx), "rejected" (401/403), or "unreachable" (network/timeout).
   async checkInstructorMode(token: string | undefined, proxyUrl: string): Promise<boolean> {
-    if (!token) { this._isInstructor = false; this._isInstructorToken = undefined; return false; }
+    if (!token) {
+      this._isInstructor = false;
+      this._isInstructorToken = undefined;
+      this._lastWhoamiStatus = null;
+      return false;
+    }
     if (this._isInstructor !== null && this._isInstructorToken === token) return this._isInstructor;
     try {
       const base = proxyUrl.replace(/\/v1\/?$/, '');
@@ -60,8 +72,10 @@ export class InstructorModeManager {
         signal: AbortSignal.timeout(5000),
       });
       this._isInstructor = res.ok;
+      this._lastWhoamiStatus = res.ok ? "ok" : "rejected";
     } catch {
       this._isInstructor = false;
+      this._lastWhoamiStatus = "unreachable";
     }
     this._isInstructorToken = token;
     return this._isInstructor;
