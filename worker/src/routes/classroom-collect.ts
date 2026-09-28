@@ -27,6 +27,26 @@ type Db = Env['HPS_DB'];
 const json = async (c: any) => { try { return await c.req.json(); } catch { return null; } };
 const NOTICE_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const audit = (db: Db, run: string, seat: string, kind: string, id: string, action: string, detail: unknown, at: number) => db.prepare('INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) VALUES(?,?,?,?,?,?,?)').bind(run, seat, kind, id, action, JSON.stringify(detail), at);
+/**
+ * #751 U1b — a seal decides from bytes it read BEFORE it commits, and R2 and D1 share no transaction: a withdrawal or an erasure
+ * can land in between (reproduced 2026-09-22 in classroom-ops-collect-kinds: a withdrawn item came back `verified` with a receipt
+ * and a fresh binding, or `incomplete` when the erasure had already removed the objects). So the admission is re-read INSIDE the
+ * commit (`sealAdmitted`), and every other statement of the seal hangs on that snapshot row carrying this seal's receipt
+ * (`sealedWith`): a withdrawn learner stays withdrawn, and no binding, basis, outbox or audit row appears for a seal that did not commit.
+ */
+const sealAdmitted = (g: Grant, item: Record<string, any>) => ({ sql: "NOT EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=? AND t.student_id=?) AND EXISTS (SELECT 1 FROM classroom_collect_items x WHERE x.batch_id=? AND x.seat_id=? AND x.state<>'withdrawn')", binds: [g.class_run_id, g.student_id, item.batch_id, item.seat_id] });
+const sealedWith = (g: Grant, item: Record<string, any>, revision: number, receipt: string) => ({ sql: 'EXISTS (SELECT 1 FROM classroom_snapshots s WHERE s.batch_id=? AND s.student_id=? AND s.revision=? AND s.receipt_id=?)', binds: [item.batch_id, g.student_id, revision, receipt] });
+const auditIf = (db: Db, when: { sql: string; binds: unknown[] }, run: string, seat: string, action: string, detail: unknown, at: number) => db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'system','collect',?,?,? WHERE ${when.sql}`).bind(run, seat, action, JSON.stringify(detail), at, ...when.binds);
+/** The seal did not commit: say why from what D1 holds now. A withdrawal wins; a concurrent seal of the same revision is replayed or refused as before. */
+const withdrawnNow = async (db: Db, g: Grant, item: Record<string, any>) => !!(await db.prepare('SELECT 1 FROM classroom_collect_tombstones WHERE class_run_id=? AND student_id=?').bind(g.class_run_id, g.student_id).first()) || (await db.prepare('SELECT state FROM classroom_collect_items WHERE batch_id=? AND seat_id=?').bind(item.batch_id, item.seat_id).first<{ state: string }>())?.state === 'withdrawn';
+const withdrawnReply = (c: any) => c.json({ error: 'collection was withdrawn', reason: 'withdrawn' }, 403);
+async function sealNotCommitted(c: any, g: Grant, item: Record<string, any>, revision: number, digest: string): Promise<Response> {
+  const db: Db = c.env.HPS_DB;
+  if (await withdrawnNow(db, g, item)) return withdrawnReply(c);
+  const snap = await db.prepare('SELECT state,receipt_id,manifest_digest,integrity,coverage FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<Record<string, string>>();
+  if (snap?.state === 'sealed' && snap.manifest_digest === digest) return c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, replay: true });
+  return c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
+}
 const liveConsent = (db: Db, run: string, student: string, purpose: string, notice: string, now: number) => db.prepare('SELECT id,basis FROM classroom_consents WHERE class_run_id=? AND student_id=? AND purpose=? AND notice_version=? AND revoked_at IS NULL AND expires_at>? ORDER BY created_at DESC LIMIT 1').bind(run, student, purpose, notice, now).first<{ id: string; basis: string }>();
 
 // ── operator: record a verified guardian consent / withdraw (admin auth only; never an issuer Bearer) ──
@@ -217,11 +237,12 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
     if (!problem) sessionId = String(JSON.parse(metaText).session_id);
   }
   if (problem) {
-    const state = ['file_missing', 'hash_mismatch'].includes(problem) ? 'incomplete' : 'quarantined';
-    await db.batch([
-      db.prepare("UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified'").bind(state, problem, now, item.batch_id, item.seat_id),
-      audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_' + state, { batch_id: item.batch_id, revision, problem }, now),
+    const state = ['file_missing', 'hash_mismatch'].includes(problem) ? 'incomplete' : 'quarantined', open = sealAdmitted(g, item);
+    const res = await db.batch([
+      db.prepare(`UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified' AND ${open.sql}`).bind(state, problem, now, item.batch_id, item.seat_id, ...open.binds),
+      auditIf(db, open, g.class_run_id, g.seat_id, 'snapshot_' + state, { batch_id: item.batch_id, revision, problem }, now),
     ]);
+    if (!(res[1] as any)?.meta?.changes && await withdrawnNow(db, g, item)) return withdrawnReply(c);
     return c.json({ error: 'snapshot did not verify', reason: problem, state }, 422);
   }
   const receipt = crypto.randomUUID(), inputRevision = (item.input_revision ?? 0) + 1;
@@ -232,16 +253,18 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   // The outbox row is still written: the report pipeline turns a non-single basis into a HELD job that the reviewer can see.
   const u3 = await basisTables(db); if (u3 === 'unreadable') return c.json({ error: 'the lesson basis of this input cannot be established right now; nothing was sealed — retry', reason: 'lesson_basis_unreadable' }, 503, { 'retry-after': '30' });
   // Seal, item state and the job outbox commit together: no verified receipt without a queued job, and no job for an unverified input.
-  await db.batch([
-    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now })] : []),
-    db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision),
+  const open = sealAdmitted(g, item), sealed = sealedWith(g, item, revision, receipt);
+  const res = await db.batch([
+    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND ${open.sql}`).bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision, ...open.binds),
+    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now, receipt })] : []),
     // A later verified revision is a NEW input revision. It never silently replaces what a report was built from.
     // `reason` of a verified item is the coverage reason: integrity=verified is not coverage=complete, and the teacher view needs why (AT-41).
-    db.prepare("UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(coverageReason, digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
-    db.prepare('INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', sessionId, m.value.binding ? 'bound' : 'metadata_run', JSON.stringify(m.value.binding?.activity ?? null), JSON.stringify(m.value.binding?.range ?? null), malformed, now),
-    ...(feedsEvaluation ? [db.prepare("INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) VALUES('report_input',?,?,?) ON CONFLICT(kind,dedupe_key) DO NOTHING").bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage }), now)] : []),
-    audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}) }, now),
+    db.prepare(`UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=? AND ${sealed.sql}`).bind(coverageReason, digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id, ...sealed.binds),
+    db.prepare(`INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${sealed.sql} ON CONFLICT DO NOTHING`).bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', sessionId, m.value.binding ? 'bound' : 'metadata_run', JSON.stringify(m.value.binding?.activity ?? null), JSON.stringify(m.value.binding?.range ?? null), malformed, now, ...sealed.binds),
+    ...(feedsEvaluation ? [db.prepare(`INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) SELECT 'report_input',?,?,? WHERE ${sealed.sql} ON CONFLICT(kind,dedupe_key) DO NOTHING`).bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage }), now, ...sealed.binds)] : []),
+    auditIf(db, sealed, g.class_run_id, g.seat_id, 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}) }, now),
   ]);
+  if ((res[0] as any)?.meta?.changes !== 1) return sealNotCommitted(c, g, item, revision, digest);
   return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}), input_revision: inputRevision }, 201);
 });
 
@@ -271,23 +294,26 @@ async function sealCollection(c: any, g: Grant, item: Record<string, any>, revis
       for (const f of (JSON.parse(storedJson || '[]') as Array<{ name: string }>)) { await c.env.HPS_TRACES.delete(key(f.name)); removed++; }
       await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(item.batch_id, g.student_id, revision).run();
     }
-    await db.batch([
-      db.prepare("UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified'").bind(state, v.problem, now, item.batch_id, item.seat_id),
-      audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_' + state, { batch_id: item.batch_id, revision, problem: v.problem, ...(removed ? { removed_files: removed } : {}) }, now),
+    const open = sealAdmitted(g, item), res = await db.batch([
+      db.prepare(`UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified' AND ${open.sql}`).bind(state, v.problem, now, item.batch_id, item.seat_id, ...open.binds),
+      auditIf(db, open, g.class_run_id, g.seat_id, 'snapshot_' + state, { batch_id: item.batch_id, revision, problem: v.problem, ...(removed ? { removed_files: removed } : {}) }, now),
     ]);
+    if (!(res[1] as any)?.meta?.changes && await withdrawnNow(db, g, item)) return withdrawnReply(c);
     return c.json({ error: 'snapshot did not verify', reason: v.problem, state }, 422);
   }
   const receipt = crypto.randomUUID(), inputRevision = (item.input_revision ?? 0) + 1;
   const u3 = await basisTables(db); if (u3 === 'unreadable') return c.json({ error: 'the lesson basis of this input cannot be established right now; nothing was sealed — retry', reason: 'lesson_basis_unreadable' }, 503, { 'retry-after': '30' });
   const current = col.parts.find((p) => p.current) ?? col.parts[0]!;
-  await db.batch([
-    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now })] : []),
-    db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, v.coverage, receipt, now, item.batch_id, g.student_id, revision),
-    db.prepare("UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(v.reason, digest, v.coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
+  const open = sealAdmitted(g, item), sealed = sealedWith(g, item, revision, receipt);
+  const res = await db.batch([
+    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND ${open.sql}`).bind(digest, v.coverage, receipt, now, item.batch_id, g.student_id, revision, ...open.binds),
+    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now, receipt })] : []),
+    db.prepare(`UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=? AND ${sealed.sql}`).bind(v.reason, digest, v.coverage, receipt, inputRevision, now, item.batch_id, item.seat_id, ...sealed.binds),
     // range_json holds the extent the instructor view reads — numbers, times, flags and kinds. The parts' session ids stay in the part files.
-    db.prepare("INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'bound',?,?,0,?) ON CONFLICT DO NOTHING").bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', current.spool_session_id, JSON.stringify(col.activity ?? null), JSON.stringify(v.extent), now),
-    audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage: v.coverage, kinds: col.kinds, sessions: col.parts.length, lines: v.extent.lines, included: v.extent.included, ...(v.reason ? { coverage_reason: v.reason } : {}) }, now),
+    db.prepare(`INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,'bound',?,?,0,? WHERE ${sealed.sql} ON CONFLICT DO NOTHING`).bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', current.spool_session_id, JSON.stringify(col.activity ?? null), JSON.stringify(v.extent), now, ...sealed.binds),
+    auditIf(db, sealed, g.class_run_id, g.seat_id, 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage: v.coverage, kinds: col.kinds, sessions: col.parts.length, lines: v.extent.lines, included: v.extent.included, ...(v.reason ? { coverage_reason: v.reason } : {}) }, now),
   ]);
+  if ((res[0] as any)?.meta?.changes !== 1) return sealNotCommitted(c, g, item, revision, digest);
   return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage: v.coverage, ...(v.reason ? { coverage_reason: v.reason } : {}), coverage_reasons: v.reasons, input_revision: inputRevision }, 201);
 }
 

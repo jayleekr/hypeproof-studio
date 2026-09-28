@@ -171,7 +171,7 @@ try {
   assert.equal(await draftOf(chat), baseline.draft, 'the composer draft is untouched'); step('H3 sent after explicit consent, 65 s after the preview; the Service stored exactly the previewed content for teacher-a in this class, until exactly the previewed end', { share: S1.id, stored_expires_at: S1.expires_at, previewed_end: preview.end, sent_after_preview_s: Math.round((Date.now() - previewedAt) / 1000) });
 
   // ── H4 instructor: the existing /manage help queue shows it; open, answer; A2 untouched; the selection stays on A1 ──
-  await page.locator('#refresh').click(); const helpItem = page.locator('#ops-help-list li').filter({ hasText: learners[0] }); await helpItem.waitFor({ timeout: 30000 });
+  await page.locator('#refresh').click(); await page.locator('#ops-help-toggle').filter({ hasText: '펼치기' }).click({ timeout: 30000 }); /* #751 U1b: the requests are folded behind the summary line */ const helpItem = page.locator('#ops-help-list li').filter({ hasText: learners[0] }); await helpItem.waitFor({ timeout: 30000 });
   const queue = (await page.locator('#ops-help-list').innerText()).replace(/\s+/g, ' '); assert.match(queue, new RegExp(learners[1]), 'the second learner\'s request is listed too');
   await helpItem.getByRole('button', { name: '요청 열기' }).click(); await page.locator('#detail-title').filter({ hasText: learners[0] }).waitFor();
   const opened = (await page.locator('#content').innerText()).replace(/\s+/g, ' '); assert.match(opened, /학생이 직접 쓴 질문/); assert.ok(opened.includes(QUESTION.replace(/\s+/g, ' '))); assert.match(opened, /Q-HELP/);

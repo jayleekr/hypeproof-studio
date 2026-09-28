@@ -88,8 +88,15 @@ local.db.prepare("UPDATE ops_latest_state SET last_received_at=? WHERE seat_id='
 const share = async (sid, kind, content) => { const t = await local.student(sid), id = crypto.randomUUID(); const r = await local.request('/v1/classroom/shares', 'POST', { id, recipient_id: 'teacher-a', kind, consent: true, duration_minutes: 480, content }, t); if (r.status !== 201 && r.status !== 200) throw Error('share ' + sid + ': ' + r.status + ' ' + r.raw); return { id, t, revision: r.json.revision }; };
 const answer = (s) => local.request(`/admin/cohorts/${local.cohort}/classroom/shares/${s.id}`, 'PUT', { expected_revision: s.revision, status: 'answered', feedback: '[합성] 확인할 지점을 적었습니다.', next_action: '[합성] 390px에서 다시 보기' }, teacher);
 const ask = (sid, text) => share(sid, 'help', { prompt: '[합성] ' + text });
-await share('synth-08', 'help', { prompt: '[합성] 미리보기에서 버튼이 안 보여요. 어디부터 확인하면 될까요?', verification: '[합성] 390px 화면에서 확인함' });
-await ask('synth-14', 'AI가 대답을 안 해요. 제가 뭘 잘못했나요?'); await ask('synth-18', '다음 단계에서 무엇을 확인해야 할지 모르겠어요.');
+// HPS_UI_PREVIEW_HELP = none | many (default: the three above) — the help summary at 0, 3 and a dozen open requests (#751 U1b UI).
+const HELP = process.env.HPS_UI_PREVIEW_HELP || 'three';
+if (HELP !== 'none') {
+  await share('synth-08', 'help', { prompt: '[합성] 미리보기에서 버튼이 안 보여요. 어디부터 확인하면 될까요?', verification: '[합성] 390px 화면에서 확인함' });
+  await ask('synth-14', 'AI가 대답을 안 해요. 제가 뭘 잘못했나요?'); await ask('synth-18', '다음 단계에서 무엇을 확인해야 할지 모르겠어요.');
+}
+if (HELP === 'many') for (const [i, sid] of ['synth-01', 'synth-02', 'synth-03', 'synth-04', 'synth-11', 'synth-13', 'synth-15', 'synth-16', 'synth-17'].entries()) {
+  const s = await ask(sid, '[합성] 도움 요청 ' + (i + 1)); if (i === 0) local.db.prepare('UPDATE classroom_shares SET expires_at=?, created_at=? WHERE id=?').run(Math.floor(Date.now() / 1000) + 600, Math.floor(Date.now() / 1000) - 25 * 60, s.id);
+}
 await share('synth-12', 'submission', { artifact_url: 'https://example.invalid/synthetic-project', verification: '[합성] 기대 조건 3개 중 2개 확인' });
 { const s = await ask('synth-05', '제출 전에 확인할 것이 있나요?'); if ((await answer(s)).status !== 200) throw Error('answer synth-05'); }
 { const s = await ask('synth-06', '색이 이상해요.'), a = await answer(s); const c = await local.request(`/v1/classroom/shares/${s.id}/confirm`, 'POST', { expected_revision: a.json.revision }, s.t); if (c.status !== 200) throw Error('confirm synth-06 ' + c.raw); }

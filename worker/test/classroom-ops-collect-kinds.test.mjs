@@ -207,5 +207,98 @@ try {
     assert.ok(bytes.prompts < bytes.record && bytes.artifacts < bytes.record, 'a subset kind stores less than the record');
     for (const k of Object.keys(stmts)) assert.ok(stmts[k] <= 16, 'a /3 seal stays a bounded number of statements: ' + k + '=' + stmts[k]);
   });
+
+  await check('AT-48 withdrawal DURING the seal (while the Service reads R2, or after it read everything and before it commits): withdrawn stays withdrawn — no receipt, no binding, no "incomplete"; asking again gives the same answer', async () => {
+    // (student-a consented again in the cost check above)
+    for (const at of ['first-read', 'after-last-read']) {
+      const b = await collect(['record']), d = device(['record']), traces = f.env.HPS_TRACES, realGet = traces.get.bind(traces); let fired = false, reads = 0;
+      const seal = d.seal; d.seal = async (...a) => {
+        const total = d.peek().files.length;
+        traces.get = async (key) => { const v = await realGet(key); if (!fired && key.includes('/' + b + '/') && (at === 'first-read' || ++reads === total)) { fired = true; assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: false, ...NOTICE }, a1.credential)).status, 200); } return v; };
+        try { return await seal(...a); } finally { traces.get = realGet; }
+      };
+      const r = await App.uploadSnapshot(b, d); assert.ok(fired, at + ': the withdrawal really landed inside the seal');
+      const row = f.db.prepare('SELECT state,reason,receipt_id FROM classroom_collect_items WHERE batch_id=? AND seat_id=?').get(b, 'A1');
+      const sealedRows = f.db.prepare("SELECT count(*) n FROM classroom_snapshots WHERE batch_id=? AND state='sealed'").get(b).n, bindingRows = f.db.prepare('SELECT count(*) n FROM classroom_snapshot_bindings WHERE batch_id=?').get(b).n;
+      assert.deepEqual([r.ok, r.code, row.state, row.reason, row.receipt_id, sealedRows, bindingRows], [false, 'withdrawn', 'withdrawn', 'withdrawn', '', 0, 0], at);
+      assert.deepEqual(keysOf('student-a').filter((k) => k.includes('/' + b + '/')), [], at + ': nothing of the batch is left');
+      const again = await f.request(`/v1/classroom/ops/collect/snapshots/${b}/1/seal`, 'POST', { schema: App.SNAPSHOT_SCHEMA_V3, files: d.peek().files.map((x) => ({ name: x.name, bytes: x.bytes, sha256: x.sha256 })), collection: d.peek().collection }, a1.credential);
+      assert.deepEqual([again.status, again.json.reason], [403, 'withdrawn'], at + ': a repeated seal is refused the same way');
+      assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, ...NOTICE }, a1.credential)).status, 201);
+    }
+  });
+
+  await check('AT-48 review F1: an earlier session that has a session_close and THEN a torn tail is not a proven end — range_unknown with the reason, up to the instructor view', async () => {
+    // just the graceful-restart pair (s1 closed, s2 current); the later sessions of this file are other checks' fixtures
+    const all = await s2.readForCollection(since, ident), p1 = all.others.find((o) => new TextDecoder().decode(o.events).includes('PROMPT-ONE')), base = { ...all, others: [p1] };
+    assert.equal(JSON.parse(new TextDecoder().decode(p1.events).trimEnd().split('\n').at(-1)).type, 'session_close', 'the control: this earlier session really ends with session_close');
+    const torn = { ...base, others: base.others.map((o) => o === p1 ? { ...o, events: new Uint8Array([...o.events, ...new TextEncoder().encode('{"seq":99,"type":"response",')]) } : o) };
+    const b = await collect(['prompts']); assert.deepEqual(await App.uploadSnapshot(b, device(['prompts'], async () => torn)), { ok: true, code: 'receipt_verified' });
+    const it = (await view(b)).items.find((i) => i.seat_id === 'A1'), part = it.extent.parts.find((x) => x.torn_tail);
+    assert.deepEqual([it.coverage, it.coverage_reason, part.current, part.end_proven, part.coverage], ['range_unknown', 'torn_tail_dropped', false, false, 'range_unknown']);
+    // positive control: the same sessions without the torn bytes are complete
+    const ok = await collect(['prompts']); assert.deepEqual(await App.uploadSnapshot(ok, device(['prompts'], async () => base)), { ok: true, code: 'receipt_verified' });
+    assert.equal((await view(ok)).items.find((i) => i.seat_id === 'A1').coverage, 'complete');
+  });
+
+  let big, bigSha;
+  await check('AT-48 review F2: an approved page larger than the spool limit (SPOOL_MAX_ARTIFACT_CHARS) is received as a CUT copy — counted, reason artifact_truncated, never complete; the limit stays', async () => {
+    const { SPOOL_MAX_ARTIFACT_CHARS } = await import('../../extensions/hypeproof-chat/src/sessionSpool.ts');
+    const page = '<html><body>' + 'B'.repeat(SPOOL_MAX_ARTIFACT_CHARS + 500) + 'BIG-PAGE-END</body></html>'; bigSha = h(page);
+    big = spoolAt(); tick(20_000); big.noteIdentity(ident); big.recordArtifactSnapshot({ source: 'existing', path: 'index.html', content: page }); big.recordArtifactApproval({ sha256: bigSha, path: 'index.html', approved: true }); await big.flush();
+    const b = await collect(['artifacts']), before = new Set(f.r2.keys());
+    assert.deepEqual(await App.uploadSnapshot(b, device(['artifacts'], () => big.readForCollection(since, ident))), { ok: true, code: 'receipt_verified' });
+    const mine = stored().filter(([k]) => !before.has(k)).map(([, v]) => v).join('\n');
+    assert.ok(mine.includes('"content_truncated":true') && !mine.includes('BIG-PAGE-END'), 'the spool kept its limit: the stored copy is cut');
+    const it = (await view(b)).items.find((i) => i.seat_id === 'A1');
+    assert.deepEqual([it.coverage, it.coverage_reason, it.extent.received.artifact_approved, it.extent.received.truncated_artifacts, it.extent.parts.find((x) => x.current).truncated_artifacts], ['gaps', 'artifact_truncated', 2, 1, 1]);
+    // negative control: a whole (not cut) page whose content does not hash to its version is not a line the App writes → held
+    const src = await big.readForCollection(since, ident), fr = App.freezeCollection(src, scope, b, NOTICE, ['artifacts'], Date.now()); assert.ok(fr.ok);
+    const texts = new Map(fr.files.map((x) => [x.name, new TextDecoder().decode(x.data)])), owner = { student: a1.student.u, cohort: a1.student.c, profile: a1.student.p, class_run_id: a1.class_run_id, batch_id: b, seat_id: 'A1', ...NOTICE, activity: scope.activity, run_starts_at: run.starts_at, upload_until: run.ends_at + 86_400_000, kinds: ['artifacts'] };
+    assert.equal((await Svc.verifyCollection(texts, fr.binding, owner)).coverage, 'gaps', 'the untouched copy verifies (as cut)');
+    const ek = [...texts.keys()].find((k) => k.endsWith('.events.jsonl') && texts.get(k).includes('"content_truncated":true')), line = JSON.parse(texts.get(ek).split('\n').find((l) => l.includes('"content_truncated":true')));
+    const { content_truncated, content_original_chars, ...hidden } = line;
+    assert.deepEqual([Svc.artifactCut(line), Svc.artifactCut(hidden), Svc.artifactCut({ ...line, content_bytes: 3 })], [true, null, null], 'a cut line must say so consistently');
+    // a whole page edited after its version hash was taken (same length, index re-hashed so only the content check can catch it)
+    const pk = [...texts.keys()].find((k) => k.endsWith('.events.jsonl') && texts.get(k).includes('APPROVED-HTML-v2')), raw = texts.get(pk).split('\n').find((l) => l.includes('APPROVED-HTML-v2')), edited = raw.replace('APPROVED-HTML-v2', 'APPROVED-HTML-v3');
+    const tampered = new Map(texts); tampered.set(pk, texts.get(pk).replace(raw, edited));
+    const ixk = pk.replace('.events.jsonl', '.index.jsonl'), ix = texts.get(ixk).trimEnd().split('\n').map((l) => JSON.parse(l)).map((e) => e.sha256 === h(raw) ? { ...e, sha256: h(edited) } : e);
+    tampered.set(ixk, ix.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const tb = { ...fr.binding, parts: fr.binding.parts.map((p) => `p${p.part}.index.jsonl` === ixk ? { ...p, final_index_sha256: h(JSON.stringify(ix.at(-1))) } : p) };
+    assert.deepEqual(await Svc.verifyCollection(tampered, tb, owner), { problem: 'artifact_content_mismatch' });
+  });
+
+  await check('AT-48 review F3: the index approval must equal the approval line; an approval the kinds asked for must arrive; cancel and the learner\'s last word across sessions still decide', async () => {
+    const b = await collect(['artifacts']), src = await big.readForCollection(since, ident);
+    const owner = { student: a1.student.u, cohort: a1.student.c, profile: a1.student.p, class_run_id: a1.class_run_id, batch_id: b, seat_id: 'A1', ...NOTICE, activity: scope.activity, run_starts_at: run.starts_at, upload_until: run.ends_at + 86_400_000, kinds: ['artifacts'] };
+    // a withdrawn approval (approved=false) in the RAW line, with the index flipped to true — sent as a record so every line travels
+    big.recordArtifactApproval({ sha256: bigSha, path: 'index.html', approved: false }); await big.flush();
+    // the big session alone (its page + both approvals), frozen as a record so every raw line travels, then the index flipped
+    const full = await big.readForCollection(since, ident), rec = App.freezeCollection({ ...full, others: [] }, scope, b, NOTICE, ['record'], Date.now()); assert.ok(rec.ok);
+    assert.deepEqual([...new Set(rec.files.filter((x) => x.name.endsWith('.events.jsonl')).flatMap((x) => new TextDecoder().decode(x.data).trimEnd().split('\n').map((l) => JSON.parse(l).type)))].sort(), ['artifact_approval', 'artifact_snapshot'], 'the control: only artifact lines are in it');
+    const texts = new Map(rec.files.map((x) => [x.name, new TextDecoder().decode(x.data)])), cur = rec.binding.parts.find((p) => p.current), ik = `p${cur.part}.index.jsonl`;
+    const lines = texts.get(ik).trimEnd().split('\n').map((l) => JSON.parse(l)), last = lines.findLastIndex((e) => e.type === 'artifact_approval'); assert.equal(lines[last].approved, false); lines[last].approved = true;
+    texts.set(ik, lines.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const forged = { ...rec.binding, kinds: ['artifacts'], parts: rec.binding.parts.map((p) => p.part === cur.part ? { ...p, final_index_sha256: h(JSON.stringify(lines.at(-1))) } : p) };
+    assert.deepEqual(await Svc.verifyCollection(texts, forged, owner), { problem: 'index_mismatch' }, 'the probe case: raw approved=false, index true');
+    // an index approval with no line at all (not sent) cannot make a version approved either
+    const art = App.freezeCollection(src, scope, b, NOTICE, ['artifacts'], Date.now()); assert.ok(art.ok);
+    const t2 = new Map(art.files.map((x) => [x.name, new TextDecoder().decode(x.data)])), c2 = art.binding.parts.find((p) => p.current), ek = `p${c2.part}.events.jsonl`;
+    const kept = t2.get(ek).trimEnd().split('\n').filter((l) => !l.includes('"artifact_approval"')); t2.set(ek, kept.join('\n') + '\n');
+    assert.deepEqual(await Svc.verifyCollection(t2, { ...art.binding, parts: art.binding.parts.map((p) => p.part === c2.part ? { ...p, included: kept.length } : p) }, owner), { problem: 'index_mismatch' });
+    // the same through the route: a forged index gets no receipt
+    for (const file of rec.files) { const data = file.name === ik ? new TextEncoder().encode(texts.get(ik)) : file.data; assert.equal((await f.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${b}/1/${file.name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + a1.credential }, body: data }), f.env, { waitUntil() {} })).status, 201); }
+    const files = rec.files.map((x) => { const data = x.name === ik ? new TextEncoder().encode(texts.get(ik)) : x.data; return { name: x.name, bytes: data.byteLength, sha256: createHash('sha256').update(data).digest('hex') }; });
+    const sealed = await f.request(`/v1/classroom/ops/collect/snapshots/${b}/1/seal`, 'POST', { schema: App.SNAPSHOT_SCHEMA_V3, files, collection: forged }, a1.credential);
+    assert.deepEqual([sealed.status, sealed.json.reason, sealed.json.state, sealed.json.receipt_id], [422, 'index_mismatch', 'quarantined', undefined], 'no receipt for an index that disagrees with its lines');
+    // the real App after the cancel: the big page is no longer approved and does not travel; the earlier session's approval stands
+    const ok = await collect(['artifacts']), before = new Set(f.r2.keys());
+    assert.deepEqual(await App.uploadSnapshot(ok, device(['artifacts'], () => big.readForCollection(since, ident))), { ok: true, code: 'receipt_verified' });
+    const it = (await view(ok)).items.find((i) => i.seat_id === 'A1');
+    // (s2 of this fixture is now an earlier session that was never closed, so its end stays unproven; nothing is cut any more)
+    assert.deepEqual([it.coverage, it.extent.reasons, it.extent.received.artifact_approved, it.extent.received.truncated_artifacts, it.extent.not_sent.artifact_unapproved], ['range_unknown', ['earlier_session_end_unproven'], 1, 0, 2]);
+    assert.ok(!stored().filter(([k]) => !before.has(k)).some(([, v]) => v.includes('BBBBBBBB')), 'the cancelled version is not sent');
+    await big.close('shutdown');
+  });
 } finally { f.close(); }
 console.log(`classroom-ops-collect-kinds: ${n} checks passed`);
