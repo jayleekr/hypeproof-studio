@@ -33,7 +33,8 @@
     "test:classroom-ops-results": "node --experimental-strip-types --experimental-sqlite classroom/ops-results.mjs",
     "test:classroom-ops-g1": "node --experimental-strip-types --experimental-sqlite classroom/ops-g1-layout.mjs",
     "test:classroom-ops-g1-wrap": "node --experimental-strip-types --experimental-sqlite classroom/ops-g1-wrap.mjs",
-    "test:classroom-authoring-g2": "node --experimental-strip-types --experimental-sqlite classroom/authoring-g2.mjs"
+    "test:classroom-authoring-g2": "node --experimental-strip-types --experimental-sqlite classroom/authoring-g2.mjs",
+    "test:classroom-authoring-mission": "node --experimental-strip-types --experimental-sqlite classroom/authoring-mission.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

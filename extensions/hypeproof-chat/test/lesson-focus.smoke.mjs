@@ -52,6 +52,13 @@ const B = { sha256: "b".repeat(64), version: "m2026.09.22-12", content: { steps:
   assert.deepEqual(r.steps.map((s) => [s.id, s.visited, s.help_offered, s.surface]), [["criteria", true, ["hint", "independent"], "criterion_form"], ["look", false, [], "not_drawn"], ["board", false, [], "not_drawn"]],
     "steps the panel never drew are reported as not drawn — never filled in from the lesson");
   ok("rehearsal report: only what was drawn, only this lesson's steps");
+  // #751 G2 mission — the header's read-back goes out as drawn (bounded), or not at all; the host never fills it from the lesson.
+  const withMission = F.rehearsalReport(A, drawn, { extension_version: "0.1.x", host: "h", runtime: "agent-sdk", os: "darwin", arch: "arm64" }, { week: "2주차", sentence: "예약 버튼이 첫 화면에서 보이게 만든다", completion: ["확인 기준을 먼저 적었다", 7], extra: "x" });
+  assert.deepEqual(withMission.mission, { week: "2주차", sentence: "예약 버튼이 첫 화면에서 보이게 만든다", completion: ["확인 기준을 먼저 적었다"] });
+  assert.deepEqual(F.rehearsalReport(A, drawn, { extension_version: "0.1.x", host: "h", runtime: "agent-sdk", os: "darwin", arch: "arm64" }, { week: null, sentence: "미션이 정해지지 않았습니다.", completion: [] }).mission, { week: null, sentence: "미션이 정해지지 않았습니다.", completion: [] }, "an unset header is reported as drawn — the Service decides");
+  assert.equal("mission" in r, false, "no read-back → no mission field (the Service then says not reported)");
+  assert.equal(F.boundMission({ sentence: "x".repeat(500) }).sentence.length, 240); assert.equal(F.boundMission({ week: "2주차" }), undefined);
+  ok("rehearsal report: the mission header read-back is carried as drawn, bounded, never synthesized");
 }
 {
   const env = buildSdkGatewayEnv({ ANTHROPIC_CUSTOM_HEADERS: "x-hps-lesson-step: ambient\nx-hps-help-mode: demonstrate\nx-other: keep" }, { proxyUrl: "https://synthetic.invalid/v1", token: "t", lessonStep: "criteria", helpMode: "independent" });

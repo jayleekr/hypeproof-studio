@@ -1966,10 +1966,16 @@
           "path": "worker/test/authoring-rehearsal.test.mjs"
         },
         {
+          "path": "worker/test/authoring-mission.test.mjs"
+        },
+        {
           "path": "extensions/hypeproof-chat/test/lesson-focus.smoke.mjs"
         },
         {
           "path": "e2e/classroom/authoring-g2.mjs"
+        },
+        {
+          "path": "e2e/classroom/authoring-mission.mjs"
         },
         {
           "path": "e2e/classroom/mac-curriculum.mjs"

@@ -119,10 +119,20 @@ export function settingPhase(b: Pick<BindingRow, 'binding_seq' | 'activated_at' 
 
 // ── what the instructor is shown before sending a setting ────────────────────
 type StepShape = { id: string; title?: string; instructions?: string; hint?: string; acceptance?: string; help?: { default?: string; allowed?: string[] }; ui?: string };
-interface LessonShape { title?: string; audience?: string; objective?: string; starter?: string; prerequisites?: string; duration_minutes?: number; steps?: Array<StepShape>; assistant?: { display_name?: string }; model?: { default?: string; allowed?: string[] }; features?: { allowed?: string[] } }
+type LearningShape = { week?: number; mission?: string; completion?: Array<{ id?: string; text?: string; event?: string }> };
+interface LessonShape { learning?: LearningShape; title?: string; audience?: string; objective?: string; starter?: string; prerequisites?: string; duration_minutes?: number; steps?: Array<StepShape>; assistant?: { display_name?: string }; model?: { default?: string; allowed?: string[] }; features?: { allowed?: string[] } }
 const TEXT_FIELDS = ['audience', 'objective', 'starter', 'prerequisites', 'duration_minutes'] as const;
 const STEP_TEXT = ['title', 'instructions', 'hint', 'acceptance'] as const;
 const clip = (x: unknown) => { const t = String(x ?? ''); return t.length > 160 ? t.slice(0, 159) + '…' : t; };
+// #751 G2 mission — what the learner's mission header shows (week, mission sentence, completion conditions), and which of the
+// preserved learning fields (observe/never/…; not edited on the authoring page) changed. `null` side = no learning block.
+const missionOf = (l?: LearningShape) => l ? { week: l.week ?? null, mission: clip(l.mission), completion: (l.completion ?? []).map((c) => ({ text: clip(c.text), event: c.event ?? '' })) } : null;
+const learningImpact = (f?: LearningShape, t?: LearningShape) => {
+  const a = missionOf(f), b = missionOf(t), rest = (l?: LearningShape) => Object.fromEntries(Object.entries(l ?? {}).filter(([k]) => !['week', 'mission', 'completion'].includes(k)));
+  const ra = rest(f), rb = rest(t), advanced = [...new Set([...Object.keys(ra), ...Object.keys(rb)])].filter((k) => JSON.stringify(ra[k]) !== JSON.stringify(rb[k])).sort();
+  if (JSON.stringify(a) === JSON.stringify(b) && !advanced.length) return null;
+  return { from: a, to: b, week: (a?.week ?? null) !== (b?.week ?? null), mission: (a?.mission ?? null) !== (b?.mission ?? null), completion: JSON.stringify(a?.completion ?? []) !== JSON.stringify(b?.completion ?? []), advanced };
+};
 const helpOf = (s?: StepShape) => s?.help ? { default: s.help.default ?? null, allowed: [...(s.help.allowed ?? [])].sort() } : null;
 /**
  * Computed by the Service from the two frozen rows — never typed by the instructor. `null` sides mean "the compiled
@@ -146,5 +156,6 @@ export function lessonImpact(from: LessonShape, to: LessonShape) {
         surface: (f.ui ?? null) === (t.ui ?? null) ? null : { from: f.ui ?? null, to: t.ui ?? null } };
     }).filter((x) => x.text.length || x.help || x.surface),
     order_changed: !same(a.filter((x) => b.includes(x)), b.filter((x) => a.includes(x))),
+    learning: learningImpact(from.learning, to.learning),
   };
 }

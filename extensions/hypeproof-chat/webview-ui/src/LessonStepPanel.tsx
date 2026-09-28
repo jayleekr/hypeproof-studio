@@ -10,6 +10,20 @@ type Step = Lesson["content"]["steps"][number];
  * the next question), the step's work surface, and — in an instructor's rehearsal — the report of what this panel drew.
  * Quiet controls only: the screen's one Primary stays region A's "지금 할 행동" (SX-01·SX-04).
  */
+/**
+ * The mission header as the learner sees it right now, read from the rendered DOM (MissionHeader.tsx) — never from the lesson
+ * data. The Service compares it word for word with the candidate, so a stale or missing header cannot pass a rehearsal.
+ */
+function drawnMission() {
+  const h = document.querySelector<HTMLElement>("header.hp-mission");
+  if (!h) return undefined;
+  return {
+    week: h.querySelector(".hp-mission-week")?.textContent ?? null,
+    sentence: h.querySelector(".hp-mission-sentence")?.textContent ?? "",
+    completion: [...h.querySelectorAll(".hp-mission-completion-text")].map((e) => e.textContent ?? ""),
+  };
+}
+
 export function LessonStepPanel(props: {
   lesson: Lesson;
   step: Step;
@@ -50,7 +64,7 @@ export function LessonStepPanel(props: {
         <section className="hp-rehearsal" aria-label="강사 리허설">
           <p><strong>강사 리허설</strong> — 이 수업 후보(버전 {r.version})를 학생 조건으로 시험하고 있습니다. 단계마다 열어 보고 AI에게 한 번 이상 물어본 뒤 결과를 보내세요. 실제 학생 기록이 아닙니다.</p>
           <button type="button" className="hp-cta-quiet" data-rehearsal-send="" disabled={props.busy || r.judged || rs?.state === "sending" || rs?.state === "sent"}
-            onClick={() => post({ type: "rehearsalSend", steps: Object.values(drawn.current.sha === lesson.sha256 ? drawn.current.steps : {}) })}>
+            onClick={() => post({ type: "rehearsalSend", steps: Object.values(drawn.current.sha === lesson.sha256 ? drawn.current.steps : {}), mission: drawnMission() })}>
             {rs?.state === "sending" ? "보내는 중…" : "리허설 결과 보내기"}
           </button>
           {rs && rs.state !== "sending" && <p role="status" data-rehearsal-result={rs.verdict ?? rs.state}>

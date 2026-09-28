@@ -108,9 +108,44 @@ U3의 전달·전환·turn snapshot 계약은 그대로 쓰고, 빠져 있던 �
 `features` 좁히기만). agent-sdk 경로의 도구 좁히기는 여전히 정상 클라이언트에 대한 계약이다(REQ-M38) —
 리허설의 도구 판정은 **요청이 실어 간 도구 이름**을 기록할 뿐 조작된 클라이언트에 대한 Service 경계가 아니다.
 시각적 블록 편집기, 나머지 다섯 작업 화면(`canvas_editor`·`canvas_preview`·`evidence_note`·`coach_request`·
-`metric_board`)의 학생 화면, `learning` 블록(미션·완료 조건) 편집 UI, 여러 대상 변형의 일괄 관리, 확정 요구의
+`metric_board`)의 학생 화면, 여러 대상 변형의 일괄 관리, 확정 요구의
 운영 활성화는 남은 작업이다. 보고서가 여러 수업 기준을 나눠 쓰는 일은 G3다 — 이 단계는 턴마다 강의 digest가
 기록되는 기존 U3 식별을 그대로 둔다. 실행 기록은 [테스트 G2 기록](../testing/chalk-authoring.md#g2-run-20260922).
+
+<a id="g2-mission-20260922"></a>
+
+#### G2 인수 보정 — 미션 작성 → 학생 과제 표시 → 실행 · 2026-09-22
+
+G2 첫 구현은 `learning` 블록을 보존만 했고 학생 화면은 "미션이 정해지지 않았습니다."를 보였다. 원래 요구(바뀐
+커리큘럼이 학생의 미션·도움·도구·실행을 바꾼다, SX-01·SX-56)의 핵심 공백이라 같은 경로 위에 채웠다. 스키마·검증기는
+기존 `worker/src/lib/learning-design.ts`(`week`·`mission` 필수, 나머지 선택) 그대로다.
+
+| 단계 | 계약 | 요구 |
+|---|---|---|
+| 편집 | `/authoring` "이번 주 미션 · 완료 조건"에서 **주차·미션 문장·완료 조건(문장 + 근거가 되는 기록 종류 8가지 중 하나)**을 켜고 편집한다. 기록 종류 이름은 학생 쪽 `KIND_LABELS`와 같은 말이다. 끄면 `learning`을 보내지 않는다(기존 수업은 그대로). 제목·목표로 미션을 대신 만들지 않는다. 주차·미션·빈 조건·기록 종류 누락은 저장 전에 강사 말로 막고, Service 검증기(점수 금지 포함)가 최종 판정한다 | SX-01, SX-55/56/59, BASE-04 |
+| 보존 | `observe`·`never`·`evidence_types`·`source_kinds`·`reflection`은 이 화면에 칸이 없다. 연 그대로 `learning` 안에 되돌려 넣고, 이름과 개수를 "그대로 보존하는 학습 설계 항목"으로 보인다. 저장·재열기·버전 전체/단계 재사용·내보내기/가져오기가 모두 같은 규칙이다. 미션을 끄면 보존 항목도 빠진다는 확인을 먼저 받는다 | SX-56, #1036 |
+| 차이 검토 | Service `lessonImpact`의 `learning`이 주차·미션·완료 조건 변화와 보존 항목 중 바뀐 키를 돌려준다. 작성 화면과 운영 보드 보내기 확인이 "학생 미션: 미션 없음 → 1주차 ‘…’", "완료 조건: … → …"로 보인다 | BASE-02, VER-01 |
+| 후보·확정 | 리허설 상태에 "이 후보의 학생 미션", 확정 확인창과 버전 목록·운영 보드 설정 선택지에 미션이 붙는다 | VER-01 |
+| 리허설 | App 보고(`hps-rehearsal-report/1`의 선택 필드 `mission`)는 학생 화면 **MissionHeader DOM에서 읽은** 주차 줄·미션 문장·완료 조건 글이다. Service는 후보의 `learning`이 그려야 할 글과 글자 그대로 비교한다. 미션이 있는 후보에서 다르면 `mission_mismatch`, 읽어 보내지 않으면(이전 App) `mission_not_reported`로 통과하지 못한다. 미션 없는 후보는 `none` — 미션 관련 준비 판정을 하지 않는다. 판정은 여전히 (버전, sha256)에 묶여 리허설 중 미션을 고친 초안은 새 후보다 | RUN-01/02, VER-02 |
+| 실행 | 코치 문맥은 기존 `learningInstruction`이 턴의 lesson(바인딩)에서 만든다 — 선택 학생의 다음 턴부터 새 미션, 진행 중 턴은 시작 때 미션, 비선택·미연결 학생은 그대로. 완료 조건은 학생 화면에서 모두 ☐이며 근거 이벤트 없이 ✓를 그리지 않는다(SX-01 P0 원칙 유지) | EDU-01, RUN-03, SX-01 |
+
+**편집 지원 범위**: 편집 = `week`·`mission`·`completion[]`(id는 자동). 보존만 = `observe`·`never`·`evidence_types`·
+`source_kinds`·`reflection`, 단계의 `evidence`·`gate`. 이들의 편집 칸(설계 문서 SX-56이 계획한 Chalk 필드)은 남은 작업이다.
+
+<a id="g2-step-ui-matrix"></a>
+
+**`steps[].ui` 지원 표** (설계 [studio-learning-experience.md](../design/studio-learning-experience.md) `steps[].ui` 7종 기준):
+
+| 값 | 학생 Studio | Chalk 선택 | 리허설 | 쓰는 곳 |
+|---|---|---|---|---|
+| (없음) → 대화 | 그림 | 기본 | 판정 | 모든 기존 수업 |
+| `criterion_form` | 그림(기준 저장 → 다음 턴 문맥) | 선택 | 판정 | Mac A, 6주 예시 3·5·6주차 |
+| `decision_form` | 그림(결정·이유 → 다음 턴 문맥) | 선택 | 판정 | Mac B, 6주 예시 1·2·4·5·6주차 |
+| `canvas_editor`·`canvas_preview`·`evidence_note`·`coach_request`·`metric_board` | "이 Studio에서 아직 열 수 없음" 안내 | 이름 붙여 보존만 | `unsupported`(확정 불가) | 6주 SX-56 **예시 픽스처**(`worker/test/fixtures/session-design/week-1..6.json`)와 설계 문서뿐 |
+
+2026-09-22 기준 실제 구성된 과정(코호트 프로필, `docs/curriculum/`)에는 다섯 값이 쓰이지 않으며, 이번 A/B 범위도
+필요로 하지 않는다. 그래서 새 소비자를 만들지 않고 `unsupported` 리허설(확정 불가)과 로드맵 상태를 유지한다. 6주 과정을
+실제 수업으로 올릴 때 이 다섯 화면이 선행 조건이다. 범용 시각 블록 편집기는 여전히 로드맵이다.
 
 ## 첫 구현 경계
 

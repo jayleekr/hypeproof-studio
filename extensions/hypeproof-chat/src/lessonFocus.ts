@@ -84,14 +84,30 @@ export function workContext(stepTitle: string, work: StepWork | undefined): stri
 }
 
 export interface RenderedStep { id: string; visited: boolean; help_offered: string[]; help_default: string | null; surface: string }
+/** What the mission header (MissionHeader.tsx) drew, as text read back from the DOM: week line, mission sentence, completion items. */
+export interface RenderedMission { week: string | null; sentence: string; completion: string[] }
+const MISSION_TEXT_MAX = 240;
+/** Bounds a webview read-back to the report schema. Never fills in anything the screen did not show. */
+export function boundMission(m: unknown): RenderedMission | undefined {
+  if (!m || typeof m !== "object") return undefined;
+  const x = m as { week?: unknown; sentence?: unknown; completion?: unknown };
+  if (typeof x.sentence !== "string") return undefined;
+  return {
+    week: typeof x.week === "string" ? x.week.slice(0, 20) : null,
+    sentence: x.sentence.slice(0, MISSION_TEXT_MAX),
+    completion: Array.isArray(x.completion) ? x.completion.filter((t): t is string => typeof t === "string").slice(0, 10).map((t) => t.slice(0, MISSION_TEXT_MAX)) : [],
+  };
+}
 /**
  * The rehearsal report the App sends: per step, what the screen actually DREW (read back from the rendered panel by the
  * webview), plus the App identity. The host only drops entries for steps this lesson does not have; it never fills in
  * what was not drawn.
  */
-export function rehearsalReport(lesson: Lesson, rendered: RenderedStep[], app: { extension_version: string; host: string; runtime: string; sdk?: string; os: string; arch: string }) {
+export function rehearsalReport(lesson: Lesson, rendered: RenderedStep[], app: { extension_version: string; host: string; runtime: string; sdk?: string; os: string; arch: string }, mission?: unknown) {
   const byId = new Map(rendered.map((r) => [r.id, r]));
+  const drawn = boundMission(mission);
   return {
+    ...(drawn ? { mission: drawn } : {}),
     schema: "hps-rehearsal-report/1" as const,
     app,
     steps: lesson.content.steps.map((s) => {
@@ -114,4 +130,6 @@ export const REHEARSAL_REASON_WORDS: Record<string, string> = {
   tool_boundary_crossed: "허용하지 않은 도구가 요청에 실렸습니다",
   allowed_tool_missing: "허용한 도구가 요청에 없습니다",
   steps_not_in_candidate: "후보에 없는 단계가 보고됐습니다",
+  mission_mismatch: "화면의 미션이 이 수업 후보와 다릅니다",
+  mission_not_reported: "화면의 미션을 확인하지 못했습니다",
 };

@@ -107,6 +107,10 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   question is still being answered; the real window's next turns are checked at the provider (lesson, help instruction, tool
   names, the learner's saved criterion/decision), then a restart and the return to V1. `curriculum/result.json` has the rows;
   it exits when done (nothing is left running). The browser counterpart that CI runs is `authoring-g2.mjs`.
+  Since the G2 mission correction the same run also sets DIFFERENT missions and completion conditions for A and B with the
+  visible controls and checks, at every step, the mission header the real window draws and the mission the Service put into
+  the provider request (`HPS_G2_RUN=<folder>` keeps a run's evidence apart from an earlier one). Browser counterpart:
+  `authoring-mission.mjs`.
 
 ## Instructor UI review preview (synthetic, for looking at the screens)
 

@@ -37,14 +37,18 @@ await check('controls: prompt and setting are kinds of the same object; a settin
 f = await localOps(); f.env.HPS_LESSON_BINDINGS = 'enforce'; f.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
 const course = f.lesson.course_id, V1 = f.lesson.version, V2 = 'm2026.09.18-2', V3 = 'm2026.09.18-3';
 const step = (id) => ({ id, title: id, instructions: '합성 단계 ' + id, hint: '', acceptance: '합성 기준' });
-const design = (ids, title) => ({ schema: 'hps-session-design/1', title, audience: '합성 사용자', duration_minutes: 60, objective: '원격 운영 시험', prerequisites: '없음', starter: '연습 폴더', steps: ids.map(step) });
+const design = (ids, title, learning) => ({ schema: 'hps-session-design/1', title, audience: '합성 사용자', duration_minutes: 60, objective: '원격 운영 시험', prerequisites: '없음', starter: '연습 폴더', steps: ids.map(step), ...(learning ? { learning } : {}) });
+// #751 G2 mission — v2 and v3 carry different missions; v1 (the run's own version) has none, as a legacy lesson.
+const M2 = { week: 2, mission: '합성 미션 둘 — 예약 버튼을 먼저 보이게 한다', completion: [{ id: 'c1', text: '확인 기준을 적었다', event: 'criterion_set' }] };
+const M3 = { week: 3, mission: '합성 미션 셋 — 고친 이유를 남긴다', completion: [{ id: 'c1', text: '고른 이유를 적었다', event: 'decision_revised' }], never: ['측정을 위해 오류를 심지 않는다'] };
+const missionIn = (system) => /\[학습 설계\] (\d+)주차 · 이번 주 미션: \\?"([^"\\]+)/.exec(system)?.slice(1, 3) ?? null;
 const students = ['a', 'b', 'c', 'd'].map((x, i) => ({ seat_id: 'A' + (i + 1), student_id: 'student-' + x }));
 const rows = (sql, ...a) => f.db.prepare(sql).all(...a).map((r) => ({ ...r })), one = (sql, ...a) => { const r = f.db.prepare(sql).get(...a); return r ? { ...r } : r; };
 try {
   await setRoster(f.env.HPS_KV, f.cohort, students.map((s) => s.student_id)); await f.freeze(course, V1, ['intro', 'build', 'review']);
   const authoring = `/admin/cohorts/${f.cohort}/authoring/${course}`;
-  async function freezeNext(version, ids, title) { const cur = (await f.request(authoring)).json; const saved = await f.request(authoring, 'PUT', { profile_id: f.profile, request_id: KEY(), expected_revision: cur.revision ?? cur.draft?.revision, content: design(ids, title) }); assert.equal(saved.status, 200, saved.raw); const fr = await f.request(`${authoring}/versions/${version}`, 'PUT', { expected_revision: saved.json.revision }); assert.equal(fr.status, 200, fr.raw); }
-  await freezeNext(V2, ['intro', 'craft-v2', 'review'], '합성 수업 v2'); await freezeNext(V3, ['intro', 'craft-v3'], '합성 수업 v3');
+  async function freezeNext(version, ids, title, learning) { const cur = (await f.request(authoring)).json; const saved = await f.request(authoring, 'PUT', { profile_id: f.profile, request_id: KEY(), expected_revision: cur.revision ?? cur.draft?.revision, content: design(ids, title, learning) }); assert.equal(saved.status, 200, saved.raw); const fr = await f.request(`${authoring}/versions/${version}`, 'PUT', { expected_revision: saved.json.revision }); assert.equal(fr.status, 200, fr.raw); }
+  await freezeNext(V2, ['intro', 'craft-v2', 'review'], '합성 수업 v2', M2); await freezeNext(V3, ['intro', 'craft-v3'], '합성 수업 v3', M3);
   const FLAGS = { ops_observe: true, ops_commands: true, ops_distribute: true, ops_lesson_settings: true };
   assert.equal((await f.configure(students, 0, { flags: FLAGS })).status, 201); let roster = 1;
   const sha = {}; for (const v of [V1, V2, V3]) sha[v] = (await readLesson(f.env, f.cohort, course, v, f.profile)).sha256;
@@ -127,7 +131,8 @@ try {
   let d2, item = {};
   await check('S1 setting: prepared is not switched, switched is not applied; one key in the profile, the gate answer, the binding row and the turn row; the unselected learner runs v1', async () => {
     const dry = await send({ object_id: setting.object_id, revision: 1, content_hash: setting.content_hash, targets: ['A1', 'A3', 'A4'], dry_run: true });
-    assert.deepEqual(dry.json.setting.impact.steps, { kept: ['intro', 'review'], removed: ['build'], added: ['craft-v2'] }); assert.equal(dry.json.setting.applies, 'next_question'); assert.equal(dry.json.targets[2].expect, 'unsupported_app');
+    assert.deepEqual(dry.json.setting.impact.steps, { kept: ['intro', 'review'], removed: ['build'], added: ['craft-v2'] });
+    assert.deepEqual([dry.json.setting.impact.learning.from, dry.json.setting.impact.learning.to?.mission, dry.json.setting.impact.learning.mission], [null, M2.mission, true], 'the send review names the mission the selected learners will get'); assert.equal(dry.json.setting.applies, 'next_question'); assert.equal(dry.json.targets[2].expect, 'unsupported_app');
     assert.equal((await send({ object_id: setting.object_id, revision: 1, content_hash: setting.content_hash, targets: ['A1'] }, X)).json.reason, 'ops_capability_missing', 'distributing a setting needs the same authority as creating one');
     d2 = (await send({ object_id: setting.object_id, revision: 1, content_hash: setting.content_hash, targets: ['A1', 'A3', 'A4'] })).json.distribution;
     [item.A1] = await take(conn.A1, 1); [item.A3] = await take(conn.A3, 3); assert.equal((await take(conn.A4, 4)).length, 0);
@@ -137,10 +142,13 @@ try {
     const sw = await switchTo('A1', 1, item.A1, 0); assert.equal(sw.status, 201, sw.raw); const K2 = sw.json.binding.key; assert.deepEqual([sw.json.binding.seq, sw.json.binding.source, sw.json.binding.version], [1, 'setting', V2]);
     v = (await view(d2.id)).json; assert.equal(v.targets[0].setting.phase, 'switched', 'a recorded switch is not an execution'); assert.equal(v.setting_summary.applied, 0);
     const p = await profileOf('A1'); assert.equal(p.lesson_binding.key, K2); assert.equal(p.lesson.version, V2);
+    assert.equal(p.lesson.content.learning.mission, M2.mission, 'the selected learner\'s profile — what MissionHeader draws — carries v2\'s mission');
     const turn = KEY(), r = await ask('A1', { turn, key: K2 }); assert.equal(r.status, 200); assert.match(r.system, /craft-v2/); assert.doesNotMatch(r.system, /build\.md/);
+    assert.deepEqual(missionIn(r.system), ['2', M2.mission], 'the next turn of the selected learner carries v2\'s mission to the model');
     assert.equal(one('SELECT binding_key k FROM classroom_lesson_turns WHERE turn_id=?', turn).k, K2);
     v = (await view(d2.id)).json; assert.deepEqual(v.targets.map((t) => t.setting.phase), ['applied', 'prepared', 'not_prepared']); assert.equal(v.setting_summary.all_applied, false, 'A3 never asked: prepared is an honest state, not a failure, and not "all applied"');
     const pb = await profileOf('A2'); assert.equal(pb.lesson.version, V1); assert.equal(pb.lesson_binding.key, KEY1); const rb = await ask('A2', { key: KEY1 }); assert.match(rb.system, /build\.md/); assert.equal(bindings('student-b').length, 0);
+    assert.equal(pb.lesson.content.learning, undefined); assert.equal(missionIn(rb.system), null, 'the unselected learner still runs v1, which has no mission: none is invented');
     const board = (await f.request(f.base + '/status', 'GET', undefined, L)).json.seats; assert.deepEqual(board.map((s) => [s.lesson.version, s.lesson.source]), [[V2, 'setting'], [V1, 'token'], [V1, 'token'], [V1, 'token']]);
   });
 
@@ -190,7 +198,11 @@ try {
     const d3 = (await send({ object_id: setting.object_id, revision: s3.json.revision, content_hash: s3.json.content_hash, targets: ['A1', 'A3'] })).json.distribution; const [i1] = await take(conn.A1, 1);
     // A3 holds the v2 setting (switched to it) and a v3 one is now on its way: a LATE switch request for the old distribution changes nothing
     const lateOld = await switchTo('A3', 3, item.A3, 1); assert.equal(lateOld.json.replayed, true, 'the row that distribution already made is simply returned'); assert.equal(bindings('student-c').length, 1);
-    const sw = await switchTo('A1', 1, i1, 1); assert.equal(sw.status, 201, sw.raw); K3 = sw.json.binding.key; assert.deepEqual(bindings('student-a').map((b) => [b.binding_seq, b.version]), [[1, V2], [2, V3]]);
+    // A turn admitted under v2 BEFORE the switch keeps v2's mission for its later requests; the next turn gets v3's.
+    const running = KEY(), K2now = (await profileOf('A1')).lesson_binding.key; assert.deepEqual(missionIn((await ask('A1', { turn: running, key: K2now })).system), ['2', M2.mission]);
+    const sw = await switchTo('A1', 1, i1, 1); assert.equal(sw.status, 201, sw.raw); K3 = sw.json.binding.key;
+    assert.deepEqual(missionIn((await ask('A1', { turn: running, key: K2now })).system), ['2', M2.mission], 'the running turn keeps the mission it started with');
+    const next = await ask('A1', { key: K3 }); assert.deepEqual(missionIn(next.system), ['3', M3.mission], 'the next turn carries v3\'s mission'); assert.match(next.system, /측정을 위해 오류를 심지 않는다/, 'the preserved `never` reaches the coach verbatim'); assert.deepEqual(bindings('student-a').map((b) => [b.binding_seq, b.version]), [[1, V2], [2, V3]]);
     assert.equal((await switchTo('A1', 1, i1, 0)).json.replayed, true); assert.match((await ask('A1', { key: K3 })).system, /craft-v3/);
     const v2view = (await view(d2.id)).json.targets[0].setting.phase, v3view = (await view(d3.id)).json.targets[0].setting.phase; assert.deepEqual([v2view, v3view], ['replaced', 'applied'], 'v2 was applied and is now history; v3 is what runs');
   });

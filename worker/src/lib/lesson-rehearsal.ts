@@ -50,11 +50,21 @@ export async function policyDigest(profile: Profile, content: SessionDesign): Pr
   ]));
 }
 
+/**
+ * #751 G2 mission — what the learner's mission header (MissionHeader.tsx) DREW, read back from the rendered DOM: the week line,
+ * the mission sentence and the completion conditions, as text. Optional in the schema only so an older App's report still
+ * parses; a candidate that HAS a mission cannot pass without it (mission_not_reported).
+ */
+export interface RenderedMission { week: string | null; sentence: string; completion: string[] }
 export interface RehearsalReport {
   schema: 'hps-rehearsal-report/1';
   app: { extension_version: string; host: string; runtime: string; sdk?: string; os: string; arch: string };
   steps: Array<{ id: string; visited: boolean; help_offered: string[]; help_default: string | null; surface: string }>;
+  mission?: RenderedMission;
 }
+/** The header a candidate must draw: exactly MissionHeader's text for its `learning`, or null when it has none. */
+export const expectedMission = (c: SessionDesign): RenderedMission | null => c.learning
+  ? { week: c.learning.week + '주차', sentence: c.learning.mission, completion: (c.learning.completion ?? []).map((x) => x.text) } : null;
 const id = (x: unknown) => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(x);
 const short = (x: unknown, max = 120) => typeof x === 'string' && x.length <= max && !/[\u0000-\u001f]/.test(x);
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -72,6 +82,12 @@ export function parseReport(x: unknown): RehearsalReport | string {
     if (s.help_default !== null && !(HELP_MODES as readonly string[]).includes(s.help_default as string)) return 'invalid help_default';
     if (!short(s.surface, 64)) return 'invalid surface';
   }
+  if (x.mission !== undefined) {
+    const m = x.mission;
+    // Drawn text may hold a line break the teacher typed; only NUL and oversize are refused.
+    const text = (t: unknown) => typeof t === 'string' && t.length <= 240 && !t.includes('\0');
+    if (!object(m) || !(m.week === null || short(m.week, 20)) || !text(m.sentence) || !Array.isArray(m.completion) || m.completion.length > 10 || !m.completion.every(text)) return 'invalid mission';
+  }
   return x as unknown as RehearsalReport;
 }
 
@@ -82,6 +98,8 @@ export interface Verdict {
   checks: {
     steps: Array<{ id: string; visited: boolean; help: 'match' | 'mismatch' | 'none' | 'not_seen'; surface: 'match' | 'mismatch' | 'unsupported' | 'not_seen'; expected_surface: string }>;
     turns: { total: number; completed: number; with_step: number; other_lesson: number; help_modes: string[] };
+    /** `none` = the candidate has no mission, so no mission-linked claim is made either way. */
+    mission: { expected: RenderedMission | null; observed: RenderedMission | null; result: 'match' | 'mismatch' | 'not_reported' | 'none' };
     tools: { runtime: string; observed: string[]; boundary: 'held' | 'violated' | 'server_enforced' | 'not_observed'; write_expected: boolean };
   };
 }
@@ -111,6 +129,15 @@ export function judgeRehearsal(o: { content: SessionDesign; lessonSha: string; p
   if (steps.some((s) => s.surface === 'mismatch')) reasons.push('surface_mismatch');
   const unsupported = steps.some((s) => s.surface === 'unsupported');
 
+  // The mission the learner's screen showed must be the candidate's own, word for word. A stale header (another version's
+  // mission), a missing one, or an App that does not read it back cannot pass a candidate that has a mission.
+  const wantMission = expectedMission(o.content), m = o.report.mission, sawMission = m ? { week: m.week, sentence: m.sentence, completion: [...m.completion] } : null;
+  const missionResult: Verdict['checks']['mission']['result'] = wantMission
+    ? (!sawMission ? 'not_reported' : JSON.stringify(sawMission) === JSON.stringify(wantMission) ? 'match' : 'mismatch')
+    : (sawMission && (sawMission.week !== null || sawMission.completion.length) ? 'mismatch' : 'none');
+  if (missionResult === 'not_reported') reasons.push('mission_not_reported');
+  if (missionResult === 'mismatch') reasons.push('mission_mismatch');
+
   const mine = o.turns.filter((t) => t.lesson_sha256 === o.lessonSha), completed = mine.filter((t) => t.outcome === 'completed');
   const turns = { total: o.turns.length, completed: completed.length, with_step: completed.filter((t) => t.step_id).length, other_lesson: o.turns.length - mine.length,
     help_modes: [...new Set(completed.map((t) => /mode=([a-z_]+)/.exec(t.help_receipt)?.[1]).filter((m): m is string => !!m))].sort() };
@@ -136,7 +163,7 @@ export function judgeRehearsal(o: { content: SessionDesign; lessonSha: string; p
   }
   const failed = reasons.length > 0;
   return { verdict: failed ? 'failed' : unsupported ? 'unsupported' : 'passed', reasons: unsupported && !failed ? ['surface_unsupported'] : reasons,
-    checks: { steps, turns, tools: { runtime, observed, boundary, write_expected: writeExpected } } };
+    checks: { steps, turns, mission: { expected: wantMission, observed: sawMission, result: missionResult }, tools: { runtime, observed, boundary, write_expected: writeExpected } } };
 }
 
 /** The readiness a version shows NOW, from its latest rehearsal row and the current policy digest. */
