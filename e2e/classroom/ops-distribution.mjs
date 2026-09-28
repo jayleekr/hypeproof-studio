@@ -69,7 +69,7 @@ try {
   // The instructor's work starts with the students: status → selection → actions in the first screen; authoring and history open on demand.
   // (An independent review measured the first student row at 1742px of a 720px viewport on 51708c7.)
   await page.setViewportSize({ width: 1280, height: 720 }); await page.evaluate(() => scrollTo(0, 0));
-  const place = await page.evaluate(() => { const top = (s) => { const e = document.querySelector(s); return e && e.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true }) ? Math.round(e.getBoundingClientRect().top + scrollY) : null; }; return { row: top('#ops-seats .ops-seat'), select: top('#ops-select-all'), action: top('#ops-dist-preview'), shares: top('#shares-title'), results: top('#ops-results'), composerOpen: document.querySelector('#ops-dist').open, historyOpen: document.querySelector('#ops-dist-history').open, title: top('#ops-dist-title') }; });
+  const place = await page.evaluate(() => { const top = (s) => { const e = document.querySelector(s); return e && e.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true }) ? Math.round(e.getBoundingClientRect().top + scrollY) : null; }; return { row: top('#ops-seats .ops-seat'), select: top('#ops-select-help'), action: top('#ops-dist-preview'), shares: top('#shares-title'), results: top('#ops-results'), composerOpen: document.querySelector('#ops-dist').open, historyOpen: document.querySelector('#ops-dist-history').open, title: top('#ops-dist-title') }; });
   await page.screenshot({ path: path.join(out, 'first-screen-720.png') });
   assert.ok(place.select < place.action && place.action < place.row && place.row < 720, 'selection, then actions, then the first student — all inside the first 720px: ' + JSON.stringify(place)); assert.ok(place.row < place.results && place.results < place.shares, 'results and history come after the students; the share panels after that');
   assert.deepEqual([place.composerOpen, place.historyOpen, place.title], [false, false, null], 'the composer and the history are closed until asked for'); await page.setViewportSize({ width: 1440, height: 1200 });
@@ -98,7 +98,7 @@ try {
 
   // ── D3+D4+D9+D10: v2 to everybody — an old app, an offline learner, a disk that refuses, and "failed only" re-selection ──
   await page.locator('#ops-dist-save').click(); await page.locator('#ops-dist-saved').filter({ hasText: '2번째 판' }).waitFor(); assert.match(await T('ops-dist-editing'), /2번째 판/);
-  await page.locator('#ops-select-all').click(); faults.A3 = true; cool(); await page.locator('#ops-dist-preview').click(); await page.locator('#ops-dist-confirm').waitFor();
+  await page.locator('#ops-pick-by > summary').click(); await page.locator('#ops-select-all').click(); /* G1: under ‘다른 조건으로 선택’ */ faults.A3 = true; cool(); await page.locator('#ops-dist-preview').click(); await page.locator('#ops-dist-confirm').waitFor();
   assert.deepEqual((await L('ops-dist-plan')).map((l) => l.slice(l.indexOf(' — ') + 3)), ['지금 전달 가능', '지금 전달 가능', '지금 전달 가능', '이 앱은 보관함을 지원하지 않음', '미연결 — 수업이 끝나기 전에 다시 연결되면 전달']);
   await page.locator('#ops-dist-go').click(); await page.locator('#ops-dist-items').filter({ hasText: 'A5 · student-e' }).waitFor(); local.db.prepare("UPDATE ops_latest_state SET last_received_at=0 WHERE seat_id='A4'").run(); await tickAll();
   await waitState(/보관함 반영 2 · 접수 1 · .* 실패 2/); const lines = (await L('ops-dist-items'));
