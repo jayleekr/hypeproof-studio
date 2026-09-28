@@ -2,6 +2,7 @@
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
 import { coachDegradedNotice, DEFAULT_COACH_NAME, resolveCoachIdentity } from "./coachIdentity.ts";
+import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers.ts";
 
 export interface CoachStateForResolve {
   name: string;
@@ -832,4 +833,12 @@ export function reentryWorkspace(o: { candidateActivity?: string; record?: { ser
   if (!a) return undefined;
   if (o.record) return o.recordServiceMatches && o.record.serverId === a ? o.record.workspace : undefined;
   return o.openFolder && o.runningActivity === a ? o.openFolder : undefined;
+}
+
+
+/** Reads the instructor token slot only — never the student slot. Extracted for direct testing. */
+export async function resolveInstructorTokenFromSecrets(
+  secrets: { get(key: string): PromiseLike<string | undefined> }
+): Promise<string | undefined> {
+  return secrets.get(ISSUER_TOKEN_KEY);
 }

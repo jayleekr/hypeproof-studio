@@ -1027,9 +1027,14 @@ async function applyTestBackdoors(
   }
   // Dev-only issuer token auto-seed: only when localRuntimeConfig returns non-null (Dev app + dev
   // setting on) and HPS_TEST_E2E is unset. Release builds and Dev app with runtime off both skip.
+  // localRuntimeConfig throws when Dev app has a remote proxyUrl or missing env — catch and skip.
   // Token value is never logged.
   const _devProxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-  if (localRuntimeConfig(vscode.env.appName, _devProxyUrl) !== null && !process.env.HPS_TEST_E2E) {
+  let _devRuntimeActive = false;
+  try {
+    _devRuntimeActive = localRuntimeConfig(vscode.env.appName, _devProxyUrl) !== null;
+  } catch { console.log("[hypeproof-chat] dev issuer seed skipped"); }
+  if (_devRuntimeActive && !process.env.HPS_TEST_E2E) {
     const devIssuerTokenFile = process.env.HPS_DEV_ISSUER_TOKEN_FILE;
     if (devIssuerTokenFile) {
       try {

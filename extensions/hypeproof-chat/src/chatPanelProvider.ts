@@ -140,6 +140,7 @@ import {
   lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
+  resolveInstructorTokenFromSecrets,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 import {
@@ -3864,7 +3865,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     // Instructor auth always uses the issuer token slot, never the student token.
-    const issuerToken = await this.context.secrets.get(ISSUER_TOKEN_KEY);
+    const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
     const isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
     const instructorBrief = (isInstructor && issuerToken)
       ? await this._instructorMode.fetchInstructorBrief(issuerToken, proxyUrl)

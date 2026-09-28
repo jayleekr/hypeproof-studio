@@ -200,4 +200,20 @@ t("ok → lastWhoamiStatus = ok, isInstructor true", async () => {
   assert.strictEqual(mgr.lastWhoamiStatus, "ok");
 });
 
+console.log("\n=== resolveInstructorTokenFromSecrets — secrets slot isolation ===");
+
+t("resolveInstructorTokenFromSecrets: ISSUER_TOKEN_KEY present → token returned", async () => {
+  const { resolveInstructorTokenFromSecrets } = await import("../src/chatPanelHelpers.ts");
+  const secrets = { get: async (k) => k === "hypeproofChat.issuerToken" ? "issuer-tok" : undefined };
+  const result = await resolveInstructorTokenFromSecrets(secrets);
+  assert.strictEqual(result, "issuer-tok", "must return value stored at ISSUER_TOKEN_KEY");
+});
+
+t("resolveInstructorTokenFromSecrets: only TOKEN_KEY present → undefined (student slot not read)", async () => {
+  const { resolveInstructorTokenFromSecrets } = await import("../src/chatPanelHelpers.ts");
+  const secrets = { get: async (k) => k === "hypeproofChat.workshopToken" ? "student-tok" : undefined };
+  const result = await resolveInstructorTokenFromSecrets(secrets);
+  assert.strictEqual(result, undefined, "student slot must not reach instructor auth path");
+});
+
 console.log(`\n${n} tests passed\n`);
