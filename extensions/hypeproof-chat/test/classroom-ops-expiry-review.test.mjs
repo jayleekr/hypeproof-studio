@@ -131,6 +131,9 @@ test('token verified before pairing still reaches the board: the host asks once 
   const until = Date.now() + 2000; while (Date.now() < until && !bodies.some((b) => b.events.some((e) => e.kind === 'activation'))) await new Promise((r) => setTimeout(r, 20));
   const activation = bodies.flatMap((b) => b.events).find((e) => e.kind === 'activation'); assert.ok(activation, 'an activation event was sent after the connection started');
   assert.deepEqual([activation.payload.stage, activation.payload.token_jti], ['token_verified', 'issue-0001']); assert.equal(probes, 1, 'asked once, not polled');
+  // Seeing the fetch does not mean the serialized outbox writes have finished.
+  // Drain that queue before fixture teardown removes its storage directory.
+  await f.host.outbox.chain;
   await f.host.disconnectInteractively();
 });
 test('negative control: no token on the device → starting a connection reports no token verification', async (t) => {
