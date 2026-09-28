@@ -311,6 +311,7 @@ async function sealCollection(c: any, g: Grant, item: Record<string, any>, revis
     db.prepare(`UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=? AND ${sealed.sql}`).bind(v.reason, digest, v.coverage, receipt, inputRevision, now, item.batch_id, item.seat_id, ...sealed.binds),
     // range_json holds the extent the instructor view reads — numbers, times, flags and kinds. The parts' session ids stay in the part files.
     db.prepare(`INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,'bound',?,?,0,? WHERE ${sealed.sql} ON CONFLICT DO NOTHING`).bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', current.spool_session_id, JSON.stringify(col.activity ?? null), JSON.stringify(v.extent), now, ...sealed.binds),
+    ...(asked.mode === 'finish' ? [db.prepare(`INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) SELECT 'report_input',?,?,? WHERE ${sealed.sql} ON CONFLICT(kind,dedupe_key) DO NOTHING`).bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage: v.coverage }), now, ...sealed.binds)] : []),
     auditIf(db, sealed, g.class_run_id, g.seat_id, 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage: v.coverage, kinds: col.kinds, sessions: col.parts.length, lines: v.extent.lines, included: v.extent.included, ...(v.reason ? { coverage_reason: v.reason } : {}) }, now),
   ]);
   if ((res[0] as any)?.meta?.changes !== 1) return sealNotCommitted(c, g, item, revision, digest);
@@ -357,7 +358,7 @@ export async function batchScope(db: Db, batchId: string): Promise<BatchScope> {
   if (!known || !/^[a-f0-9]{64}$/.test(row.request_hash)) throw new CollectScopeUnavailable('scope_invalid');
   // Kinds that do not parse, or kinds on the class wrap-up, are not guessed at: the batch is unreadable, not "the whole record".
   let kinds: CollectKind[] | undefined;
-  if (row.kinds_json != null) { let k: unknown; try { k = JSON.parse(row.kinds_json); } catch { throw new CollectScopeUnavailable('scope_invalid'); } kinds = normalizeKinds(k) ?? undefined; if (!kinds || row.mode !== 'collect_only') throw new CollectScopeUnavailable('scope_invalid'); }
+  if (row.kinds_json != null) { let k: unknown; try { k = JSON.parse(row.kinds_json); } catch { throw new CollectScopeUnavailable('scope_invalid'); } kinds = normalizeKinds(k) ?? undefined; if (!kinds || (row.mode === 'finish' && kinds.join() !== 'record')) throw new CollectScopeUnavailable('scope_invalid'); }
   return { scope: row.scope as BatchScope['scope'], mode: row.mode as BatchScope['mode'], targets: seats!, request_hash: row.request_hash, ...(kinds ? { kinds } : {}) };
 }
 /** The single refusal every route gives when the scope cannot be read. No evaluation input, job or delivery is created on this path; the caller may retry. */

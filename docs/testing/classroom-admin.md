@@ -59,6 +59,8 @@ U3 잔여 오류 → U4 원인별 조치 → 필요한 회수 흐름(U1b)은 202
 남은 순서는 [보고서 갭 재설정](../plan/learning-agent-experience-epics.md#report-gap-reset-20260922)의 G1 강사 운영 화면 → G2 커리큘럼→실행 →
 G3 여러 세션 보고서·발송 → G4 이 통합 인수(실제 Mac 여정)다. 구성 편집기 확장·전체 PC 조종·새 전달 채널은 이 인수를 핑계로 추가하지 않는다.
 통합 인수 후에도 미완 범주는 로드맵에 남기며, 완료한 기능만 메인 Features 항목의 지원 범위로 옮긴다.
+2026-09-22 G2: 커리큘럼 구성 범주의 기술 검증(두 커리큘럼 작성 → 실제 창 리허설 → 확정 → 선택 학생 적용 → 다음 턴 관측)은
+[Chalk G2 실행 기록](chalk-authoring.md#g2-run-20260922)에 있다. 합성 계정·기록기 모델이며 이 통합 인수(G4)의 운영 검증을 대신하지 않는다.
 
 <a id="g1-instructor-ia-tests"></a>
 
@@ -1370,3 +1372,63 @@ NOT RUN: 실제 모델, Windows, 학교망, hosted/staging/운영 D1·R2, 실제
 NOT RUN: 여러 물리 PC(한 Mac 두 창이다), Windows(link/rename·백신), 학교망, hosted D1/R2, 실제 모델·메일, Keychain 기반 설치 앱, 정전 중 쓰기, 미성년·보호자 동의(#1175).
 
 증거(공통 git-dir): `remote-classroom-evidence/management-20260921/native-help/storage/` — `before/`(수정 전 재현), `store-checks.log`·`host-checks.{log,json}`·`extension-npm-test-fe37a72.log`, `mac-run-fe37a72/`(`help/` H1~H9 결과·화면, `help-windows/` 두 창 결과·화면, manifest·run log), `takeover-u4fix-runner/`(정지 전 이전 runner 기록).
+
+
+## G3/G4 single-class completion — 2026-09-24 (#1301)
+
+The accepted single-class boundary connects explicit whole-roster `mode: finish`,
+`kinds: [record]` collection to reviewed reports across restarts. An omitted `kinds`
+keeps the legacy /1-/2 path. Selected collect-only batches never feed evaluation.
+A report pins the verified snapshot digest and rechecks input file hashes. Each /3
+quote carries its session and original line; unqualified or cross-session evidence
+is refused. The report lists included sessions and missing-session counts. Mixed or
+unreadable lesson bases remain held; this does not implement cross-version scoring.
+Approval, recipient approval, provider acceptance and confirmed delivery remain separate.
+
+Regression: `worker/test/classroom-ops-report-sessions.test.mjs` exercises the real
+spool/freezer/upload/routes/evaluator adapter/review/delivery ledger with synthetic
+people, SQLite, in-memory R2 and transport substitutes. Existing collect, basis,
+withdrawal, evaluator, provider and erasure suites remain required.
+Mac integration: `HPS_G4_JOURNEY=1` runs `e2e/classroom/mac-curriculum.mjs` through
+authored and rehearsed lessons into `g4-journey.mjs` on the same local Service.
+Execution evidence is recorded separately after the run; a test file is not a PASS.
+
+Explicit follow-ups: cross-week pattern prose, PDF mail attachments, Kakao/SMS/QR,
+additional work surfaces and a general visual composer are outside this single-class
+completion. Existing PDF export and approved report-link email remain. Local/legacy
+external evaluators retain their single-spool contract and explicitly refuse /3;
+the Service evaluator supports /3. Real learners, real model quality, installed
+Keychain, Windows, multiple physical PCs, school network, hosted D1/R2 and actual
+recipients are separate field/release gates, not synthetic successes.
+
+### Observed local G4 result — 2026-09-24
+
+PASS on implementation `4cb0a29`: authored A/B lesson rehearsal and confirmation;
+native learner mission across restart; voluntary help and instructor feedback;
+actual device diagnostic receipt `succeeded`; notice distributed only to A1;
+explicit whole-roster finish collecting two same-learner sessions; reviewed
+session-qualified report; recipient approval and one sandbox send followed by a
+synthetic delivered event. Work files were unchanged. Screenshots were inspected.
+The shell was a copy of installed Mac 0.1.16 with current extension bundles built
+at `c6e65f2`; this is extension-level evidence, not a newly packaged release.
+The recorder model, identities, SQLite/R2 and mail transport were synthetic/local.
+
+The same implementation passed Worker full tests, classroom-ops regressions,
+typecheck, Chalk tests, report/G1-wrap/ops browser checks and docs integrity.
+Review fixes also reproduce thirty concurrent wrong viewer checks, signed bounce
+before accepted/lost send response, and 25 stalled plus 25 delayed erasures ahead
+of runnable work. These prove bounded local behavior; the field gates above remain.
+
+### Instructor progressive disclosure · 2026-09-27 · #1363
+
+The latest instructor request supersedes the seven-column overview and green/lime palette. The browser checks now exercise the four-column overview, charcoal/cyan styling and actual user clicks into folded detail; action, consent and resolution assertions remain in place.
+
+- `npm --prefix chalk test` and `npm --prefix chalk run typecheck`: route/auth/forwarding, authoring, operations and budget contracts.
+- `npm --prefix e2e run test:classroom-ops-g1`: 24 synthetic seats through the real local Service; eight complete rows at 1280×720 and six at 1024×640, 14px+ row text, filter versus selection, unknown/approval/help distinction, keyboard/drawer/focus return, disclosure, no writes when merely selecting, result cards and wrap-up state. Includes 390px controls and read-only selection.
+- `npm --prefix e2e run test:classroom-ops`: actual device sync/command runner, confirmed reset with preserved work, question delivery and code refusal, evidence review, pause application, collection consent, measured contrast and 44px targets.
+- `npm --prefix e2e run test:classroom-authoring-g2`: authoring → rehearsal → confirmation → built learner webview → selected-target setting picker.
+- `npm --prefix e2e run test:budgets:browser`: actual browser budget allocation/pause, keyboard/zoom and role-negative controls.
+
+These are local synthetic fixtures, not live students, production activation, real model evaluation or human visual acceptance of the original concept. The original concept is a design reference, not runtime evidence.
+
+Follow-up browser coverage for this revision: `test:classroom`, roster (7), selection (8), distribution (7), lesson settings (5), help, results (18), G1 wrap (8), authoring mission (7) and report rendering (4) passed locally. Tests open disclosures with real summary clicks and use the single refresh action. Additional findings fixed: connection-input contrast; old apps without step observation remain unknown; lesson binding/version is preserved in selected learner details; shared-outage guidance stays visible; mobile refresh remains reachable and disconnect appears with connection settings. Opening selection tools also reveals the composer without requiring a target, while sending still requires explicit selected-target confirmation.

@@ -152,7 +152,7 @@ try {
   const run2 = 'ops-test-run-2', t = Date.now(); local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run2, local.cohort, local.profile, new Date(t - 60000).toISOString(), new Date(t + 3600000).toISOString());
   await startSession(local.env.HPS_KV, local.cohort, { session_id: run2, profile_id: local.profile, starts_at: new Date(t - 60000).toISOString(), ends_at: new Date(t + 3600000).toISOString() });
   assert.equal((await local.request(`/admin/cohorts/${local.cohort}/classroom/runs/${run2}`, 'PUT', { expected_roster_revision: 0, seats: seats.slice(0, 2).map((x) => ({ seat_id: 'T' + x.seat_id.slice(1), student_id: x.student_id })), flags: { ops_observe: true, ops_collect: true, ops_reports: true, ops_delivery: true }, lesson: local.lesson })).status, 201);
-  await refresh(page); await page.locator('#ops-state').filter({ hasText: run2 }).waitFor(); s = await until(page, ['idle', 'idle', 'idle', 'idle'], 'another run shows nothing of run 1');
+  await refresh(page); await page.locator('.class-status > summary').click(); await page.locator('#ops-state').filter({ hasText: run2 }).waitFor(); s = await until(page, ['idle', 'idle', 'idle', 'idle'], 'another run shows nothing of run 1');
   assert.equal(await page.locator('#ops-finish-items p').count(), 0); assert.equal(await page.locator('#ops-reports').isHidden(), true);
   await finish(page); await page.locator('#ops-finish-state').filter({ hasText: /^명단 2명/ }).waitFor();
   s = await until(page, ['none', 'none', 'none', 'idle'], 'everyone excluded'); results.all_excluded = s;

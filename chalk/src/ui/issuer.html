@@ -51,31 +51,62 @@
 </style>
 </head>
 <body>
-<style>/* Instructor flow bar — the same three stages as /manage (docs/requirements/classroom-design.md · 강사 화면 공통 동선). Scoped so the page's own styles stay as they were. */.hp-flowbar{box-sizing:border-box;max-width:1100px;margin-left:auto!important;margin-right:auto!important;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 24px;padding:8px 16px;margin:0 0 20px;background:#111915;border:1px solid #3A4A3E;border-radius:10px;font:15px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif;color:#F2F4E8;color-scheme:dark}.hp-flowbar .hp-home{font-size:14px;color:#BAC5B4;text-decoration:none}.hp-flowbar nav{display:flex;flex-wrap:wrap;gap:4px 6px}.hp-flowbar .hp-step{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding-right:8px;border-right:1px solid #3A4A3E}.hp-flowbar .hp-step:last-child{border-right:0}.hp-flowbar .hp-label{font-size:14px;color:#BAC5B4;padding:0 6px 0 8px;white-space:nowrap}.hp-flowbar nav a{font-size:15px;font-weight:400;display:inline-flex;align-items:center;min-height:44px;padding:0 10px;border-radius:7px;color:#F2F4E8;text-decoration:none;white-space:nowrap}.hp-flowbar nav a:hover{background:#26352B;text-decoration:underline}.hp-flowbar nav a:focus-visible,.hp-flowbar .hp-home:focus-visible{outline:3px solid #D5F279;outline-offset:2px}.hp-flowbar nav a[aria-current="page"]{background:#26352B;box-shadow:inset 0 -3px 0 #D5F279;font-weight:600}@media(max-width:620px){.hp-flowbar nav{flex:1 1 100%;min-width:0;flex-wrap:nowrap;overflow-x:auto;max-width:100%}.hp-flowbar .hp-step{flex-wrap:nowrap}}</style><div class="hp-flowbar"><a class="hp-home" href="/manage">HypeProof Chalk · 강사</a><nav aria-label="강사 도구"><div class="hp-step"><span class="hp-label">1 수업 준비</span><a href="/authoring">강의 작성</a><a href="/issuer" aria-current="page">학생 초대·토큰</a><a href="/budgets">AI 예산</a></div><div class="hp-step"><span class="hp-label">2 수업 진행</span><a href="/console">수업 열기·종료</a><a href="/manage">운영 보드</a><a href="/manage#ops-help-title">도움 요청 응대</a></div><div class="hp-step"><span class="hp-label">3 마무리</span><a href="/manage#shares-title">결과물·공유 기록</a><a href="/manage#ops-finish-title">기록 회수·보고서</a></div></nav></div>
+<style>/* Instructor flow bar — the same three stages as /manage (docs/requirements/classroom-design.md · 강사 화면 공통 동선). Scoped so the page's own styles stay as they were. */.hp-flowbar{box-sizing:border-box;max-width:1100px;margin-left:auto!important;margin-right:auto!important;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 24px;padding:8px 16px;margin:0 0 20px;background:#111915;border:1px solid #3A4A3E;border-radius:10px;font:15px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif;color:#F2F4E8;color-scheme:dark}.hp-flowbar .hp-home{font-size:14px;color:#BAC5B4;text-decoration:none}.hp-flowbar nav{display:flex;flex-wrap:wrap;gap:4px 6px}.hp-flowbar .hp-step{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding-right:8px;border-right:1px solid #3A4A3E}.hp-flowbar .hp-step:last-child{border-right:0}.hp-flowbar .hp-label{font-size:14px;color:#BAC5B4;padding:0 6px 0 8px;white-space:nowrap}.hp-flowbar nav a{font-size:15px;font-weight:400;display:inline-flex;align-items:center;min-height:44px;padding:0 10px;border-radius:7px;color:#F2F4E8;text-decoration:none;white-space:nowrap}.hp-flowbar nav a:hover{background:#26352B;text-decoration:underline}.hp-flowbar nav a:focus-visible,.hp-flowbar .hp-home:focus-visible{outline:3px solid #D5F279;outline-offset:2px}.hp-flowbar nav a[aria-current="page"]{background:#26352B;box-shadow:inset 0 -3px 0 #D5F279;font-weight:600}@media(max-width:620px){.hp-flowbar nav{flex:1 1 100%;min-width:0;flex-wrap:nowrap;overflow-x:auto;max-width:100%}.hp-flowbar .hp-step{flex-wrap:nowrap}}</style><style>
+/* #1363 shared instructor theme — charcoal + cyan, compact flowbar, first-view spacing. */
+:root{--hp-bg:#0F1418;--hp-panel:#151C22;--hp-panel-hi:#1D2630;--hp-line:#2A343E;--hp-line-hi:#3A4855;--hp-text:#E8ECEF;--hp-text-2:#B7C1CA;--hp-mute:#7D8994;--hp-accent:#2AC4D9;--hp-accent-hi:#5FE0F2;--hp-ok:#7DC896;--hp-warn:#F5C36B;--hp-alert:#FF8686}
+html,body{background:var(--hp-bg);color:var(--hp-text)}
+a{color:var(--hp-accent)}
+button{color:var(--hp-text)}
+input,select,textarea{background:var(--hp-panel-hi);color:var(--hp-text);border-color:var(--hp-line-hi)}
+button:not(.ghost):not(.reset):not(.danger){background:var(--hp-accent);color:#08131A;border-color:var(--hp-accent);font-weight:600}
+button:not(.ghost):not(.reset):not(.danger):hover:not(:disabled){background:var(--hp-accent-hi);border-color:var(--hp-accent-hi);color:#08131A}
+button.ghost,button.reset,.reset,button[disabled]{background:transparent;color:var(--hp-text-2);border:1px solid var(--hp-line-hi);font-weight:400}
+form:has(input,textarea,select) button:nth-of-type(n+2):not(.primary):not([type=submit]){background:transparent;color:var(--hp-text-2);border:1px solid var(--hp-line-hi);font-weight:400}
+button.ghost,button.reset,.reset{background:transparent;color:var(--hp-text-2);border-color:var(--hp-line-hi)}
+*:focus-visible{outline-color:var(--hp-accent)!important}
+.hp-flowbar{background:var(--hp-panel);border-color:var(--hp-line);color:var(--hp-text);padding:8px 14px;gap:4px 10px}
+.hp-flowbar .hp-home{color:var(--hp-mute);font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.hp-flowbar .hp-step{padding-right:8px;border-right-color:var(--hp-line)}
+.hp-flowbar .hp-label{display:none}
+.hp-flowbar nav{gap:2px 4px}
+.hp-flowbar nav a{min-height:32px;padding:2px 10px;font-size:.8125rem;color:var(--hp-text-2);border-radius:6px}
+.hp-flowbar nav a:hover{background:var(--hp-panel-hi);color:var(--hp-text);text-decoration:none}
+.hp-flowbar nav a[aria-current="page"]{background:transparent;box-shadow:none;color:var(--hp-accent);font-weight:600;border-bottom:2px solid var(--hp-accent);border-radius:0;padding-bottom:0}
+/* Page containers: reduce top padding and h1 size so essential inputs sit above the fold. */
+body>header,body>main,body>.wrap{padding-top:16px}
+h1{font-size:1.375rem;letter-spacing:.01em;margin:8px 0 4px}
+.sub,p.sub,header>p,header p{font-size:.875rem;color:var(--hp-mute);margin:0 0 12px;max-width:60ch}
+/* Fieldsets/sections: panels with clear separation, primary field first. */
+fieldset,section,form.editor{background:var(--hp-panel);border-color:var(--hp-line);border-radius:10px;padding:14px 16px;margin:0 0 12px}
+legend{background:transparent;color:var(--hp-mute);font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;padding:0 6px}
+/* Fold anything beyond the first fieldset on a fresh page load until the user acts (progressive disclosure). Users still see progress via headings. */
+label{color:var(--hp-text-2);font-size:.8125rem}
+label small{color:var(--hp-mute)}
+</style><div class="hp-flowbar"><a class="hp-home" href="/manage">HypeProof Chalk · 강사</a><nav aria-label="강사 도구"><a href="/manage">수업 운영</a><a href="/authoring">강의 작성</a><a href="/issuer" aria-current="page">학생 초대</a><a href="/console">수업 시작·종료</a><a href="/budgets">AI 예산</a><details><summary>더보기</summary><div class="more-links"><a href="/authoring#rehearsal">리허설·확정</a><a href="/manage#ops-help-title">도움 요청</a><a href="/manage#shares-title">공유 기록</a><a href="/manage#ops-finish-title">기록 회수·보고서</a></div></details></nav></div>
 <div class="wrap">
-  <h1>학생 초대 · 학생 토큰 발급</h1>
-  <div class="sub">강사(issuer) 토큰이 있으면 담당 코호트의 학생 토큰을 직접 발급할 수 있어요. 발급은 학생 앱의 연결 완료가 아닙니다 — 운영 보드에서 앱 확인 여부를 봅니다.</div>
+  <h1>학생 초대</h1>
+  <div class="sub">학생이 앱에 입력할 참여 코드를 발급합니다.</div>
 
   <fieldset>
-    <legend>① 본인 issuer 토큰</legend>
-    <label>Jay에게서 받은 issuer 토큰을 한 번 붙여넣으면 다음 발급부터는 자동으로 채워집니다 (세션 동안).</label>
+    <legend>강사 연결 코드</legend>
+    <label>운영자에게 받은 강사 코드를 입력하세요.</label>
     <textarea id="issuer" rows="3" placeholder="eyJjIjoi…"></textarea>
     <div class="help">잊어버렸으면 단톡방에 Jay에게 재발급 요청.</div>
   </fieldset>
 
   <fieldset>
-    <legend>② 발급할 student 토큰 정보</legend>
-    <label>학생 handle (소문자, 영숫자 + 하이픈)</label>
+    <legend>초대할 학생</legend>
+    <label>학생 ID (영문 소문자·숫자·하이픈)</label>
     <input id="u" placeholder="participant-01">
-    <label>cohort</label>
+    <label>수업 ID</label>
     <input id="c" placeholder="boah-dental-2026-a">
-    <label>profile</label>
+    <label>수업 설정 ID</label>
     <input id="p" placeholder="boah-dental-teaser-2026-s1">
-    <label>hours (유효기간)</label>
+    <label>사용 시간</label>
     <input id="hours" type="number" min="1" max="1440" value="12">
     <div class="help">로컬 데모: 6시간. 1회차 + 디버깅 여유까지: 12-24시간.</div>
     <button id="mint">발급 →</button>
-    <button class="reset" id="forget" type="button">issuer 토큰 지우기</button>
+    <button class="reset" id="forget" type="button">강사 코드 지우기</button>
   </fieldset>
 
   <div id="result"></div>
@@ -251,5 +282,11 @@ if (typeof window === "undefined") {
   (globalThis).__issuerPageHelpers = { sanitizeToken, mapServerError, TOKEN_SHAPE };
 }
 </script>
-</body>
+<style>
+html:root,body{background:#0f1418!important;color:#e8ecef;min-height:100vh}body{margin:0!important}body>.wrap,body>header,body>main{width:min(100%,1100px);margin-inline:auto;padding:20px}
+.hp-flowbar{align-items:center;font-size:15px}.hp-flowbar nav{gap:4px;align-items:center;overflow:visible!important;flex-wrap:wrap!important}.hp-flowbar nav a{font-size:14px;min-height:40px}.hp-flowbar details{position:relative;padding:0 10px}.hp-flowbar summary{cursor:pointer;color:#b7c1ca}.hp-flowbar .more-links{position:absolute;right:0;top:32px;z-index:20;background:#151c22;border:1px solid #3a4855;border-radius:8px;padding:8px;min-width:200px}.hp-flowbar .more-links a{display:block;white-space:normal}
+label{font-size:15px}input,textarea,select{font-size:16px}small,.help,.muted{color:#a7b4bf}button.secondary,button.ghost,button.reset{background:transparent!important;color:#b7c1ca!important;border:1px solid #3a4855!important}
+.page-help{margin:14px 0;color:#b7c1ca}.page-help>summary{cursor:pointer}.page-help[open]{padding-bottom:12px}.page-help nav{display:flex;flex-wrap:wrap;gap:16px;padding:12px 0}.page-help p{line-height:1.6}
+@media(max-width:600px){body>.wrap,body>header,body>main{padding:14px}.hp-flowbar{padding:10px}.hp-flowbar nav{gap:0}.hp-flowbar nav a{padding:4px 7px;font-size:14px}}
+</style></body>
 </html>

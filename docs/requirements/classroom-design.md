@@ -5,6 +5,19 @@
 목적: 강사가 수업 중 학생의 상태를 읽고 필요한 도움을 주며 학생은 공유 범위를 통제한다.
 기존 모바일 기준에 더해 화면 구성과 상호작용의 합격 조건을 정의한다.
 
+## Instructor simplification · 2026-09-27 · #1363
+
+TJ's latest direction takes precedence over the historical layout and colour descriptions below: use the first charcoal/cyan concept as the visual reference, minimise text on each initial instructor page, and reveal learner details after selection. This is a local implementation revision, not production or real-class acceptance.
+
+- DES-01/04/12: the default list has selection, seat, short status and a detail action. Entry, step, provenance, signal timestamps, recovery history and technical identifiers remain in the selected learner's disclosures. The recommended action stays visible; secondary actions keep their original permissions and confirmations.
+- DES-05/07: fault, learner help, approval wait and unknown stay distinct. Missing runtime evidence must not receive a normal badge. Normal/unknown filters use the same predicate as their badges.
+- DES-02/03/06: maintain at least eight complete rows at 1280×720 and six at 1024×640, readable 14px+ row text, keyboard/Escape/focus return, and 44px action targets. Mobile keeps search, all status filters and optional selection tools available.
+- DES-08/10: opening a learner or changing selection sends nothing. Preserve question drafts, explicit destructive-action confirmation, and the distinction between requested, executed and resolved. Open evidence disclosures survive status polling for the same learner.
+- Visual tokens: background `#0F1418`, panel `#151C22`, cyan `#2AC4D9`, text `#E8ECEF`. This supersedes the green/lime tokens below. The original concept's individual fields can be reduced to meet the user's newer minimal-information direction; no claim of pixel-identical reproduction is made.
+- `/authoring`, `/issuer`, `/console`, `/budgets`: five primary destinations plus explicit more-navigation; concise initial instructions and named primary input/action. Longer guidance is available on demand. Student consent screens are unchanged.
+
+Verification: `ops-g1-layout.mjs` (real Chalk/Service browser fixture), `ops.mjs` (device-loop actions), authoring G2 and budget browser tests. Retain local-versus-production and synthetic-versus-real evidence boundaries.
+
 ## Acceptance requirements
 
 | ID | 디자인 요구사항 및 합격 기준 | 우선순위 |
