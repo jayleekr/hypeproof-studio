@@ -73,7 +73,9 @@ WORKTREE_DIR="$TMP_BASE/studio-review-${SAFE_BRANCH}"
 # macOS BSD date does not support %N; use python3 for millisecond timestamps.
 ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
 
+_CLEANUP_DONE=0
 cleanup() {
+  [[ $_CLEANUP_DONE -eq 1 ]] && return; _CLEANUP_DONE=1
   echo ""
   echo "=== Cleanup ==="
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -90,7 +92,7 @@ cleanup() {
   fi
   echo "Done."
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 trap 'echo "FAILED at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # ── Step 1: worktree ──────────────────────────────────────────────────────────
@@ -322,5 +324,7 @@ fi
 echo ""
 echo "When done reviewing, press Ctrl+C to clean up."
 
-# Wait forever (cleanup runs on exit)
-wait
+# Wait for the wrangler dev background job (cleanup runs on exit/INT/TERM).
+# || true: prevents a non-zero exit from wrangler from triggering the ERR trap
+# here — the trap was already sent before cleanup; this is normal shutdown.
+wait "$SERVER_PID" 2>/dev/null || true

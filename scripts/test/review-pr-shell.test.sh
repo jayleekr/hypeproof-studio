@@ -72,6 +72,20 @@ else
   ok "migration loop absent from script"
 fi
 
+# 9. trap includes INT TERM for foreground Ctrl+C
+if grep -q "trap cleanup EXIT INT TERM" "$SCRIPT"; then
+  ok "trap cleanup EXIT INT TERM found"
+else
+  fail "trap cleanup EXIT INT TERM not found (SIGINT cleanup fix missing)"
+fi
+
+# 10. cleanup has double-run guard
+if grep -q "_CLEANUP_DONE" "$SCRIPT"; then
+  ok "_CLEANUP_DONE guard found in cleanup"
+else
+  fail "_CLEANUP_DONE guard not found"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
