@@ -62,7 +62,7 @@ await check('T-G2 student mode: new E2-6 tools NOT in definitions', () => {
 });
 
 // ─── T-G3: chalk_set_inputs → PUT /admin/chalk/cohorts/:cohort/courses/:course/inputs ─
-await check('T-G3 execSetInputs correct path and body includes vocab', async () => {
+await check('T-G3 execSetInputs correct path, body includes vocab, request_id auto-generated', async () => {
   let capturedPath = '';
   let capturedBody = '';
   await withMockServer((req, res) => {
@@ -73,16 +73,19 @@ await check('T-G3 execSetInputs correct path and body includes vocab', async () 
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ revision: 2 }));
   }, async (port) => {
+    // expected_revision, request_id는 모델이 넘기지 않는다 — exec가 자동 생성
     await execSetInputs(fakeCtx(port), {
       cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
-      audience: '어린이', assets: ['intent', 'verify'],
+      audience: '어린이', assets: ['INTENT', 'VERIFY'],
       teaching_style: '탐구', requirements: '없음', format: 'workshop',
-      vocab: { goals: ['concept_understanding'], conditions: ['no_prior'], learner_level: 'novice', has_guidance: false },
-      expected_revision: 1, request_id: 'uuid-001',
+      vocab: { goals: ['concept_understanding'], conditions: ['no_prior'] },
     });
     assert.match(capturedPath, /\/admin\/chalk\/cohorts\/sk-biopharm-kids-s1\/courses\/lesson-01\/inputs/,
       `inputs 경로 불일치: ${capturedPath}`);
     assert.ok(capturedBody.includes('"vocab"'), `vocab 필드가 바디에 없다`);
+    const parsed = JSON.parse(capturedBody);
+    assert.ok(typeof parsed.request_id === 'string' && parsed.request_id.length > 0, 'request_id가 자동 생성되지 않았다');
+    assert.ok(typeof parsed.expected_revision === 'number', 'expected_revision이 자동 생성되지 않았다');
   });
 });
 
@@ -115,12 +118,14 @@ await check('T-G5 execOpenCourse correct path', async () => {
 });
 
 // ─── T-G6: chalk_save_plan → PUT .../plan (파일 내용 바디에 포함) ──────────
-await check('T-G6 execSavePlan reads working copy and sends html in body', async () => {
+await check('T-G6 execSavePlan reads working copy and sends html in body, request_id auto-generated', async () => {
   const tmpDir = join(tmpdir(), `chalk-test-${Date.now()}`);
   const course = 'lesson-01';
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
+  // meta.json에 revision 미리 저장 — fetchExpectedRevision이 서버를 호출하지 않도록
+  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   let capturedPath = '';
   let capturedBody = '';
@@ -132,12 +137,14 @@ await check('T-G6 execSavePlan reads working copy and sends html in body', async
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ revision: 2, sha256: 'abc', findings: [] }));
   }, async (port) => {
-    await execSavePlan(fakeCtx(port, { cwd: tmpDir }), {
-      cohort: 'c1', course, knowledge_version: 3, expected_revision: 1, request_id: 'uuid-002',
-    });
+    // expected_revision, request_id는 모델이 넘기지 않는다 — exec가 자동 생성
+    await execSavePlan(fakeCtx(port, { cwd: tmpDir }), { cohort: 'c1', course, knowledge_version: 3 });
     assert.match(capturedPath, /\/admin\/chalk\/cohorts\/c1\/courses\/lesson-01\/plan/,
       `plan PUT 경로 불일치: ${capturedPath}`);
     assert.ok(capturedBody.includes('<html>draft</html>'), `작업 사본 html이 바디에 없다`);
+    const parsed = JSON.parse(capturedBody);
+    assert.ok(typeof parsed.request_id === 'string' && parsed.request_id.length > 0, 'request_id가 자동 생성되지 않았다');
+    assert.equal(parsed.expected_revision, 1, 'meta.json의 revision이 expected_revision으로 사용되지 않았다');
   });
 });
 
@@ -183,6 +190,7 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflic
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
+  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
@@ -191,7 +199,7 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflic
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port, { cwd: tmpDir }),
       'chalk_save_plan',
-      { cohort: 'c1', course, knowledge_version: 3, expected_revision: 1, request_id: 'uuid-003' },
+      { cohort: 'c1', course, knowledge_version: 3 },
     ));
     assert.equal(result.error, 'revision_conflict', `409 충돌이 revision_conflict로 반환되지 않았다: ${JSON.stringify(result)}`);
     assert.ok(result.message.includes('chalk_open_course'), '다시 열기 안내에 chalk_open_course가 없다');
@@ -205,6 +213,7 @@ await check('T-G10 execSavePlan returns knowledge_missing on 409 knowledge_missi
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
   await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
   await writeFile(filePath, '<html>draft</html>', 'utf-8');
+  await writeFile(join(tmpDir, 'chalk', course, 'meta.json'), JSON.stringify({ revision: 1 }), 'utf-8');
 
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
@@ -213,7 +222,7 @@ await check('T-G10 execSavePlan returns knowledge_missing on 409 knowledge_missi
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port, { cwd: tmpDir }),
       'chalk_save_plan',
-      { cohort: 'c1', course, knowledge_version: 999, expected_revision: 1, request_id: 'uuid-kv' },
+      { cohort: 'c1', course, knowledge_version: 999 },
     ));
     assert.equal(result.error, 'knowledge_missing', `지식 없음이 knowledge_missing으로 반환되지 않았다: ${JSON.stringify(result)}`);
     assert.ok(result.message, '안내 메시지가 없다');
@@ -275,16 +284,18 @@ await check('T-G13 workingCopyPath: lesson and ops produce different paths', () 
   assert.notEqual(lessonPath, opsPath, 'lesson and ops paths must differ');
 });
 
-// ─── T-G14: chalk_set_inputs 스키마 필드가 서버 PUT /inputs 필수 필드를 포함한다 ─
-await check('T-G14 chalk_set_inputs schema required fields match server PUT /inputs validation', () => {
+// ─── T-G14: chalk_set_inputs 스키마 + 도구 자동 생성 필드 = 서버 PUT /inputs 검증 집합 ─
+await check('T-G14 chalk_set_inputs schema + tool-generated fields cover server PUT /inputs validation', () => {
   const def = CHALK_TOOL_DEFINITIONS.find(d => d.name === 'chalk_set_inputs');
   assert.ok(def, 'chalk_set_inputs def missing');
   const required = def.inputSchema.required ?? [];
-  // 서버가 400 invalid_request로 거부하는 필수 필드: audience, assets, teaching_style,
-  // requirements, format, expected_revision, request_id
-  for (const field of ['audience', 'assets', 'teaching_style', 'requirements', 'format', 'expected_revision', 'request_id']) {
-    assert.ok(required.includes(field), `'${field}' must be in required array`);
+  // 모델이 채워야 하는 필수 필드
+  for (const field of ['audience', 'assets', 'teaching_style', 'requirements', 'format']) {
+    assert.ok(required.includes(field), `모델 필수 필드 '${field}'가 required 배열에 없다`);
   }
+  // expected_revision, request_id는 스키마에서 제거됨 — exec가 자동 생성
+  assert.ok(!required.includes('expected_revision'), 'expected_revision은 스키마 required에 없어야 한다 (exec 자동 생성)');
+  assert.ok(!required.includes('request_id'), 'request_id는 스키마 required에 없어야 한다 (exec 자동 생성)');
   // assets는 enum 배열이어야 한다
   const assetsSchema = def.inputSchema.properties?.assets;
   assert.ok(assetsSchema?.type === 'array', 'assets must be array type');

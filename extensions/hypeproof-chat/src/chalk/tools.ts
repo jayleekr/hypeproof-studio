@@ -10,6 +10,7 @@
 import type * as vscode from "vscode";
 import * as nodePath from "node:path";
 import * as nodeFs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 
 // ─── 공통 타입 ─────────────────────────────────────────────────────────────
 
@@ -305,6 +306,57 @@ export function workingCopyPath(cwd: string, course: string, file?: string): str
   return nodePath.join(cwd, "chalk", course, fname);
 }
 
+/** 로컬 메타 파일 경로. draft revision을 저장한다. */
+function metaPath(cwd: string, course: string): string {
+  return nodePath.join(cwd, "chalk", course, "meta.json");
+}
+
+/** 로컬 meta.json에서 revision 읽기. 없으면 0 (미확인). */
+async function readLocalRevision(cwd: string, course: string): Promise<number> {
+  try {
+    const raw = await nodeFs.readFile(metaPath(cwd, course), "utf8");
+    const meta = JSON.parse(raw) as { revision?: unknown };
+    if (typeof meta.revision === "number" && meta.revision >= 1) return meta.revision;
+  } catch { /* 없으면 0 */ }
+  return 0;
+}
+
+/** meta.json에 revision 저장. cwd 없으면 no-op. */
+async function saveLocalRevision(cwd: string | undefined, course: string, revision: number): Promise<void> {
+  if (!cwd) return;
+  const mp = metaPath(cwd, course);
+  try {
+    await nodeFs.mkdir(nodePath.dirname(mp), { recursive: true });
+    await nodeFs.writeFile(mp, JSON.stringify({ revision }), "utf8");
+  } catch { /* 저장 실패는 무시 — 다음 호출에서 서버로 재확인 */ }
+}
+
+/**
+ * expected_revision 획득. 우선순위: 로컬 meta.json → 서버 GET /plan → 1(기본).
+ * 서버 GET /plan 응답의 `ref` 필드가 draft revision 번호다.
+ */
+async function fetchExpectedRevision(
+  ctx: ChalkToolContext,
+  cohort: string,
+  course: string,
+  file: string = "lesson",
+): Promise<number> {
+  if (ctx.cwd) {
+    const local = await readLocalRevision(ctx.cwd, course);
+    if (local >= 1) return local;
+  }
+  try {
+    const resp = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan?file=${encodeURIComponent(file)}`,
+      { method: "GET" },
+    ) as Record<string, unknown>;
+    const ref = Number(resp.ref);
+    if (Number.isFinite(ref) && ref >= 1) return ref;
+  } catch { /* 서버 오류 시 기본값 사용 */ }
+  return 1;
+}
+
 async function hasLocalChanges(filePath: string): Promise<boolean> {
   try {
     const stat = await nodeFs.stat(filePath);
@@ -337,8 +389,6 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
       teaching_style: { ...str, description: "교수 스타일 또는 방법론 (예: 탐구 학습)" },
       requirements: { type: "string", description: "기타 요구사항 또는 제약 (빈 문자열 허용)" },
       format: { type: "string", enum: ["workshop", "track"], description: "강의 형식" },
-      expected_revision: { type: "number", description: "현재 초안 리비전 번호 (≥1)" },
-      request_id: { ...str, description: "중복 방지용 고유 요청 ID (영문숫자·-·_ 조합, 최대 128자)" },
       family_session: { type: "boolean", description: "가족 세션 여부 (선택)" },
       vocab: {
         type: "object",
@@ -350,7 +400,7 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
         description: "어휘 필터 (선택)",
       },
     },
-    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format", "expected_revision", "request_id"],
+    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format"],
   ),
 };
 
@@ -358,18 +408,24 @@ export async function execSetInputs(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course, ...body } = input as {
+  const { cohort, course, ...rest } = input as {
     cohort: string;
     course: string;
     [k: string]: unknown;
   };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
+  const request_id = randomUUID().replace(/-/g, "");
+  const body = { ...rest, expected_revision, request_id };
   try {
-    return await issuerFetch(
+    const result = await issuerFetch(
       ctx,
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
       { method: "PUT", body },
-    );
+    ) as Record<string, unknown>;
+    // 성공 시 새 revision을 로컬에 저장한다.
+    if (typeof result.revision === "number") await saveLocalRevision(ctx.cwd, course, result.revision);
+    return result;
   } catch (e) {
     if (e instanceof IssuerHttpError) {
       const b = e.body as Record<string, unknown> | null;
@@ -470,6 +526,9 @@ export async function execOpenCourse(
 
   await nodeFs.mkdir(nodePath.dirname(dest), { recursive: true });
   await nodeFs.writeFile(dest, html, "utf8");
+  // GET /plan 응답의 ref = draft revision 번호. 다음 PUT 호출에 사용한다.
+  const ref = Number(result.ref);
+  if (Number.isFinite(ref) && ref >= 1) await saveLocalRevision(ctx.cwd, course, ref);
   return { ...result, localPath: dest };
 }
 
@@ -505,14 +564,19 @@ export async function execSavePlan(
     throw new Error(`로컬 작업 사본(${src})을 읽을 수 없습니다. chalk_open_course로 먼저 열어보세요.`);
   }
 
-  // 서버 body에는 html 외 추가 필드(knowledge_version, expected_revision, request_id)도 포함한다.
+  // knowledge_version 등 모델이 넘긴 추가 필드는 그대로 전달한다.
   const { cohort: _c, course: _co, file: _f, ...extras } = input as Record<string, unknown>;
+  const expected_revision = await fetchExpectedRevision(ctx, cohort, course, file ?? "lesson");
+  const request_id = randomUUID().replace(/-/g, "");
   try {
-    return await issuerFetch(
+    const result = await issuerFetch(
       ctx,
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
-      { method: "PUT", body: { html, ...extras } },
-    );
+      { method: "PUT", body: { html, ...extras, expected_revision, request_id } },
+    ) as Record<string, unknown>;
+    // 성공 시 새 revision을 로컬에 저장한다.
+    if (typeof result.revision === "number") await saveLocalRevision(ctx.cwd, course, result.revision);
+    return result;
   } catch (e) {
     if (e instanceof IssuerHttpError) {
       const b = e.body as Record<string, unknown> | null;
