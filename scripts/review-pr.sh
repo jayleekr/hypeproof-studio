@@ -4,7 +4,7 @@
 # Wraps studio-dev.py; never touches production values.
 # --vault <path>  explicit path to the curriculum_wiki vault for Chalk knowledge import.
 #                 Falls back to CHALK_VAULT_PATH env var, then auto-detects sibling repo paths.
-set -euo pipefail
+set -Eeuo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PROVIDER="service"
@@ -28,7 +28,7 @@ done
 
 # ── Pre-flight checks (before any network calls) ──────────────────────────────
 if lsof -iTCP:"$WRANGLER_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
-  HOLDER="$(lsof -iTCP:$WRANGLER_PORT -sTCP:LISTEN -Fp 2>/dev/null | grep '^p' | head -1 | sed 's/^p//')"
+  HOLDER="$(lsof -iTCP:$WRANGLER_PORT -sTCP:LISTEN -Fp 2>/dev/null | grep -m1 '^p' | sed 's/^p//')"
   echo "ERROR: port $WRANGLER_PORT already in use by PID $HOLDER ($(ps -p "$HOLDER" -o comm= 2>/dev/null || echo unknown))" >&2
   echo "Kill it first or close the other session." >&2
   exit 1
@@ -41,11 +41,29 @@ if [[ "${HYPEPROOF_API_URL:-}" == *"hypeproof-ai.xyz"* ]] || \
 fi
 
 # ── Resolve branch from PR number ─────────────────────────────────────────────
+FETCH_REF=""      # what to git fetch (branch name or "main" for merged commit)
+CHECKOUT_REF=""   # what to checkout (origin/<branch> or bare commit sha)
 if [[ "$INPUT" =~ ^[0-9]+$ ]]; then
-  BRANCH="$(gh pr view "$INPUT" --repo jayleekr/hypeproof-studio --json headRefName --jq '.headRefName')"
-  echo "PR #$INPUT → branch: $BRANCH"
+  PR_JSON="$(gh pr view "$INPUT" --repo jayleekr/hypeproof-studio --json state,headRefName,mergeCommit)"
+  PR_STATE="$(python3 -c "import sys,json; print(json.loads(sys.stdin.read())['state'])" <<< "$PR_JSON")"
+  if [[ "$PR_STATE" == "MERGED" ]]; then
+    BRANCH="$(python3 -c "import sys,json; print(json.loads(sys.stdin.read())['mergeCommit']['oid'])" <<< "$PR_JSON")"
+    FETCH_REF="main"
+    CHECKOUT_REF="$BRANCH"
+    echo "PR #$INPUT → MERGED, commit: $BRANCH"
+  elif [[ "$PR_STATE" == "OPEN" ]]; then
+    BRANCH="$(python3 -c "import sys,json; print(json.loads(sys.stdin.read())['headRefName'])" <<< "$PR_JSON")"
+    FETCH_REF="$BRANCH"
+    CHECKOUT_REF="origin/$BRANCH"
+    echo "PR #$INPUT → branch: $BRANCH"
+  else
+    echo "ERROR: PR #$INPUT is CLOSED (unmerged). Cannot review a closed PR." >&2
+    exit 1
+  fi
 else
   BRANCH="$INPUT"
+  FETCH_REF="$BRANCH"
+  CHECKOUT_REF="origin/$BRANCH"
 fi
 
 SAFE_BRANCH="${BRANCH//\//-}"
@@ -55,7 +73,9 @@ WORKTREE_DIR="$TMP_BASE/studio-review-${SAFE_BRANCH}"
 # macOS BSD date does not support %N; use python3 for millisecond timestamps.
 ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
 
+_CLEANUP_DONE=0
 cleanup() {
+  [[ $_CLEANUP_DONE -eq 1 ]] && return; _CLEANUP_DONE=1
   echo ""
   echo "=== Cleanup ==="
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -72,20 +92,21 @@ cleanup() {
   fi
   echo "Done."
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
+trap 'echo "FAILED at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # ── Step 1: worktree ──────────────────────────────────────────────────────────
 echo ""
 echo "=== [1/6] Worktree ==="
 if [[ -d "$WORKTREE_DIR" ]]; then
   echo "Reusing existing worktree at $WORKTREE_DIR"
-  git -C "$REPO" fetch origin "$BRANCH" --quiet
-  git -C "$WORKTREE_DIR" checkout --detach "origin/$BRANCH" 2>&1
+  git -C "$REPO" fetch origin "$FETCH_REF" --quiet
+  git -C "$WORKTREE_DIR" checkout --detach "$CHECKOUT_REF" 2>&1
   echo "Updated to: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
 else
   T1=$(ms)
-  git -C "$REPO" fetch origin "$BRANCH" --quiet
-  git -C "$REPO" worktree add "$WORKTREE_DIR" "origin/$BRANCH" 2>&1
+  git -C "$REPO" fetch origin "$FETCH_REF" --quiet
+  git -C "$REPO" worktree add "$WORKTREE_DIR" "$CHECKOUT_REF" 2>&1
   T1_END=$(ms)
   echo "Worktree ready in $(( T1_END - T1 ))ms"
   echo "Building: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
@@ -108,8 +129,9 @@ echo "=== [3/6] Local server (port $WRANGLER_PORT) ==="
 WORKER_DIR="$WORKTREE_DIR/worker"
 DEV_VARS="$WORKER_DIR/.dev.vars"
 
-# Generate a random 32-char hex secret (never production value)
-LOCAL_SECRET="dev-local-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 20)"
+# Generate a random 20-char hex secret (never production value).
+# openssl rand has no pipe: avoids SIGPIPE from tr|head under set -o pipefail.
+LOCAL_SECRET="dev-local-$(openssl rand -hex 10)"
 
 cat > "$DEV_VARS" << EOF
 HPS_SIGNING_SECRET="$LOCAL_SECRET"
@@ -125,12 +147,9 @@ echo "Created $DEV_VARS with local random signing secret."
 echo "Initialising local D1..."
 (cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file schema.sql 2>&1 | grep -v "^$\|Reading\|Executing" || true)
 
-# Apply migrations
-if ls "$WORKER_DIR"/migrations/*.sql >/dev/null 2>&1; then
-  for mig in "$WORKER_DIR"/migrations/*.sql; do
-    npx --prefix "$WORKER_DIR" wrangler d1 execute hypeproof-studio --local --file "$mig" 2>&1 | grep -v "^$\|Reading\|Executing" || true
-  done
-fi
+# Migrations are NOT applied here: schema.sql is the cumulative snapshot and
+# AT-33 asserts schema.sql == applying all migrations in order (same DDL).
+# Running migrations on a fresh local DB would produce duplicate-object errors.
 
 # ── Step 3.5: Chalk knowledge import ─────────────────────────────────────────
 IMPORT_SCRIPT="$WORKTREE_DIR/scripts/chalk-knowledge-import/index.ts"
@@ -171,8 +190,8 @@ if [[ -f "$IMPORT_SCRIPT" ]]; then
         --created-by "review-pr.sh" \
         --out "$KB_SQL" 2>&1; then
       # Extract vault commit and doc count from the SQL comment header
-      VAULT_COMMIT="$(grep 'source_commit:' "$KB_SQL" | head -1 | sed 's/.*source_commit: *//' | tr -d ' ')"
-      DOC_COUNT="$(grep 'doc_count:' "$KB_SQL" | head -1 | sed 's/.*doc_count: *//' | tr -d ' ')"
+      VAULT_COMMIT="$(grep -m1 'source_commit:' "$KB_SQL" | sed 's/.*source_commit: *//' | tr -d ' ')"
+      DOC_COUNT="$(grep -m1 'doc_count:' "$KB_SQL" | sed 's/.*doc_count: *//' | tr -d ' ')"
       echo "적재 중... (commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT:-?})"
       LOAD_RC=0
       LOAD_OUT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file "$KB_SQL" 2>&1)" || LOAD_RC=$?
@@ -211,7 +230,7 @@ except Exception:
 fi
 
 T3=$(ms)
-(cd "$WORKER_DIR" && npx wrangler dev --local --port "$WRANGLER_PORT" 2>&1 &)
+(cd "$WORKER_DIR" && npx wrangler dev --local --port "$WRANGLER_PORT" 2>&1) &
 SERVER_PID=$!
 echo "wrangler dev PID: $SERVER_PID"
 
@@ -231,8 +250,8 @@ echo ""
 echo "=== [4/6] Instructor token ==="
 
 # Auto-detect first available profile and its cohort
-PROFILE_ID="$(grep -h "^  id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | head -1 | sed "s/.*id: ['\"]//;s/['\"].*//" | tr -d ' ')"
-COHORT_ID="$(grep -h "cohort_id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | head -1 | sed "s/.*cohort_id: ['\"]//;s/['\"].*//" | tr -d ' ')"
+PROFILE_ID="$(grep -h -m1 "^  id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | sed "s/.*id: ['\"]//;s/['\"].*//" | tr -d ' ')"
+COHORT_ID="$(grep -h -m1 "cohort_id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | sed "s/.*cohort_id: ['\"]//;s/['\"].*//" | tr -d ' ')"
 
 if [[ -z "$PROFILE_ID" || -z "$COHORT_ID" ]]; then
   echo "WARNING: Could not auto-detect profile/cohort. Use the token issued below manually." >&2
@@ -270,6 +289,18 @@ fi
 # ── Step 5: Dev app ───────────────────────────────────────────────────────────
 echo ""
 echo "=== [5/6] Dev app ==="
+
+# Auto-seed the token file so the extension loads it without manual paste.
+# studio-dev.py computes state = ~/Library/.../HypeProof Studio Development/<sha256[:12]>
+# where sha256 is over str(REPO) = WORKTREE_DIR (Path(__file__).parents[1]).
+if [[ -n "${TOKEN:-}" ]]; then
+  STATE_HASH="$(python3 -c "import hashlib; print(hashlib.sha256('$WORKTREE_DIR'.encode()).hexdigest()[:12])")"
+  STATE_DIR="$HOME/Library/Application Support/HypeProof Studio Development/$STATE_HASH"
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$TOKEN" > "$STATE_DIR/local-participant-token.txt"
+  echo "Token seeded → $STATE_DIR/local-participant-token.txt"
+fi
+
 T5=$(ms)
 python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
   --provider "$PROVIDER" \
@@ -293,5 +324,7 @@ fi
 echo ""
 echo "When done reviewing, press Ctrl+C to clean up."
 
-# Wait forever (cleanup runs on exit)
-wait
+# Wait for the wrangler dev background job (cleanup runs on exit/INT/TERM).
+# || true: prevents a non-zero exit from wrangler from triggering the ERR trap
+# here — the trap was already sent before cleanup; this is normal shutdown.
+wait "$SERVER_PID" 2>/dev/null || true
