@@ -5,6 +5,7 @@ import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { InstructorInbox } from './InstructorInbox';
 import { HelpRequest } from './HelpRequest';
+import { acceptHelp } from '../../src/classroomHelp';
 import { addImportRef, canUndoImport, dropImportRef, importIntoDraft, type ImportRef, type LastImport } from './draftImport';
 import { isObservationFormat, showsObservationResults } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
@@ -262,7 +263,8 @@ export function ChatPanel(props: Props) {
   // #751 native help — the host reads the learner, class connection and Service again for every draw; nothing is kept here.
   const [help, setHelp] = useState<import("../../src/classroomHelp").HelpView | null>(null);
   useEffect(() => {
-    const off = onHostMessage((msg) => { if (msg.type === "helpState") setHelp(msg.help); });
+    // The host numbers its draws; one that arrives after a newer draw (an older learner's, or an older read) is not shown.
+    const off = onHostMessage((msg) => { if (msg.type === "helpState") setHelp((prev) => acceptHelp(prev, msg.help)); });
     const ask = () => { if (document.visibilityState !== "hidden") postToHost({ type: "helpRequest" }); };
     ask(); document.addEventListener("visibilitychange", ask);
     const stop = () => { off(); document.removeEventListener("visibilitychange", ask); };
