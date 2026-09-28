@@ -264,4 +264,36 @@ await check('T-G9 instructor mode: all E2-6 tools in merged definitions', () => 
   }
 });
 
+// ─── T-G13: lesson과 ops 작업 사본 경로가 다르다 ────────────────────────────
+await check('T-G13 workingCopyPath: lesson and ops produce different paths', () => {
+  const cwd = '/tmp/test-cwd';
+  const course = 'lesson-01';
+  const lessonPath = workingCopyPath(cwd, course, 'lesson');
+  const opsPath = workingCopyPath(cwd, course, 'ops');
+  assert.ok(lessonPath.endsWith('lesson.html'), `lesson path must end with lesson.html: ${lessonPath}`);
+  assert.ok(opsPath.endsWith('ops.html'), `ops path must end with ops.html: ${opsPath}`);
+  assert.notEqual(lessonPath, opsPath, 'lesson and ops paths must differ');
+});
+
+// ─── T-G14: chalk_set_inputs 스키마 필드가 서버 PUT /inputs 필수 필드를 포함한다 ─
+await check('T-G14 chalk_set_inputs schema required fields match server PUT /inputs validation', () => {
+  const def = CHALK_TOOL_DEFINITIONS.find(d => d.name === 'chalk_set_inputs');
+  assert.ok(def, 'chalk_set_inputs def missing');
+  const required = def.inputSchema.required ?? [];
+  // 서버가 400 invalid_request로 거부하는 필수 필드: audience, assets, teaching_style,
+  // requirements, format, expected_revision, request_id
+  for (const field of ['audience', 'assets', 'teaching_style', 'requirements', 'format', 'expected_revision', 'request_id']) {
+    assert.ok(required.includes(field), `'${field}' must be in required array`);
+  }
+  // assets는 enum 배열이어야 한다
+  const assetsSchema = def.inputSchema.properties?.assets;
+  assert.ok(assetsSchema?.type === 'array', 'assets must be array type');
+  assert.ok(Array.isArray(assetsSchema?.items?.enum), 'assets items must have enum');
+  // format은 enum이어야 한다
+  const formatSchema = def.inputSchema.properties?.format;
+  assert.ok(Array.isArray(formatSchema?.enum), 'format must have enum');
+  assert.ok(formatSchema.enum.includes('workshop'), 'format enum must include workshop');
+  assert.ok(formatSchema.enum.includes('track'), 'format enum must include track');
+});
+
 console.log(`\n${passed} tests passed`);

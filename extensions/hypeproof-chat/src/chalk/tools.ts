@@ -298,10 +298,11 @@ export async function execRecommendMethods(
 
 /**
  * 로컬 작업 사본 경로. cohort를 포함하지 않는다 — 같은 강의는 코호트 무관하게 한 사본.
- * file 파라미터는 서버 쿼리용이고 로컬 파일명은 항상 지도안.html이다.
+ * file 별로 다른 파일(lesson.html, ops.html)을 쓴다. 기본은 lesson.html.
  */
-export function workingCopyPath(cwd: string, course: string, _file?: string): string {
-  return nodePath.join(cwd, "chalk", course, "지도안.html");
+export function workingCopyPath(cwd: string, course: string, file?: string): string {
+  const fname = file ? `${file}.html` : "lesson.html";
+  return nodePath.join(cwd, "chalk", course, fname);
 }
 
 async function hasLocalChanges(filePath: string): Promise<boolean> {
@@ -324,13 +325,32 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
     {
       cohort: { ...str, description: "코호트 ID" },
       course: { ...str, description: "강의 ID" },
-      inputs: {
+      audience: { ...str, description: "수강 대상 설명 (예: 초등 3~4학년 20명)" },
+      assets: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["TASTE", "INTENT", "CONTEXT", "VERIFY", "DELEGATE", "ITERATE", "OWNERSHIP"],
+        },
+        description: "7대 AI Native Asset 중 이 강의에서 다룰 항목",
+      },
+      teaching_style: { ...str, description: "교수 스타일 또는 방법론 (예: 탐구 학습)" },
+      requirements: { type: "string", description: "기타 요구사항 또는 제약 (빈 문자열 허용)" },
+      format: { type: "string", enum: ["workshop", "track"], description: "강의 형식" },
+      expected_revision: { type: "number", description: "현재 초안 리비전 번호 (≥1)" },
+      request_id: { ...str, description: "중복 방지용 고유 요청 ID (영문숫자·-·_ 조합, 최대 128자)" },
+      family_session: { type: "boolean", description: "가족 세션 여부 (선택)" },
+      vocab: {
         type: "object",
-        description: "입력값 맵 (서버 스키마에 따라 자유 형식)",
-        additionalProperties: true,
+        properties: {
+          goals: { type: "array", items: { type: "string" }, description: "어휘 목표 키 목록" },
+          conditions: { type: "array", items: { type: "string" }, description: "어휘 조건 키 목록" },
+        },
+        additionalProperties: false,
+        description: "어휘 필터 (선택)",
       },
     },
-    ["cohort", "course", "inputs"],
+    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format", "expected_revision", "request_id"],
   ),
 };
 
@@ -338,14 +358,12 @@ export async function execSetInputs(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course, ...rest } = input as {
+  const { cohort, course, ...body } = input as {
     cohort: string;
     course: string;
     [k: string]: unknown;
   };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
-  // inputs 필드가 있으면 그것만, 없으면 나머지 전체를 바디로 보낸다.
-  const body = (rest.inputs !== undefined ? rest.inputs : rest) as Record<string, unknown>;
   try {
     return await issuerFetch(
       ctx,
@@ -460,11 +478,12 @@ export async function execOpenCourse(
 export const CHALK_SAVE_PLAN_DEF: ChalkToolDefinition = {
   name: "chalk_save_plan",
   description:
-    "로컬 작업 사본(지도안.html)을 서버에 저장합니다. 저장 전 로컬 파일을 읽습니다.",
+    "로컬 작업 사본(<file>.html)을 서버에 저장합니다. 저장 전 로컬 파일을 읽습니다.",
   inputSchema: schema(
     {
       cohort: { ...str, description: "코호트 ID" },
       course: { ...str, description: "강의 ID" },
+      file: { ...str, description: "파일 키 (lesson 또는 ops). 기본값: lesson" },
     },
     ["cohort", "course"],
   ),
@@ -474,11 +493,11 @@ export async function execSavePlan(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course } = input as { cohort: string; course: string };
+  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
   if (!ctx.cwd) throw new Error("작업 폴더(cwd)가 설정되지 않았습니다.");
 
-  const src = workingCopyPath(ctx.cwd, course);
+  const src = workingCopyPath(ctx.cwd, course, file);
   let html: string;
   try {
     html = await nodeFs.readFile(src, "utf8");
@@ -487,7 +506,7 @@ export async function execSavePlan(
   }
 
   // 서버 body에는 html 외 추가 필드(knowledge_version, expected_revision, request_id)도 포함한다.
-  const { cohort: _c, course: _co, ...extras } = input as Record<string, unknown>;
+  const { cohort: _c, course: _co, file: _f, ...extras } = input as Record<string, unknown>;
   try {
     return await issuerFetch(
       ctx,
