@@ -3159,6 +3159,33 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-INSTRUCTOR-MODE",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-DES-CHALK-INSTRUCTOR"
+      ],
+      "sources": [
+        { "path": "worker/src/routes/chalk-instructor.ts" },
+        { "path": "extensions/hypeproof-chat/src/chalk/instructorMode.ts" }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-INSTRUCTOR-MODE",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-INSTRUCTOR",
+        "ST-IMP-CHALK-INSTRUCTOR-MODE"
+      ],
+      "sources": [
+        { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
+        { "path": "worker/test/chalk-instructor-brief.test.mjs" },
+        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" }
+      ]
+    },
+    {
       "id": "ST-TEST-CHALK-MVP",
       "stage": "test",
       "owner": "JinyongShin",

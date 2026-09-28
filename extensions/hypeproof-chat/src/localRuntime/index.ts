@@ -99,6 +99,9 @@ export async function runLocalCoach(args: {
   requestApproval: (
     a: CoachToolAction,
   ) => Promise<boolean | { approved: boolean; actor: "user" | "policy" }>;
+  // #1298 — when set, overrides the default student-coach system prompt.
+  // Used by instructor mode to inject the versioned instructor-brief.
+  systemPrompt?: string;
   /** 강사 모드일 때만 넘긴다. 없으면 Chalk 도구를 AI 에 붙이지 않는다(SUB-06). */
   chalkCtx?: ChalkToolContext;
 }) {
@@ -118,13 +121,13 @@ export async function runLocalCoach(args: {
 
   // Chalk 도구는 강사 모드(chalkCtx 있음)에서만 붙는다(SUB-06).
   const tools = mergeChalkTools(workTools, args.chalkCtx);
-  const system =
-    "You are the coach in a LOCAL DEVELOPMENT rehearsal of HypeProof Studio. Reply in Korean. Follow the supplied course. Only provided Studio file tools are available; do not claim shell, browser or deployment actions. Read existing files before changing them; preserve unrelated work. Never treat sample results as real customers.\n" +
+  const system = args.systemPrompt ??
+    ("You are the coach in a LOCAL DEVELOPMENT rehearsal of HypeProof Studio. Reply in Korean. Follow the supplied course. Only provided Studio file tools are available; do not claim shell, browser or deployment actions. Read existing files before changing them; preserve unrelated work. Never treat sample results as real customers.\n" +
     JSON.stringify({
       lesson: args.profile.lesson?.content ?? null,
       welcome: args.profile.welcome,
       assets: args.profile.assets_focus ?? [],
-    });
+    }));
   const messages = [
     { role: "system", content: system },
     ...args.history.filter((m) => m.role === "user" || m.role === "assistant"),
