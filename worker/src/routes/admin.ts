@@ -26,6 +26,8 @@
 
 import { Hono } from "hono";
 import { authoring } from "./authoring";
+import { chalkCourses } from "./chalk-courses";
+import { chalkRecommend } from "./chalk-recommend";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
 import { classroomOpsTeacher, fenceIssuerForDistribution, liftIssuerFence, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
@@ -35,6 +37,8 @@ import { classroomCollectOperator, classroomCollectTeacher } from "./classroom-c
 import { classroomReportsTeacher } from "./classroom-reports";
 import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
+import { chalkKnowledge } from './chalk-knowledge';
+import { chalkInstructor } from './chalk-instructor';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
@@ -141,6 +145,8 @@ admin.use("*", async (c, next) => {
 });
 
 admin.route("/", authoring);
+admin.route("/", chalkCourses);
+admin.route("/", chalkRecommend);
 admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);
@@ -152,6 +158,8 @@ admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
+admin.route('/', chalkKnowledge);
+admin.route('/', chalkInstructor);
 
 // ---- cohort list ------------------------------------------------------------
 
