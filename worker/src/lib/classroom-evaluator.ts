@@ -63,14 +63,14 @@ export function systemPrompt(model: CapabilityModel): string {
 
 interface CatalogEntry { quote_id: string; event_id: string; quote: string; basis: boolean; actor: string; source_state: string }
 /** Decoded events of the verified input → an immutable excerpt catalog. Ids are the record's own event_id, or `L<line>` for the legacy spool. */
-export function buildCatalog(inputText: string): { catalog: CatalogEntry[]; locators: Map<string, DraftEvidence>; truncated: { events_total: number; events_used: number } | null } {
+export function buildCatalog(inputText: import('./classroom-report').ReportInput): { catalog: CatalogEntry[]; locators: Map<string, DraftEvidence>; truncated: { events_total: number; events_used: number } | null } {
   // An event whose text contains something that looks like a secret is left out entirely: a scrubbed excerpt would no
   // longer be a verbatim quote of the record, and a credential is not evidence of anything.
   const all = indexInput(inputText).filter((e) => e.text.trim() && scrubSecrets(e.text) === e.text), locators = new Map<string, DraftEvidence>();
   let budget = MAX_CATALOG_CHARS; const events = all.slice(0, MAX_EVENTS).filter((e) => { const n = Math.min(e.text.length, MAX_EVENT_CHARS); if (n > budget) { budget = 0; return false; } budget -= n; return true; });
-  const batchEvents = events.map((e) => {
-    const id = e.event_id ?? `L${e.line}`;
-    locators.set(id, e.event_id ? { event_id: e.event_id, quote: '' } : { locator: { line: e.line, ...(e.turn_id ? { turn_id: e.turn_id } : {}) }, quote: '' });
+  const batchEvents = events.map((e, index) => {
+    const id = e.session_id ? `S${index}L${e.line}` : e.event_id ?? `L${e.line}`;
+    locators.set(id, { ...(e.session_id ? { session_id: e.session_id } : {}), locator: { line: e.line, ...(e.turn_id ? { turn_id: e.turn_id } : {}) }, ...(e.event_id && !e.session_id ? { event_id: e.event_id } : {}), quote: '' });
     return { id, text: e.text.slice(0, MAX_EVENT_CHARS), actor: e.actor, source_state: e.source_state };
   });
   const meta = new Map(batchEvents.map((e) => [e.id, e]));
@@ -109,7 +109,7 @@ export function draftFromSelections(raw: unknown, model: CapabilityModel, job: {
 
 export type Transport = (request: Record<string, unknown>, signal: AbortSignal) => Promise<Response>;
 /** One bounded call, no tools, no automatic retry, nothing logged. Throws a short machine code on failure. */
-export async function evaluateInput(env: Env, cfg: EvaluatorConfig, model: CapabilityModel, job: { rubric: string; evaluator: string }, inputText: string, transport?: Transport): Promise<{ draft: Draft; usage: Record<string, number>; analysis_ai_model: string; truncated: { events_total: number; events_used: number } | null }> {
+export async function evaluateInput(env: Env, cfg: EvaluatorConfig, model: CapabilityModel, job: { rubric: string; evaluator: string }, inputText: import('./classroom-report').ReportInput, transport?: Transport): Promise<{ draft: Draft; usage: Record<string, number>; analysis_ai_model: string; truncated: { events_total: number; events_used: number } | null }> {
   const built = buildCatalog(inputText);
   // Nothing the learner said is in the record: every capability is "not seen yet". No provider call is made for that.
   if (!built.catalog.some((q) => q.basis)) return { draft: draftFromSelections({ findings: [], next_experiment: '' }, model, job, built), usage: {}, analysis_ai_model: 'none', truncated: built.truncated };

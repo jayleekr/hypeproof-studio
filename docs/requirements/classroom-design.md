@@ -5,6 +5,19 @@
 목적: 강사가 수업 중 학생의 상태를 읽고 필요한 도움을 주며 학생은 공유 범위를 통제한다.
 기존 모바일 기준에 더해 화면 구성과 상호작용의 합격 조건을 정의한다.
 
+## Instructor simplification · 2026-09-27 · #1363
+
+TJ's latest direction takes precedence over the historical layout and colour descriptions below: use the first charcoal/cyan concept as the visual reference, minimise text on each initial instructor page, and reveal learner details after selection. This is a local implementation revision, not production or real-class acceptance.
+
+- DES-01/04/12: the default list has selection, seat, short status and a detail action. Entry, step, provenance, signal timestamps, recovery history and technical identifiers remain in the selected learner's disclosures. The recommended action stays visible; secondary actions keep their original permissions and confirmations.
+- DES-05/07: fault, learner help, approval wait and unknown stay distinct. Missing runtime evidence must not receive a normal badge. Normal/unknown filters use the same predicate as their badges.
+- DES-02/03/06: maintain at least eight complete rows at 1280×720 and six at 1024×640, readable 14px+ row text, keyboard/Escape/focus return, and 44px action targets. Mobile keeps search, all status filters and optional selection tools available.
+- DES-08/10: opening a learner or changing selection sends nothing. Preserve question drafts, explicit destructive-action confirmation, and the distinction between requested, executed and resolved. Open evidence disclosures survive status polling for the same learner.
+- Visual tokens: background `#0F1418`, panel `#151C22`, cyan `#2AC4D9`, text `#E8ECEF`. This supersedes the green/lime tokens below. The original concept's individual fields can be reduced to meet the user's newer minimal-information direction; no claim of pixel-identical reproduction is made.
+- `/authoring`, `/issuer`, `/console`, `/budgets`: five primary destinations plus explicit more-navigation; concise initial instructions and named primary input/action. Longer guidance is available on demand. Student consent screens are unchanged.
+
+Verification: `ops-g1-layout.mjs` (real Chalk/Service browser fixture), `ops.mjs` (device-loop actions), authoring G2 and budget browser tests. Retain local-versus-production and synthetic-versus-real evidence boundaries.
+
 ## Acceptance requirements
 
 | ID | 디자인 요구사항 및 합격 기준 | 우선순위 |
@@ -139,3 +152,49 @@
    코호트·수업 회차·좌석의 학생이 바뀌면 옮기지 않는다. 같은 연결 안에서 같은 식별자의 실시간 재그리기에만 유지된다.
 
 검증: `e2e/classroom/ops-help.mjs`(신규) 및 갱신된 `ops.mjs`·`ops-roster.mjs` — [실행 기록](../testing/classroom-admin.md#instructor-ui-pass2-run-20260922), U4 통합본 [실행 기록](../testing/classroom-admin.md#instructor-ui-integration-run-20260922), 통합 후속 [실행 기록](../testing/classroom-admin.md#instructor-ui-integration-followup-run-20260922), 통합 후속 2 [실행 기록](../testing/classroom-admin.md#instructor-ui-integration-followup2-run-20260922).
+
+<a id="g1-instructor-ia-20260922"></a>
+
+### G1 강사 운영 화면 구조 · 2026-09-22 (보고서 갭 재설정 1단계 · 구현 · 사용자 시각 인수 전)
+
+출처: 2026-09-22 구현 현황 보고서가 짚은 차이 — 처음 제안한 시안(왼쪽 메뉴, 정렬된 학생 표, 오른쪽 고정 상세, 한 줄 마무리)과
+달리 **학생 비교와 이동 구조가 사라졌다**(1280×720에서 첫 학생이 y≈527, 1024×640에서 y≈729). 색이 아니라 정보 구조의 결함이다.
+[로드맵의 G1](../plan/learning-agent-experience-epics.md#report-gap-reset-20260922)이며 G2(커리큘럼→실행)·G3(여러 세션 보고서·발송)·
+G4(실환경 통합)는 여기서 하지 않는다. 기존 `/manage` 한 화면을 재배치했고 **API·저장소·인증·토큰 보관 범위는 바꾸지 않았다**(토큰은 여전히 이
+창의 메모리에만 있고 주소·저장소에 들어가지 않는다). 색·한국어·상태 기호(DES-05)·44px 대상(DES-06)·대비(DES-11)는 위 절의 기준을 그대로 쓴다.
+
+| 인수 기준 | 구현 | 검증 |
+|---|---|---|
+| **왼쪽 메뉴** — 준비·진행·마무리 묶음, 현재 위치 표시 | 1200px 이상은 고정 왼쪽 메뉴(`1 수업 준비 / 2 수업 진행 / 3 마무리`, `aria-current`). ‘도움 요청 응대’에 대기 건수 배지. 수업 전체 ‘새 AI 실행’ 제어와 연결 정보가 메뉴 아래 카드에 있다. 1200px 미만은 ‘메뉴’ 버튼의 서랍 — 열리면 뒤 화면은 `inert`, Esc·배경으로 닫고 포커스는 ‘메뉴’로 돌아온다. 일시정지 중이면 상단 수업 줄에도 “새 AI 실행 일시정지 중”이 보인다 | ops-g1 ①, ops-help ④(동선 링크) |
+| **짧은 연결·수업 상태** | 상단 한 줄: 화면 제목 + 수업·강의·운영 집계·조회 시각(24시간), 오른쪽에 “● 연결됨 · 10초마다 갱신”과 지금 갱신·접속 설정·연결 해제 | ops, ops-help |
+| **필터·찾기** | 집계 칩(명단·기술 장애 확인·주의·도움 요청·승인 대기·확인 불가·정상)이 곧 보기 필터(`aria-pressed`). 찾기는 좌석·학생 ID. **보기만 좁힌다** — 가려진 선택 학생도 조치 대상이며 “선택한 학생 중 n명은 지금 목록에서 가려져 있습니다”로 셈한다 | ops-g1 ② |
+| **비교 가능한 학생 표** — 좌석/학생, 토큰/앱 입장, 현재 단계, 수행·도움·오류, 마지막 신호, 기록 | 모든 행이 같은 7열(선택 포함). 좌석 칸이 상세를 여는 버튼(행 클릭도 같음). 기술 값(발급 ID·요청 ID·보고 시각·긴 기준 설명·권장 조치 문장)은 상세의 ‘연결·보고 기록’과 ‘원인과 조치 결과’로 옮겼다. 기술 장애(✕ 빨강)·학생 도움 요청(✋)·확인 불가/오래된 신호(?)·승인 대기(오류 아님)는 서로 다른 줄·기호이며 성공이나 진단을 지어내지 않는다 | ops, ops-g1 ①, ops-help |
+| **행 밀도** — 1280×720·24석·확대 없음에서 펼치지 않은 기본 보드 완전한 행 ≥8, 1024×640 ≥4, 본문 14px 이상, 숨김·축소 글자 없음 | 합성 24석 실측: 1280×720 **8행**, 1024×640 **6행**, 행 높이 45px, 표 글자 14px, 문서 가로 넘침 없음(아래 시험 문서의 행 상자 측정 + 캡처 육안 확인). 긴 학생 ID는 칸 안에서 줄바꿈 | ops-g1 ①, 캡처 |
+| **상세** — 목록·선택 유지, 좁은 화면은 서랍 | 1080px 이상 오른쪽 고정(sticky) 상세. 목록·선택·현재 행(`aria-current`)이 그대로이고 목록은 두 줄 격자로 좁아진다(정보는 숨기지 않음). 1080px 미만은 기존 서랍(Esc·배경·연 행으로 포커스 복귀). 화살표·Home·End로 보이는 행 사이를 이동 | ops-roster, ops-g1 ①④ |
+| **선택 도구** — 선택≠발송, 실제 대상 수, 맥락별 주요 행동, 보조 행동 묶음 | 1줄: 현재 선택(대상 수·연결 여부·좌석 목록) + 도움 요청/기술 문제로 고르기·선택 해제·‘다른 조건으로 선택’(전체·연결됨·미연결). 2줄: ‘선택한 학생에게’ 좌석 진단·기록 회수·보내기·작성. **주요 버튼 하나**는 선택 없음 → 문제 좌석 고르기, 저장된 공지 있음 → 보내기, 기술 문제 좌석 포함 → 진단, 그 밖 → 회수. 주요 버튼도 먼저 확인 화면만 연다. 확인 패널이 열려 있으면 목록의 주요 버튼은 물러난다. 동의·담당·수업·권한·오래된 대상 검사와 기존 확인 단계는 그대로다. 임의 셸·원격 데스크톱 조작은 추가하지 않았다 | ops-g1 ③, ops-selection, ops-distribution |
+| **결과 카드** — 첫 줄 = 조치 + 확정/미확인/진행 중 + 다음 행동 | 제목 줄: “진단 다시 실행 — 결과 확정 1 · 미확인 0 · 진행 중 1 / 2명 · 해결 확인 0 · 다음: …”. 그 아래 흐름별 단계 수(기존), 학생별 짧은 상태(서버 검증·범위·잘린 결과물·세션 끝 확인 불가·앱 업데이트 필요 등). 세션 범위·무결성·범위 사유는 ‘세부 근거 펼치기’. 조치마다 카드가 따로이고 지금 선택이 이전 결과를 다시 겨누지 않는다(“보낼 때의 대상 기준”). 접수·수신·준비는 적용·해결·완료가 아니다. 실패만 다시 고르기는 선택만 한다. F1~F3·철회/승인 경합 수정은 서버 쪽이라 그대로다 | ops-results, ops-g1 ⑤ |
+| **마무리 단계** | ‘수업 마무리 단계’: 1 기록 회수 → 2 보고서 초안 → 3 검수 → 4 발송. 각 칸은 이 화면이 **이 수업 회차·이 마무리 묶음**에 대해 서버에서 받은 수로 상태를 정하고 **글자 배지**로 말한다 — ○ 시작 전 / … 진행 중 / ◐ 일부만 / ! 확인 필요 / ? 확인 불가 / ✓ 완료 / – 대상 없음 / 사용할 수 없음(테두리 색은 보조). 판정 규칙은 아래 [마무리 단계 판정](#g1-wrap-state-20260922). 꺼진 단계는 “사용할 수 없음”과 이유. 아직 없는 경로(재시작 전 세션을 담은 `/3` 회수를 보고서 입력으로 쓰기, 반복 패턴 본문, 카카오·문자·QR, PDF 첨부)는 완료로 표시하지 않고 명시한다. 목록에서 고른 학생의 회수는 보고서로 이어지지 않는다 | ops-g1 ⑥, ops-g1-wrap |
+| **다른 강사 화면 유지** | `/authoring`·`/issuer`·`/budgets`·`/console` 링크, 도움 요청 목록, 명단·관측 설정(검토된 단계 입력), 예산 링크, 조치별 이력은 그대로 닿는다. 다른 화면의 본문은 바꾸지 않았다(이번 캡처는 `/manage`만 대표한다) | ops-help, ops-roster |
+
+1차 정리에서 남긴 후보 중 **필터**와 **상세의 기술 값 분리**는 위로 처리했다. 행 정렬(도움 우선)은 하지 않았다 — 좌석 순서를 유지해
+교실 배치와 맞추고, 필터 한 번으로 해당 학생만 본다. 사용자 시각 인수·실제 강사 운영 관측은 아직 없다.
+검증 기록: [시험 문서 G1](../testing/classroom-admin.md#g1-instructor-ia-tests).
+
+<a id="g1-wrap-state-20260922"></a>
+
+#### 마무리 단계 판정 · 2026-09-22 (G1 독립 검토 보류 보정)
+
+독립 검토(Codex)가 실제 Chalk 스크립트에 **대기만 있는 표시 픽스처**(실제 발송 배치, 검증 0/명단 24, 초안 작업 24건 모두 대기)를 직접 넣어
+‘기록 회수’와 ‘보고서 초안’이 `done`으로 칠해지는 것을 재현했다(합성 화면 반례 — 백엔드·실기기 완료 증거가 아니고, 실제 발송이 일어났다는 뜻도 아니다).
+원인은 `renderWrap`이 미리 확인이 아닌 배치면 회수 완료, 작업이 하나라도 있으면 초안 완료, 승인 1건이면 검수 완료로 본 것이며, 완료 표시는 흐린 테두리뿐이었다.
+보정 후 각 단계는 **실제 수와 식별자**로 정한다.
+
+| 단계 | 규칙 |
+|---|---|
+| 1 기록 회수 | 대상 = 명단 − 동의 없음·보호자 동의 전·철회 − 고르지 않음. 대상 0명 → **대상 없음**(완료 아님). 검증 = 대상 전원이고 모두 범위 전체면 **완료**, 검증 전원이나 범위 일부면 **일부만**(검증≠범위 전체). 요청·업로드 중이 남으면 검증 0 → 진행 중, 그 밖 → 일부만. 남은 것이 미연결·불완전·격리·올리기 기한 지남뿐이면 **확인 필요**. 상태별 수가 없거나 셀 수 없는 나머지 → **확인 불가** |
+| 2 보고서 초안 | 초안 = 부분·검수 대기·승인. 대상에서 대체됨·철회됨·보류(수업 설정 기준 확인 전)·검증된 기록 없음은 빼되 **아직 기록이 오는 중인 학생의 ‘기록 없음’ 작업은 대기**로 센다. 대상 0 → 대상 없음. 초안 = 대상 → 완료(검수 전). 대기 중인데 평가기 미설정 → 확인 필요. 대기 → 진행 중/일부만. 실패·격리만 남음 → 확인 필요. 작업 목록을 읽지 못함 → 확인 불가 |
+| 3 검수 | 승인 = 초안 전부이고 2단계가 완료일 때만 **완료**. 일부 승인 → 일부만(“아직 초안이 다 나오지 않았습니다” 포함). 승인은 내용 확인이며 발송 승인이 아니다 |
+| 4 발송 | 발송 승인 → 시작 전(아직 보내지 않음). 발송 요청·제공자 접수 → 진행 중(전달 미확인). 전달 확인 = 보낸 메시지 전부 → 완료(전달≠열람). 실패·반송·열람 확인 값 없음 → 확인 필요, 결과 불명 → 확인 불가(재발송 금지). ‘전달 상태 보기’가 요약을 다시 계산한다 |
+| 공통 | 초안 작업·평가기·발송 응답은 그 마무리 묶음에 묶인다. 새 묶음이나 다른 수업 회차가 되면 이전 응답·발송 승인을 버리고(승인 버튼 해제) 다시 읽는다. 이전 묶음이나 이전 회차에 대한 늦은 응답은 버린다. 다시 읽기에 실패하면 이전 값을 “마지막으로 읽은 값”으로 표시하고 **확인 불가**로 바꾼다 |
+
+검증: `e2e/classroom/ops-g1-wrap.mjs` — [시험 문서 G1-T10](../testing/classroom-admin.md#g1-instructor-ia-tests).

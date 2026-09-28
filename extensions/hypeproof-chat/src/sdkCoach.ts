@@ -100,6 +100,9 @@ export interface SdkCoachArgs {
   fundingSource?: string;
   /** #751 U3 — sent on every request of this turn as `x-hps-lesson-binding` (the CLI's headers are fixed for the process, i.e. for the turn). */
   lessonBinding?: string;
+  /** #751 G2 — the lesson step on screen and the learner's help mode for this turn. Teaching pointers the Service re-checks; never grants. */
+  lessonStep?: string;
+  helpMode?: string;
   /**
    * The extension's proxyUrl setting (OpenAI-compat base ending in /v1).
    * ANTHROPIC_BASE_URL is DERIVED from it (the /v1 suffix stripped — the SDK
@@ -577,6 +580,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<SdkTurnEnd> {
       turnId: args.turnId,
       fundingSource: args.fundingSource,
       lessonBinding: args.lessonBinding,
+      lessonStep: args.lessonStep,
+      helpMode: args.helpMode,
       token: args.token,
       cwd: args.cwd,
       baseEnv: process.env,

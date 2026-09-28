@@ -16,6 +16,7 @@ import type { Env } from '../env';
 import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
+import { readReportInput, reportInputFiles } from '../lib/classroom-report-input';
 import { snapshotKey } from '../lib/classroom-collect';
 import { batchScope, scopeRefusal } from './classroom-collect';
 import { LEASE_MS, RENDERER_REVISION, composeReport, draftKey, draftPrefix, modelById, validateDraft } from '../lib/classroom-report';
@@ -61,7 +62,7 @@ const profileModel = (profileId: string): string | undefined => { try { const p 
  * explicit `missing` job — absence is not a zero.
  */
 async function createJobs(db: Db, run: Record<string, any>, batch: Record<string, any>, v: { model: { id: string; revision: number }; rubric: string; evaluator: string }, now: number): Promise<{ inputs: number; without_input: number }> {
-  const pending = ((await db.prepare("SELECT id,payload_json FROM classroom_job_outbox WHERE kind='report_input' AND state='pending' ORDER BY id LIMIT 500").all()).results ?? []) as Array<{ id: number; payload_json: string }>;
+  const pending = ((await db.prepare("SELECT id,payload_json FROM classroom_job_outbox WHERE kind='report_input' AND state='pending' AND json_extract(payload_json, '$.batch_id')=? ORDER BY id LIMIT 500").bind(batch.id).all()).results ?? []) as Array<{ id: number; payload_json: string }>;
   const stmts = []; let created = 0;
   for (const o of pending) {
     const p = JSON.parse(o.payload_json); if (p.batch_id !== batch.id) continue;
@@ -167,9 +168,9 @@ async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { ki
   if (await closeIfWithdrawn(db, job, job.lease_generation, now)) return WITHDRAWN;
   // #751 U3 — BEFORE the input is read or a provider is called.
   { const held = await holdForBasis(env, job, job.lease_generation, actor, now); if (held) return held; }
-  const input = await env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
-  if (!input) return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: 'input_missing' }, actor, now);
-  const text = await input.text();
+  let text: import('../lib/classroom-report').ReportInput;
+  try { text = await readReportInput(env, job); }
+  catch (err) { return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: String((err as Error).message).startsWith('input_') ? (err as Error).message : 'input_unreadable' }, actor, now); }
   try {
     const out = await evaluateInput(env, cfg, model, job, text, evaluatorTransport);
     await audit(db, job.class_run_id, 'system', 'evaluator', 'report_evaluated', { job_id: job.id, evaluator: cfg.id, analysis_ai_model: out.analysis_ai_model, usage: out.usage, ...(out.truncated ? { input_truncated: out.truncated } : {}) }, now).run();
@@ -328,12 +329,12 @@ classroomReportsRunner.post('/claim', async (c) => {
     const legacy = waiting.filter((j) => j.capability_model === 'legacy-seven-assets').length, service = waiting.filter((j) => j.capability_model !== 'legacy-seven-assets' && j.evaluator.startsWith('service-')).length;
     return c.json({ job: null, waiting: { queued: waiting.length, paused: waiting.filter((j) => j.next_at > now).length, needs_legacy_engine: can.legacy ? 0 : legacy, needs_service_evaluator: can.service ? 0 : service, needs_local_evaluator: can.local ? 0 : waiting.length - legacy - service, service_evaluator_configured: !!cfg } });
   }
-  return c.json({ job: { id: job.id, student_id: job.student_id, lease_generation: job.lease_generation, lease_ms: LEASE_MS, capability_model: job.capability_model, rubric: job.rubric, evaluator: job.evaluator, renderer_revision: job.renderer_revision, input: { manifest_digest: job.input_manifest_digest, coverage: job.input_coverage, files: ['session.meta.json', 'events.jsonl'] } } });
+  return c.json({ job: { id: job.id, student_id: job.student_id, lease_generation: job.lease_generation, lease_ms: LEASE_MS, capability_model: job.capability_model, rubric: job.rubric, evaluator: job.evaluator, renderer_revision: job.renderer_revision, input: { manifest_digest: job.input_manifest_digest, coverage: job.input_coverage, files: (await reportInputFiles(c.env, job)).map((f) => f.name) } } });
 });
 const leased = (c: any, generation: unknown) => c.env.HPS_DB.prepare("SELECT * FROM classroom_report_jobs WHERE id=? AND batch_id=? AND state='leased' AND lease_owner=? AND lease_generation=? AND lease_expires_at>? AND NOT EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id)").bind(c.req.param('job'), c.get('batch'), c.get('runner'), Number(generation), Date.now()).first() as Promise<Job | null>;
 classroomReportsRunner.get('/jobs/:job/input/:file', async (c) => {
   const job = await leased(c, c.req.query('generation')); if (!job) return c.json({ error: 'no live lease on this job', reason: 'lease_lost' }, 409);
-  if (!['session.meta.json', 'events.jsonl'].includes(c.req.param('file'))) return c.json({ error: 'not an input file' }, 400);
+  if (!(await reportInputFiles(c.env, job)).some((f) => f.name === c.req.param('file'))) return c.json({ error: 'not an input file' }, 400);
   // #751 U3 — no byte of a held input leaves the Service, even for a job leased before its basis was known.
   { const held = await holdForBasis(c.env, job, job.lease_generation, { kind: 'runner', id: c.get('runner') }, Date.now()); if (held) return c.json({ error: 'this input is held: it was produced under more than one lesson basis, or its basis cannot be established', reason: held.reason }, 409); }
   const obj = await c.env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, c.req.param('file')));
@@ -345,8 +346,10 @@ classroomReportsRunner.post('/jobs/:job/heartbeat', async (c) => {
 });
 classroomReportsRunner.post('/jobs/:job/result', bodyLimit({ maxSize: 512 * 1024 }), async (c) => {
   const b = await json(c), job = await leased(c, b?.lease_generation), now = Date.now(); if (!job) return c.json({ error: 'no live lease on this job; result discarded', reason: 'lease_lost' }, 409);
-  const input = await c.env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
-  const v = b?.failed ? ({ ok: false, state: 'failed', reason: /^[a-z_]{1,48}$/.test(b.failed) ? b.failed : 'runner_failed' } as const) : validateDraft(b?.draft, job, input ? await input.text() : '');
+  { const held = await holdForBasis(c.env, job, job.lease_generation, { kind: 'runner', id: c.get('runner') }, now); if (held) return c.json(held, 409); }
+  let v: ReturnType<typeof validateDraft>;
+  try { v = b?.failed ? { ok: false, state: 'failed', reason: /^[a-z_]{1,48}$/.test(b.failed) ? b.failed : 'runner_failed' } : validateDraft(b?.draft, job, await readReportInput(c.env, job)); }
+  catch { v = { ok: false, state: 'failed', reason: 'input_unreadable' }; }
   const saved = await saveResult(c.env, job, job.lease_generation, v, { kind: 'runner', id: c.get('runner') }, now);
   if (!saved) return c.json({ error: 'lease changed while saving; result discarded', reason: 'lease_lost' }, 409);
   return c.json({ state: saved.state, reason: saved.reason, draft_digest: saved.draft_digest }, saved.ok ? 201 : saved.state === 'withdrawn' ? 409 : 422);

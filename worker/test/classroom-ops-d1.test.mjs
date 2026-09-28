@@ -2,6 +2,7 @@
 // migration re-run, batch atomicity of the roster CAS, single-use pairing under
 // parallel connects, and the conditional state write. Not production D1.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createMiniflare } from './harness/miniflare.mjs';
 import { localOps } from './harness/classroom-ops.mjs';
@@ -13,7 +14,7 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
   // The deploy order is rehearsed here on real local D1, with the same checker the runbook uses against a remote target
   // (worker/scripts/classroom-ops-d1-check.mjs): nothing applied → half applied → all applied → applied again.
-  const { compare, expectedObjects } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings', '0025-classroom-collect-kinds'];
+  const { compare, expectedObjects } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings', '0025-classroom-collect-kinds', '0026-authoring-rehearsal'];
   const chalkInChecker = expectedObjects().filter((m) => Number(m.file.slice(0, 4)) >= 30); assert.deepEqual(chalkInChecker, [], 'expectedObjects() must not include Chalk migrations (0030+)');
   const present = async () => (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => r.name);
   let seen = compare(await present()); assert.equal(seen.none, true); assert.deepEqual(seen.next, files.map((m) => m + '.sql'), 'the checker lists every migration file of this feature, in order');
@@ -89,6 +90,21 @@ try {
     assert.deepEqual(JSON.parse((await db.prepare('SELECT args_json FROM ops_commands WHERE idempotency_key=?').bind('collect-' + made.json.batch.id).first()).args_json).kinds, ['artifacts', 'prompts']);
     const before = (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n, stale = await ask(2);
     assert.deepEqual([stale.status, stale.json.reason, (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n], [409, 'revision_conflict', before]);
-    console.log('PASS actual local workerd/D1 (U1b): the kinds row commits with its batch; a refused request writes no kinds row'); }
+    console.log('PASS actual local workerd/D1 (U1b): the kinds row commits with its batch; a refused request writes no kinds row');
+    // U1b integrity: the guarded seal on actual D1 — the admission is re-read inside the commit and the binding/basis/audit rows hang on
+    // this seal's receipt. A seal commits normally; a withdrawal after the Service read R2 and before it commits wins (reproduced in SQLite).
+    // The U3 basis statement of every seal reads usage_log; this fixture has not created it yet (the base schema's table, verbatim).
+    await db.prepare(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').match(/CREATE TABLE IF NOT EXISTS usage_log \([\s\S]*?\n\);/)[0]).run();
+    const conn = connects.find((r) => r.status === 201).json, TEXT = '{"seq":1,"type":"prompt","text":"[합성]"}\n';
+    const send = async (batch) => { const fr = f.collectionFiles(conn, batch, TEXT, ['artifacts', 'prompts']); for (const x of fr.files) assert.equal((await f.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batch}/1/${x.name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.credential }, body: x.data }), f.env, { waitUntil() {} })).status, 201);
+      return () => f.request(`/v1/classroom/ops/collect/snapshots/${batch}/1/seal`, 'POST', { schema: 'hps-classroom-snapshot/3', files: fr.files.map((x) => ({ name: x.name, bytes: x.data.byteLength, sha256: createHash('sha256').update(x.data).digest('hex') })), collection: fr.binding }, conn.credential); };
+    const ok = made.json.batch.id, sealed = await (await send(ok))();
+    assert.equal(sealed.status, 201, sealed.raw);
+    assert.deepEqual([(await db.prepare('SELECT count(*) AS n FROM classroom_snapshot_bindings WHERE batch_id=?').bind(ok).first()).n, (await db.prepare('SELECT state FROM classroom_collect_items WHERE batch_id=? AND seat_id=?').bind(ok, seat).first()).state, (await db.prepare("SELECT count(*) AS n FROM ops_audit WHERE action='snapshot_verified' AND detail_json LIKE ?").bind('%' + ok + '%').first()).n], [1, 'verified', 1]);
+    const late = await ask(3); assert.equal(late.status, 201, late.raw); const lb = late.json.batch.id, go = await send(lb), traces = f.env.HPS_TRACES, get = traces.get.bind(traces); let reads = 0;
+    traces.get = async (key) => { const v = await get(key); if (key.includes('/' + lb + '/') && ++reads === 2) assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: false, purpose: 'class_report', notice_version: 'notice-v1' }, credential)).status, 200); return v; };
+    const raced = await go(); traces.get = get;
+    assert.deepEqual([raced.status, raced.json?.reason, (await db.prepare('SELECT state FROM classroom_collect_items WHERE batch_id=? AND seat_id=?').bind(lb, seat).first()).state, (await db.prepare('SELECT count(*) AS n FROM classroom_snapshot_bindings WHERE batch_id=?').bind(lb).first()).n, (await db.prepare("SELECT count(*) AS n FROM classroom_snapshots WHERE batch_id=? AND state='sealed'").bind(lb).first()).n], [403, 'withdrawn', 'withdrawn', 0, 0]);
+    console.log('PASS actual local workerd/D1 (U1b integrity): the guarded /3 seal commits with its binding and audit; a withdrawal between the R2 read and the commit leaves the item withdrawn, no binding, no sealed row'); }
   console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner, U4 linked follow-up + outcome + bounded follow-up read');
 } finally { f?.close(); await mf.dispose(); }

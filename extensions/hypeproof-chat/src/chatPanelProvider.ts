@@ -13,6 +13,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import {createHash} from 'node:crypto';
+import { APPROVAL_PLACEHOLDER, approvalChoices, approvalMessage, approveArtifact } from "./artifactApproval.ts";
 import {NativeObservationRecorder} from './nativeObservationRecorder';
 import {OBSERVATION_FORMATS, validateFindings, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
@@ -22,6 +23,7 @@ import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
+import { acceptFocus, acceptWork, rehearsalReport, turnLesson, workContext, type LessonFocus, type StepWork } from "./lessonFocus";
 import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
 import {
   coachSeatKeyFor,
@@ -381,6 +383,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this.logChannel;
   }
   private cachedProfile: ResolvedProfile | null = null;
+  /** #751 G2 — the step on screen and the learner's help choice, checked against the lesson; read ONCE per turn at turn start. */
+  private lessonFocus: LessonFocus | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
   /**
    * #381 — why the last profile fetch failed (null when it succeeded or was
@@ -731,7 +735,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
-  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting">>) | null = null;
+  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting" | "approvalScope">>) | null = null;
   /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
   inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
@@ -784,21 +788,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * mark. Only versions marked here travel in an "approved artifacts" collection; nothing is sent by this command itself.
    */
   async approveArtifactInteractively(): Promise<void> {
-    if (!this.spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-    let content = "";
-    try { if (root) content = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8"); } catch { content = ""; }
-    if (!/<html[\s>]/i.test(content) && !/<!doctype html/i.test(content)) { void vscode.window.showInformationMessage("작업 폴더에 결과물(index.html)이 없습니다. 결과물을 만든 뒤 다시 해 주세요."); return; }
-    const sha256 = createHash("sha256").update(content, "utf8").digest("hex"), kb = Math.max(1, Math.round(Buffer.byteLength(content, "utf8") / 1024));
-    const pick = await vscode.window.showQuickPick([
-      { label: "이 결과물을 수업 결과물로 승인", detail: `index.html · ${kb}KB · 지문 ${sha256.slice(0, 8)}`, approved: true },
-      { label: "이 결과물의 승인 취소", detail: `index.html · 지문 ${sha256.slice(0, 8)}`, approved: false },
-    ], { title: "수업 결과물 승인", placeHolder: "승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어갑니다. 지금 바로 보내지는 않으며, 수업 기록 보내기에 동의한 경우에만 보냅니다." });
-    if (!pick) return;
-    this.spool.recordArtifactSnapshot({ source: "existing", path: "index.html", content });
-    this.spool.recordArtifactApproval({ sha256, path: "index.html", approved: pick.approved });
-    await this.spool.flush();
-    void vscode.window.showInformationMessage(pick.approved ? `이 판(지문 ${sha256.slice(0, 8)})을 수업 결과물로 승인했습니다. 나중에 고치면 새 판은 다시 승인해야 합니다.` : `이 판(지문 ${sha256.slice(0, 8)})의 승인을 취소했습니다.`);
+    const spool = this.spool;
+    if (!spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
+    const outcome = await approveArtifact({
+      owner: () => spool.owner(),
+      classroom: () => this.opsObserver?.approvalScope?.() ?? "",
+      readPage: async () => { const root = vscode.workspace.workspaceFolders?.[0]?.uri; try { return root ? Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8") : null; } catch { return null; } },
+      ask: async (page) => (await vscode.window.showQuickPick(approvalChoices(page), { title: "수업 결과물 승인", placeHolder: APPROVAL_PLACEHOLDER }))?.approved,
+      record: (owner, e) => spool.recordArtifactApprovalFor(owner, e),
+    });
+    const msg = approvalMessage(outcome); if (msg) void vscode.window.showInformationMessage(msg);
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
@@ -2294,6 +2293,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
       case "inboxLink": await this.handleInboxLink(msg); return;
       case "helpRequest": await this.helpSource?.refresh(); return;
+      case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
       case "helpCancel": await this.helpSource?.cancel(msg.key); return;
@@ -2487,6 +2487,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.opsObserver?.lessonStep(signal.lesson_version, signal.step_id, signal.status);
         return;
       }
+      // #751 G2 — the learner's focus (step + help choice) for the NEXT turn. A turn already running keeps what it started with.
+      case "lessonFocus": {
+        const lesson = this.cachedProfile?.lesson;
+        const focus = acceptFocus(lesson, msg);
+        if (focus) this.lessonFocus = focus;
+        if (lesson) await this.post({ type: "lessonWorkState", sha256: lesson.sha256, work: this.lessonWorkFor(lesson.sha256) });
+        return;
+      }
+      // #751 G2 — a work-surface save. Kept on this device per lesson digest; it travels with the next turn of that step.
+      case "lessonWork": {
+        const lesson = this.cachedProfile?.lesson;
+        const saved = acceptWork(lesson, msg, Date.now());
+        if (!lesson || !saved) return;
+        const all = this.context.workspaceState.get<Record<string, Record<string, StepWork>>>("hps.lessonWork") ?? {};
+        await this.context.workspaceState.update("hps.lessonWork", { ...all, [lesson.sha256]: { ...(all[lesson.sha256] ?? {}), [saved.stepId]: saved.work } });
+        this.spool?.recordWorkflow({ event: "lesson_work_saved", payload: { lesson_version: lesson.version, step_id: saved.stepId, kind: saved.work.kind } });
+        await this.post({ type: "lessonWorkState", sha256: lesson.sha256, work: this.lessonWorkFor(lesson.sha256) });
+        return;
+      }
+      // #751 G2 — rehearsal only: send what the panel drew, with this App's identity, under the rehearsal code.
+      case "rehearsalSend": {
+        await this.sendRehearsalReport(msg.steps, msg.mission);
+        return;
+      }
+
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2639,6 +2664,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const profile=resolvedProfile?accessProfile(resolvedProfile,chosenAccess):null;
     // #751 U3 — captured ONCE for this turn: every request of the turn names the binding the turn started under.
     const bindingKey = profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined;
+    // #751 G2 — the step and help choice for THIS turn, from the focus at turn start against the turn's own lesson.
+    const turnFocus = turnLesson(profile?.lesson, this.lessonFocus);
     const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
     const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
     if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
@@ -2657,6 +2684,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // resurrecting it on webview remounts (webview clears its copy on userSent).
     this.pendingPageNotice = null;
     let userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    // #751 G2 — what the learner saved on this step's work surface travels with the turn (their words, labelled).
+    if (profile?.lesson && turnFocus.step) {
+      const step = profile.lesson.content.steps.find((x) => x.id === turnFocus.step);
+      const saved = workContext(step?.title ?? turnFocus.step, this.lessonWorkFor(profile.lesson.sha256)[turnFocus.step]);
+      if (saved) userTextForModel = `${saved}\n\n${userTextForModel}`;
+    }
     // 2026-08-19 — pre-built guest worlds. When a child picks a guest they are not
     // made to wait 30–40 s for the coach to produce 5 KB: the filled-in HTML is
     // fetched from the worker, saved and shown immediately, and the coach is told
@@ -3021,6 +3054,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             effort,
             fundingSource,
             lessonBinding: bindingKey,
+            lessonStep: turnFocus.step,
+            helpMode: turnFocus.helpMode,
 
             token,
             history,
@@ -3045,6 +3080,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           turnId: streamId,
             fundingSource,
           lessonBinding: bindingKey,
+          lessonStep: turnFocus.step,
+          helpMode: turnFocus.helpMode,
 
           token,
           history,
@@ -3117,6 +3154,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             turnId: streamId,
             fundingSource,
             lessonBinding: bindingKey,
+            lessonStep: turnFocus.step,
+            helpMode: turnFocus.helpMode,
 
             token,
             model,
@@ -3407,6 +3446,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     effort?: import('./protocol').CourseEffort;
     fundingSource?: string;
     lessonBinding?: string;
+    lessonStep?: string;
+    helpMode?: string;
     proxyUrl: string;
     model: string;
     token: string | undefined;
@@ -3435,6 +3476,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           turnId: p.streamId,
           fundingSource:p.fundingSource,
           lessonBinding: p.lessonBinding,
+          lessonStep: p.lessonStep,
+          helpMode: p.helpMode,
           token: p.token,
           history: p.history,
           userText: p.userText,
@@ -3770,6 +3813,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       verb,
     );
     return pick === verb;
+  }
+
+  private lessonWorkFor(sha256: string): Record<string, StepWork> {
+    return (this.context.workspaceState.get<Record<string, Record<string, StepWork>>>("hps.lessonWork") ?? {})[sha256] ?? {};
+  }
+
+  /**
+   * #751 G2 — the rehearsal report. The panel's own read-back of what it drew goes out unchanged (only steps of this lesson);
+   * the Service compares it with the candidate AND with its own records of the requests made under this code.
+   */
+  private async sendRehearsalReport(steps: import("./lessonFocus").RenderedStep[], mission?: unknown): Promise<void> {
+    const profile = this.cachedProfile, lesson = profile?.lesson, token = await this.context.secrets.get(TOKEN_KEY);
+    if (!profile?.rehearsal || !lesson || !token) { await this.post({ type: "rehearsalState", state: "error", message: "리허설 코드로 연 수업이 아닙니다." }); return; }
+    const cfg = vscode.workspace.getConfiguration("hypeproofChat");
+    const pkg = this.context.extension.packageJSON as { version?: string; devDependencies?: Record<string, string> };
+    const report = rehearsalReport(lesson, Array.isArray(steps) ? steps : [], {
+      extension_version: String(pkg.version ?? "unknown"), host: `${vscode.env.appName} ${vscode.version}`.slice(0, 120),
+      runtime: cfg.get<string>("coachRuntime", "proxy"), sdk: String(pkg.devDependencies?.["@anthropic-ai/claude-agent-sdk"] ?? "none").slice(0, 120),
+      os: process.platform, arch: process.arch,
+    }, mission);
+    await this.post({ type: "rehearsalState", state: "sending" });
+    try {
+      const base = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1").replace(/\/$/, "");
+      const r = await fetch(base + "/classroom/rehearsal/report", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify(report) });
+      const j = await r.json().catch(() => ({})) as { verdict?: string; reasons?: string[]; reason?: string; error?: string };
+      if (!r.ok) { await this.post({ type: "rehearsalState", state: "error", message: j.reason === "no_request_yet" ? "아직 AI에게 한 번도 묻지 않았습니다. 단계마다 한 번 이상 물어본 뒤 보내세요." : (j.error ?? "보내지 못했습니다 (" + r.status + ")") }); return; }
+      await this.post({ type: "rehearsalState", state: "sent", verdict: j.verdict, reasons: j.reasons ?? [] });
+    } catch (err) { await this.post({ type: "rehearsalState", state: "error", message: "Service에 연결하지 못했습니다: " + (err as Error).message }); }
   }
 
   private async postConfig(): Promise<void> {

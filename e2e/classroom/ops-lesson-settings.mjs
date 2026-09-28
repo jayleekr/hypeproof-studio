@@ -76,7 +76,7 @@ try {
     return r; }
 
   browser = await chromium.launch(); const origin = 'http://127.0.0.1:' + chalkServer.address().port, page = await browser.newPage({ viewport: { width: 1440, height: 1300 } }); const errors = []; page.on('pageerror', (e) => errors.push(e.message));
-  const connect = async (t) => { await page.goto(origin + '/manage'); await page.locator('#token').fill(t); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill('student-'); await page.locator('#connect button').first().click(); await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#ops-check').click(); await page.locator('#ops-seats .ops-seat[data-seat="A4"]').waitFor(); };
+  const connect = async (t) => { await page.goto(origin + '/manage'); await page.locator('#token').fill(t); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill('student-'); await page.locator('#connect button').first().click(); await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#refresh').click(); await page.locator('#ops-seats .ops-seat[data-seat="A4"]').waitFor(); await page.locator('#ops-tools > summary').click(); };
   const box = (id) => page.locator(`#ops-seats .ops-seat[data-seat="${id}"]`).getByLabel('선택'), T = (id) => page.locator('#' + id).innerText(), Ls = async (id) => (await T(id)).split('\n').filter(Boolean);
   const compose = async () => { if (!(await page.locator('#ops-dist').evaluate((d) => d.open))) await page.locator('#ops-dist-summary').click(); await page.locator('#ops-dist-title').waitFor(); };
   const saveForm = async () => { await page.locator('#ops-dist-save').click(); await page.locator('#ops-dist-saved').filter({ hasText: '저장했습니다' }).waitFor(); };
@@ -89,7 +89,7 @@ try {
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt'], 'this instructor may distribute, not change lesson settings');
   await page.locator('#ops-dist-kind').selectOption('prompt'); assert.match(await T('ops-dist-kind-help'), /초안에 가져오기.*수업 설정은 지금 쓸 수 없습니다: 이 강사 토큰에는 수업 설정 권한/s);
   await connect(L); await compose();
-  assert.match(await page.locator('#ops-dist-preview').innerText(), /^선택한 학생에게 보내기 \(공지·자료·프롬프트·수업 설정\) — 먼저 확인$/, 'the entry names everything it can send'); assert.match(await T('ops-dist-summary'), /^공지·자료·프롬프트·수업 설정 작성/);
+  assert.match(await page.locator('#ops-dist-preview').innerText(), /^보내기 — 먼저 확인$/, 'G1: the button sits under ‘선택한 학생에게’; the composer entry below names everything it can send'); assert.match(await T('ops-dist-summary'), /^공지·자료·프롬프트·수업 설정 작성/);
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt', 'setting']);
   ok('E1 the setting kind is offered only to an instructor who holds `lesson_settings`; the prompt kind needs only `distribute`');
 
@@ -188,9 +188,9 @@ try {
   const good = await ask('A1', { key: K2 }); assert.equal(good.status, 200); assert.ok(good.sent.includes('craft-v2'), 'the next question runs under the switched version');
   sl = await refresh(); assert.match(sl[0], /설정: 적용 — 이 설정으로 보낸 모델 요청이 정상 종료됨 \(m2026\.09\.18-2\) · 이후 실패한 요청도 있음|설정: 적용 — 이 설정으로 보낸 모델 요청이 정상 종료됨 \(m2026\.09\.18-2\)/); assert.match(await T('ops-dist-state'), /준비 1 · 전환 0 · 실행 시도 0 · 적용 1/); assert.doesNotMatch(await T('ops-dist-state'), /모두 적용/);
   assert.match(await T('ops-dist-observed'), /요청 단위/); assert.deepEqual(bindings('student-c'), []); assert.equal((await ask('A3', { key: K1 })).status, 200, 'the unselected learner keeps running the run\'s version'); assert.deepEqual(await dev.A3.cards(), []);
-  await page.locator('#ops-check').click(); await page.waitForTimeout(300);
-  assert.match(await page.locator('#ops-seats .ops-seat[data-seat="A1"]').innerText(), new RegExp('강의 버전: ' + V2.replace(/\./g, '\\.') + ' · 수업 설정으로 전환됨')); assert.doesNotMatch(await page.locator('#ops-seats .ops-seat[data-seat="A3"]').innerText(), /강의 버전:/);
-  await page.screenshot({ path: path.join(out, 'instructor-setting-phases.png'), fullPage: true });
+  await page.locator('#refresh').click(); await page.waitForTimeout(300);
+  await page.locator('#ops-seats .ops-seat[data-seat="A1"] .seat-open').click(); await page.locator('.detail-evidence > summary').click(); await page.locator('.ops-tech-fold > summary').click(); assert.match(await page.locator('#ops-tech').innerText(), new RegExp('강의 버전: ' + V2.replace(/\./g, '\\.') + ' · 수업 설정으로 전환됨')); assert.doesNotMatch(await page.locator('#ops-seats .ops-seat[data-seat="A3"]').innerText(), /강의 버전:/);
+  await page.screenshot({ path: path.join(out, 'instructor-setting-phases.png'), fullPage: true }); await page.keyboard.press('Escape');
   ok('E3 setting: picked from confirmed versions with the Service\'s impact; prepared → switched → attempt failed → applied are told apart; a running answer is kept; the unselected learner is untouched');
 
   // ── E4: withdraw is not a return — and the return is an ordinary revision sent through the same steps ──
@@ -203,7 +203,7 @@ try {
   await tickAll(); const back = await switchOn('A1'); assert.equal(back.status, 201, back.raw); assert.deepEqual(bindings('student-a'), [[1, 'setting', V2], [2, 'base', '']], 'a return names no version of its own: it is whatever the participant\'s token pins');
   assert.equal((await profileOf('A1')).lesson.version, V1); const K3 = back.json.binding.key; assert.equal((await ask('A1', { key: K2 })).status, 403); const home = await ask('A1', { key: K3 }); assert.equal(home.status, 200); assert.ok(!home.sent.includes('craft-v2'));
   sl = await refresh(); assert.match(sl[0], /설정: 적용 — 이 설정으로 보낸 모델 요청이 정상 종료됨 \(기본 수업\)/);
-  await page.locator('#ops-check').click(); await page.waitForTimeout(300); assert.match(await page.locator('#ops-seats .ops-seat[data-seat="A1"]').innerText(), /기본 수업으로 복귀함/);
+  await page.locator('#refresh').click(); await page.waitForTimeout(300); await page.locator('#ops-seats .ops-seat[data-seat="A1"] .seat-open').click(); if (!(await page.locator('.detail-evidence').evaluate(d=>d.open))) await page.locator('.detail-evidence > summary').click(); await page.locator('.ops-tech-fold > summary').click(); assert.match(await page.locator('#ops-tech').innerText(), /기본 수업으로 복귀함/);
   await page.screenshot({ path: path.join(out, 'instructor-return.png'), fullPage: true }); assert.deepEqual(errors, []);
   ok('E4 withdraw stops only who has not switched; the return is a {base:true} revision through save → check → send, and the learner runs the token lesson again');
   console.log(`\n${n} passed`);

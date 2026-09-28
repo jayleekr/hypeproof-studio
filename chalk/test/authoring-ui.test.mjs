@@ -49,17 +49,44 @@ assert.doesNotMatch(authoring, /feature-allowed'\)\.innerHTML/, 'the feature lis
 // disappeared on the next save — steps[].help already did, and the learning block was
 // about to go the same way. render() holds on to the unrecognized keys of the draft it
 // opened and content() lays them back down.
-// It **only preserves** — a learning editing UI is not in the scope of this change.
+// #751 G2 mission — `learning` is now owned by the form (week, mission and completion have controls); its other fields
+// are carried inside learning exactly as loaded (carriedLearning), the same preservation rule one level down.
 assert.match(
   authoring,
-  /const formKeys=\['schema',\.\.\.fields,'steps','assistant','model','features'\];/,
+  /const formKeys=\['schema',\.\.\.fields,'steps','assistant','model','features','learning'\];/,
   'the form declares which top-level keys it owns, so everything else is an unknown key to preserve',
 );
+assert.match(authoring, /carriedLearning=l\?Object\.fromEntries\(Object\.entries\(l\)\.filter\(\(\[k\]\)=>!\['week','mission','completion'\]\.includes\(k\)\)\):\{\};/,
+  'observe/never/evidence_types/source_kinds/reflection are kept as loaded — the page has no control for them');
+assert.match(authoring, /return \{learning:\{\.\.\.carriedLearning,week:Number\(\$\('learning-week'\)\.value\),mission:\$\('learning-mission'\)\.value\.trim\(\),/,
+  'the preserved learning fields go first so the edited week/mission/completion win');
+assert.match(authoring, /function learningValue\(\)\{if\(!\$\('learning-on'\)\.checked\)return \{\};/, 'a lesson without a mission sends no learning block at all (legacy stays legacy)');
+assert.doesNotMatch(authoring, /learning-mission'\)\.value=\$\('(title|objective)'\)/, 'the mission is never filled in from the title or objective');
+assert.match(authoring, /제목이나 목표로 미션을 대신 만들지 않습니다/, 'the copy says no mission is invented');
+assert.match(authoring, /학생이 실제로 남긴 기록이 생기기 전에는 완료로 표시하지 않습니다/, 'the copy says no condition is shown as met without a record');
+assert.doesNotMatch(authoring, /learning-completion'\)\.innerHTML|learning-advanced'\)\.innerHTML/, 'teacher text is never rendered as HTML');
+{
+  // The completion-record labels are the learner-side table (learningStateHelpers.ts KIND_LABELS), not a second wording.
+  const { KIND_LABELS } = await import('../../extensions/hypeproof-chat/src/learningStateHelpers.ts');
+  const labels = JSON.parse(/const EVENT_LABELS=(\{[^}]+\});/.exec(authoring)[1].replace(/([a-z_]+):'/g, '"$1":\'').replace(/'/g, '"'));
+  assert.deepEqual(labels, KIND_LABELS, 'Chalk names the eight learning event kinds with the learner-side words');
+}
 assert.match(
   authoring,
-  /const stepFormKeys=\['id','title','instructions','hint','acceptance'\];/,
-  'the form declares which step keys it owns — help/ui/evidence/gate are not among them',
+  /const stepFormKeys=\['id','title','instructions','hint','acceptance','help','ui'\];/,
+  'the form declares which step keys it owns — since G2 help and ui have their own controls; evidence/gate are still only preserved',
 );
+// #751 G2 — per-step help choices and work surface are EDITED here (not only preserved), and the controls say what they are.
+assert.match(authoring, /function stepTeachingValue\(f\)\{/, 'help/ui are produced from the step controls');
+assert.match(authoring, /\.\.\.\(on\.length\?\{help:\{default:on\.includes\(def\)\?def:on\[0\],allowed:on\}\}:\{\}\)/, 'no help block when no mode is chosen; the default is always one of the allowed modes');
+assert.match(authoring, /지원 전 값 유지: /, 'a ui value this Studio cannot draw is kept and named, never dropped');
+assert.match(authoring, /도움 방식은 AI가 돕는 방법이며 도구 권한을 바꾸지 않습니다/, 'the copy says help grants nothing');
+// #751 G2 — candidate → rehearsal → confirmation. Freezing is not confirmation and issuing a code is not readiness.
+assert.match(authoring, /<button id="freeze" disabled>저장한 초안을 리허설 후보로 고정<\/button>/);
+assert.doesNotMatch(authoring, /강의가 확정되었습니다/, 'freezing no longer claims the course is confirmed');
+assert.match(authoring, /\$\('confirm-go'\)\.disabled=busy\|\|readiness\?\.state!=='passed'/, 'confirmation is offered only on a passed rehearsal');
+assert.match(authoring, /리허설 중 — 코드를 발급했고 Studio의 결과를 기다립니다 \(준비 완료 아님\)/);
+assert.doesNotMatch(authoring, /readiness-detail'\)\.innerHTML|impact-view'\)\.innerHTML/, 'server text is never rendered as HTML');
 assert.match(
   authoring,
   /function carry\(c\)\{carriedTop=Object\.fromEntries\(Object\.entries\(c\)\.filter\(\(\[k\]\)=>!formKeys\.includes\(k\)\)\);/,
@@ -78,8 +105,8 @@ assert.match(
 );
 assert.match(
   authoring,
-  /return \{\.\.\.carriedStep\.get\(own\.id\),\.\.\.own\};/,
-  'a step’s preserved keys are restored under the values the form produced',
+  /return \{\.\.\.carriedStep\.get\(own\.id\),\.\.\.own,\.\.\.stepTeachingValue\(f\)\};/,
+  'a step’s preserved keys are restored under the values the form produced (text fields, then help/ui controls)',
 );
 
 const learn = await page('/learn');
@@ -87,4 +114,4 @@ assert.match(learn, /c\.assistant\?\.display_name/, 'learn page reads the option
 assert.match(learn, /'이 수업의 AI 이름: '\+c\.assistant\.display_name\+' \(AI 도우미\)'/, 'learn page renders the name through textContent with the AI notice');
 assert.doesNotMatch(learn, /innerHTML/, 'lesson text is never rendered as HTML');
 
-console.log('PASS authoring ui: AI name round-trips, feature narrowing is opt-in and omitted when inheriting, unknown keys survive a save, learn page renders via textContent');
+console.log('PASS authoring ui: mission/week/completion are edited and the rest of learning preserved, AI name round-trips, feature narrowing is opt-in and omitted when inheriting, unknown keys survive a save, learn page renders via textContent');
