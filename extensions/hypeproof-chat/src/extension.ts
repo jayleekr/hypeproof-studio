@@ -27,6 +27,8 @@ import {
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
+import { looksLikeIssuerTokenUnverified } from "./chatPanelHelpers";
+import { localRuntimeConfig } from "./localRuntime";
 import {
   scheduleUpdateChecks,
   checkForUpdates,
@@ -424,8 +426,19 @@ export async function activate(context: vscode.ExtensionContext) {
         ignoreFocusOut: true,
       });
       if (!input || input.trim().length === 0) return;
-      await context.secrets.store(ISSUER_TOKEN_KEY, input.trim());
-      provider.refreshConfig();
+      const trimmed = input.trim();
+      if (!looksLikeIssuerTokenUnverified(trimmed)) {
+        vscode.window.showErrorMessage("issuer 토큰 형식이 아닙니다. 발급받은 강사 토큰을 확인하세요.");
+        return;
+      }
+      await context.secrets.store(ISSUER_TOKEN_KEY, trimmed);
+      await provider.refreshConfig();
+      const isInstructor = provider.isInstructor;
+      if (isInstructor !== true) {
+        await context.secrets.delete(ISSUER_TOKEN_KEY);
+        vscode.window.showErrorMessage("강사 토큰이 유효하지 않습니다. 서버 인증에 실패했습니다.");
+        return;
+      }
       vscode.window.showInformationMessage("강사 토큰이 저장됐습니다.");
     }),
 
@@ -1008,10 +1021,11 @@ async function applyTestBackdoors(
   if (issuerToken && issuerToken.length > 0) {
     await context.secrets.store(ISSUER_TOKEN_KEY, issuerToken);
   }
-  // Dev-only issuer token auto-seed: only in "HypeProof Studio Dev" with HPS_TEST_E2E unset.
-  // Release builds ignore this env var even if it happens to be set.
+  // Dev-only issuer token auto-seed: only when localRuntimeConfig returns non-null (Dev app + dev
+  // setting on) and HPS_TEST_E2E is unset. Release builds and Dev app with runtime off both skip.
   // Token value is never logged.
-  if (vscode.env.appName === "HypeProof Studio Dev" && !process.env.HPS_TEST_E2E) {
+  const _devProxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+  if (localRuntimeConfig(vscode.env.appName, _devProxyUrl) !== null && !process.env.HPS_TEST_E2E) {
     const devIssuerTokenFile = process.env.HPS_DEV_ISSUER_TOKEN_FILE;
     if (devIssuerTokenFile) {
       try {

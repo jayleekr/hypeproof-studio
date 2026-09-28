@@ -836,11 +836,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
   hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0 || !!this.worldOpening || !!this.observationAssessment || (this.pendingApprovals?.size ?? 0) > 0; }
 
-  refreshConfig() {
-    void (async () => {
+  refreshConfig(): Promise<void> {
+    return (async () => {
       await this.postConfig();
       await this.postHistory();
     })();
+  }
+
+  get isInstructor(): boolean | null {
+    return this._instructorMode.isInstructor;
   }
 
   private clearingHistory = false;

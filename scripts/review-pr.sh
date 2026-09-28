@@ -259,7 +259,7 @@ else
   # Write token to file for HPS_DEV_ISSUER_TOKEN_FILE auto-seed in Dev app.
   # Cleanup trap removes the file. Never print the token value in logs.
   ISSUER_TOKEN_FILE="$WORKTREE_DIR/issuer-token.txt"
-  printf '%s' "$TOKEN" > "$ISSUER_TOKEN_FILE"
+  (umask 077; printf '%s' "$TOKEN" > "$ISSUER_TOKEN_FILE")
   export HPS_DEV_ISSUER_TOKEN_FILE="$ISSUER_TOKEN_FILE"
   echo "Instructor token written to worktree (auto-injected into Dev app)."
   # Also copy to clipboard as fallback for manual paste.

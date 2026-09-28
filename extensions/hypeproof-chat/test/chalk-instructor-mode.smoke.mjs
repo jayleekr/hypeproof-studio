@@ -148,7 +148,7 @@ t("ISSUER_TOKEN_KEY slot value with whoami 200 → isInstructor true", async () 
 console.log("\n=== HPS_DEV_ISSUER_TOKEN_FILE — release app name guard ===");
 
 t("app name guard: non-Dev app name must not read HPS_DEV_ISSUER_TOKEN_FILE", () => {
-  // The extension.ts backdoor reads the file only when vscode.env.appName === "HypeProof Studio Dev".
+  // The extension.ts backdoor uses localRuntimeConfig which requires appName === "HypeProof Studio Dev".
   // We cannot call activate() here; verify the guard condition string is correct.
   const DEV_APP_NAME = "HypeProof Studio Dev";
   const releaseNames = ["HypeProof Studio", "VSCodium", "Visual Studio Code", ""];
@@ -157,6 +157,15 @@ t("app name guard: non-Dev app name must not read HPS_DEV_ISSUER_TOKEN_FILE", ()
   }
   // Confirm the Dev name matches.
   assert.strictEqual(DEV_APP_NAME, "HypeProof Studio Dev");
+});
+
+t("localRuntimeConfig: Dev app name but HPS_DEV_RUNTIME unset → returns null → backdoor skipped", async () => {
+  // localRuntimeConfig returns null when HPS_DEV_RUNTIME !== "1", even if appName matches.
+  // This tests the second negative: Dev name alone is not sufficient.
+  const { localRuntimeConfig } = await import("../src/localRuntime/index.ts");
+  // No HPS_DEV_RUNTIME in env → runtime off
+  const result = localRuntimeConfig("HypeProof Studio Dev", "http://127.0.0.1:8787/v1", {});
+  assert.strictEqual(result, null, "Dev app + runtime off → null → backdoor gate must not fire");
 });
 
 console.log(`\n${n} tests passed\n`);
