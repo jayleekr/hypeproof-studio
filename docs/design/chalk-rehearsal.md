@@ -44,7 +44,7 @@
 | | 서버 경로 리허설 | 구독 리허설 |
 |---|---|---|
 | 모델 호출 | 앱 → 서버(`/v1/messages` 또는 `/v1/chat/completions`) | 앱 → 강사 컴퓨터 CLI(`localRuntime`) |
-| 코호트 지시문 | 서버가 넣음(`chat-gate.ts:336-363`, 게이트는 세션·로스터 필요 `:207-256`). `buildAnthropicSystemBlocks`(`translate.ts:513-529`)는 `system_prompt`만 조립 — 구독 리허설엔 부족하다 | **[추정] E6-7**: `chat-gate.ts:336-363` 조립 부분을 세션 검사와 분리된 순수 함수로 빼고(동작 불변 시험 필수, 개정 R1), 좌석 토큰으로 단계·도움 방식별로 내려받는다. 로컬 기본 지시문이 원본 수업을 넘겨 `learning.observe`가 보이는 문제(SX-57)도 여기서 막는다 |
+| 코호트 지시문 | 서버가 넣음(`chat-gate.ts:336-363`, 게이트는 세션·로스터 필요 `:207-256`). `buildAnthropicSystemBlocks`(`translate.ts:513-529`)는 `system_prompt`만 조립 — 구독 리허설엔 부족하다 | **E6-7**: `chat-gate.ts:336-363` 조립 부분을 세션 검사와 분리된 순수 함수로 빼고(동작 불변 시험 필수, 개정 R1), 좌석 토큰으로 단계·도움 방식별로 내려받는다. **[추정]** 로컬 기본 지시문이 원본 수업을 넘겨 `learning.observe`가 보이는 문제(SX-57)도 여기서 막는다 |
 | 미성년 모더레이션·길이 제한 | 걸림 | **안 걸림** → 경고 + 기록 |
 | 요청 기록 | 서버가 직접 봄(`authoring_rehearsal_turns`) | **앱이 올림**(E4-7 `POST /admin/chalk/transcripts`, `rehearsal_id` 포함) |
 | 확정 근거 | 됨 | **됨**(결정 8 (나)) |
