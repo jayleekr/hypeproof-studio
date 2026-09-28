@@ -1172,3 +1172,56 @@ CREATE TABLE IF NOT EXISTS classroom_input_basis (
 -- One setting object per class run: every change of version is the next revision of that one object, so the per-object
 -- event order of U2 is a total order per participant. No row of kind 'setting' exists before this migration.
 CREATE UNIQUE INDEX IF NOT EXISTS classroom_content_objects_setting ON classroom_content_objects(class_run_id) WHERE kind='setting';
+
+-- ── migrations/0030-chalk-knowledge-store.sql (#1288 E1-2) ──
+CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
+  version        INTEGER PRIMARY KEY,
+  parent_version INTEGER,
+  origin         TEXT NOT NULL CHECK (origin IN ('vault-import', 'product-edit')),
+  source_repo    TEXT,
+  source_commit  TEXT,
+  note           TEXT NOT NULL,
+  created_by     TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  doc_count      INTEGER NOT NULL,
+  digest         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
+  version     INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
+  doc_id      TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  fields_json TEXT NOT NULL,
+  body        TEXT NOT NULL DEFAULT '',
+  source_path TEXT,
+  PRIMARY KEY (version, doc_id)
+);
+
+-- ── migrations/0031-chalk-plan-files.sql (#1295 E1-1) ──
+CREATE TABLE IF NOT EXISTS chalk_plan_files (
+  cohort_id         TEXT NOT NULL,
+  course_id         TEXT NOT NULL,
+  ref_kind          TEXT NOT NULL,
+  ref               TEXT NOT NULL,
+  file              TEXT NOT NULL,
+  html              TEXT NOT NULL,
+  sha256            TEXT NOT NULL,
+  knowledge_version INTEGER NOT NULL,
+  created_at        INTEGER NOT NULL,
+  PRIMARY KEY (cohort_id, course_id, ref_kind, ref, file),
+  FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
+);
+CREATE TABLE IF NOT EXISTS chalk_course_inputs (
+  cohort_id       TEXT NOT NULL,
+  course_id       TEXT NOT NULL,
+  revision        INTEGER NOT NULL,
+  audience        TEXT NOT NULL,
+  assets_json     TEXT NOT NULL,
+  teaching_style  TEXT NOT NULL,
+  requirements    TEXT NOT NULL,
+  format          TEXT NOT NULL,
+  family_session  INTEGER NOT NULL DEFAULT 0,
+  vocab_json      TEXT,
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (cohort_id, course_id),
+  FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
+);

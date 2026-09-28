@@ -289,11 +289,80 @@
         "WEB-09"
       ],
       "inline_prefixes": [],
-      "sha256": "76cb41b1245edb078f9dafada9617a88837d9512230e0a1ae4ecb7b7034145b7",
+      "sha256": "322736c53543b87bb0136d098823691a89fd7248162ef490c9a2304902d1d1f0",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/chalk-authoring.md",
       "test": "docs/testing/chalk-authoring.md"
+    },
+    {
+      "path": "docs/requirements/chalk-mvp.md",
+      "ids": [
+        "FB-01",
+        "FB-02",
+        "FB-03",
+        "FB-04",
+        "FB-05",
+        "GEN-01",
+        "GEN-02",
+        "GEN-03",
+        "GEN-04",
+        "GEN-05",
+        "GEN-06",
+        "HTML-01",
+        "HTML-02",
+        "HTML-03",
+        "HTML-04",
+        "KB-01",
+        "KB-02",
+        "KB-03",
+        "KB-04",
+        "KB-05",
+        "OUT-01",
+        "OUT-02",
+        "OUT-03",
+        "OUT-04",
+        "OUT-05",
+        "PLAN-01",
+        "PLAN-02",
+        "PLAN-03",
+        "PLAN-04",
+        "PLAN-05",
+        "PLAN-06",
+        "PLAN-07",
+        "PLAN-08",
+        "PLAN-09",
+        "PLAN-10",
+        "RH-01",
+        "RH-02",
+        "RH-03",
+        "RH-04",
+        "SCH-01",
+        "SCH-02",
+        "SCH-03",
+        "SUB-01",
+        "SUB-02",
+        "SUB-03",
+        "SUB-04",
+        "SUB-05",
+        "SUB-06",
+        "SUB-07",
+        "SUB-08",
+        "SUB-09",
+        "SUB-10",
+        "SUB-11",
+        "UX-01",
+        "UX-02",
+        "UX-03",
+        "UX-04",
+        "UX-05"
+      ],
+      "inline_prefixes": [],
+      "sha256": "fe2407e419b467b446c11e36a5f38360b17602900039165b4abd9781797dca5b",
+      "owner": "jayleekr",
+      "intent": "docs/intents/chalk-mvp.md",
+      "design": "docs/requirements/chalk-mvp.md",
+      "test": "docs/testing/chalk-mvp.md"
     },
     {
       "path": "docs/requirements/classroom-admin.md",
@@ -2445,6 +2514,132 @@
       "gate": {
         "reason": "학습 이벤트는 지금 로컬에만 있다(MC-24). MC-39 원격 제출과 학생 공유 범위 선택이 없으면 강사 화면에 보낼 근거 자체가 없다. 미성년 파일럿의 보호자 동의·강사 매개 경로는 Lab MISSION 아동 안전 결정 대기."
       }
+    },
+    {
+      "id": "chalk-mvp-kb-html-sch",
+      "title": "Chalk 제품 지식·계획서 형식·저장 형식 구현",
+      "issue": 1280,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "KB-01", "KB-02", "KB-03", "KB-04", "KB-05",
+            "HTML-01", "HTML-02", "HTML-03", "HTML-04",
+            "SCH-01", "SCH-02", "SCH-03"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "chalk_knowledge_versions·chalk_knowledge_docs 테이블, 계획서 HTML 형식 파서, SessionDesign 새 칸을 구현한다.",
+      "design_delta": "E1-1 설계(docs/design/chalk-knowledge-and-plan-spec.md) §1·§2·§4를 따른다. chalk_plan_files 는 별도 테이블, content 에 계획서 원문을 넣지 않는다.",
+      "positive_control": "볼트 가져오기 후 /admin/chalk/knowledge/:version/docs 로 문서 조회. 계획서 HTML 에서 section·step 파싱. SessionDesign 새 칸 저장·재읽기.",
+      "negative_control": "학생 토큰으로 지식 엔드포인트 403. scope 키 없음. 타입 틀린 값 저장 거부.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "chalk-mvp-gen-fb",
+      "title": "Chalk 생성기와 검사 고리 구현",
+      "issue": 1281,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "GEN-01", "GEN-02", "GEN-03", "GEN-04", "GEN-05", "GEN-06",
+            "FB-01", "FB-02", "FB-03", "FB-04", "FB-05"
+          ]
+        }
+      ],
+      "depends_on": ["chalk-mvp-kb-html-sch"],
+      "next_action": "계획서 초안 생성 도구와 관문 검사(G1~G3) 고리를 구현한다.",
+      "design_delta": "E1-1 §2(HTML 규격), E2 생성기 설계를 따른다. 검사는 서버에서 한다(ARC-01).",
+      "positive_control": "초안 생성 요청 후 chalk-plan/1 형식 계획서 파일 반환. 관문 위반 있으면 FB 응답.",
+      "negative_control": "관문 위반 있는 초안 확정 거부. 학생 화면에 교사 칸 노출 없음.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "chalk-mvp-plan",
+      "title": "Chalk 강의 계획안 구현",
+      "issue": 1282,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "PLAN-01", "PLAN-02", "PLAN-03", "PLAN-04", "PLAN-05",
+            "PLAN-06", "PLAN-07", "PLAN-08", "PLAN-09", "PLAN-10"
+          ]
+        }
+      ],
+      "depends_on": ["chalk-mvp-gen-fb"],
+      "next_action": "운영 계획안(ops) 생성, 진행자 런북·참가자 안내문 파생, 시간표·행위자·위험·동의 칸을 구현한다.",
+      "design_delta": "E3 설계(#1282 하위)를 따른다. 파생 파일은 data-chalk-derived-from sha256 링크.",
+      "positive_control": "ops 생성 후 runbook·handout 파생 파일 확인. 시간표 블록 step-ref 정합.",
+      "negative_control": "step-ref 없는 블록 거부. 행위자 필수 칸(teacher·learner) 없으면 거부.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "chalk-mvp-ux",
+      "title": "Chalk 강사 면·채팅 진입·목록 구현",
+      "issue": 1283,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "UX-01", "UX-02", "UX-03", "UX-04", "UX-05"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "강사 채팅 패널에서 Chalk 진입·강의 목록·상태 표시를 구현한다.",
+      "design_delta": "E4 설계(#1283 하위)를 따른다. Studio 확장 webview 에서 강사 채팅으로 Chalk 전부.",
+      "positive_control": "강의 목록 불러오기·새 강의 만들기·초안 이어 작성 흐름.",
+      "negative_control": "학생 토큰으로 강의 목록 접근 거부.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "chalk-mvp-out",
+      "title": "Chalk 강의 만들기 구현",
+      "issue": 1284,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "OUT-01", "OUT-02", "OUT-03", "OUT-04", "OUT-05"
+          ]
+        }
+      ],
+      "depends_on": ["chalk-mvp-gen-fb"],
+      "next_action": "계획서에서 학생 강의로 변환(E5)·확정·배포 흐름을 구현한다.",
+      "design_delta": "E5 설계(#1284 하위)를 따른다. 교사 칸 학생 전달 금지(ARC-01), plan_ref 만 content 에 포함.",
+      "positive_control": "계획서 확정 후 /v1/profile 에 plan_ref 포함. 코치 system_prompt 에 교사 칸 없음.",
+      "negative_control": "교사 칸(prohibited_moves 등)이 학생 채팅·코치 prompt JSON 에 없음.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "chalk-mvp-rh-sub",
+      "title": "Chalk 리허설·구독 연결 구현",
+      "issue": 1285,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "ids": [
+            "RH-01", "RH-02", "RH-03", "RH-04",
+            "SUB-01", "SUB-02", "SUB-03", "SUB-04", "SUB-05",
+            "SUB-06", "SUB-07", "SUB-08", "SUB-09", "SUB-10", "SUB-11"
+          ]
+        }
+      ],
+      "depends_on": ["chalk-mvp-out"],
+      "next_action": "리허설 흐름(강사가 학생 조건으로 체험)과 구독 연결(강의 클라이언트 배포) 구현.",
+      "design_delta": "E6 리허설·E7 구독 설계를 따른다. 리허설 점검표는 지도안 13절 support 섹션에서 파생.",
+      "positive_control": "리허설 모드 진입·학생 화면 체험·점검표 확인. 구독 토큰 발급·강의 열기.",
+      "negative_control": "리허설 중 교사 칸 노출 없음. 구독 만료 후 강의 열기 거부.",
+      "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
     }
   ]
 }
