@@ -23,7 +23,7 @@
     {
       "id": "ST-REQ-NATIVE",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -36,7 +36,7 @@
     {
       "id": "ST-DES-NATIVE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -50,7 +50,7 @@
     {
       "id": "ST-REQ-UX",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -63,7 +63,7 @@
     {
       "id": "ST-IMP-START",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-DES-NATIVE",
         "ST-REQ-UX"
@@ -77,7 +77,7 @@
     {
       "id": "ST-TEST-NATIVE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -90,7 +90,7 @@
     {
       "id": "ST-TEST-UX",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UX"
       ],
@@ -103,7 +103,7 @@
     {
       "id": "ST-VAL-NATIVE",
       "stage": "validation",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-TEST-NATIVE",
         "ST-IMP-START"
@@ -117,7 +117,7 @@
     {
       "id": "ST-REQ-COACH-RUNTIME",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -135,7 +135,7 @@
     {
       "id": "ST-TEST-COACH-SESSION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -148,7 +148,7 @@
     {
       "id": "ST-TEST-LESSON-FEATURES",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -161,7 +161,7 @@
     {
       "id": "ST-TEST-LESSON-HELP-MODE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -174,7 +174,7 @@
     {
       "id": "ST-REQ-STUDIO-SAFETY",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -188,7 +188,7 @@
     {
       "id": "ST-TEST-PUBLISH-GATE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY"
       ],
@@ -201,7 +201,7 @@
     {
       "id": "ST-TEST-SDK-RESULT-DRIFT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -214,7 +214,7 @@
     {
       "id": "ST-TEST-SDK-SURFACE-DRIFT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -227,7 +227,7 @@
     {
       "id": "ST-DES-COURSE-EFFORT",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -241,7 +241,7 @@
     {
       "id": "ST-TEST-COURSE-EFFORT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME",
         "ST-DES-COURSE-EFFORT"
@@ -273,7 +273,7 @@
     {
       "id": "ST-TEST-GPT-PRACTICE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME",
         "ST-REQ-NATIVE"
@@ -302,7 +302,7 @@
     {
       "id": "ST-DES-USAGE-OBSERVATION",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "rabqatab",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY"
       ],
@@ -315,7 +315,7 @@
     {
       "id": "ST-TEST-USAGE-OBSERVATION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY",
         "ST-DES-USAGE-OBSERVATION"
@@ -341,7 +341,7 @@
     {
       "id": "ST-REQ-COACH-NAMING",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -355,7 +355,7 @@
     {
       "id": "ST-TEST-HISTORY-IDENTITY",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-COACH-NAMING"
       ],
@@ -368,7 +368,7 @@
     {
       "id": "ST-REQ-MODEL-USAGE",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -381,7 +381,7 @@
     {
       "id": "ST-TEST-MODEL-USAGE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE",
         "ST-REQ-COACH-RUNTIME"
@@ -401,7 +401,7 @@
     {
       "id": "ST-REQ-TRIAL-CONVERSATION",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-INT-NATIVE",
         "ST-REQ-UX"
@@ -415,7 +415,7 @@
     {
       "id": "ST-TEST-TRIAL-CONVERSATION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-TRIAL-CONVERSATION",
         "ST-REQ-NATIVE"
@@ -457,7 +457,7 @@
     {
       "id": "ST-REQ-CAPABILITY-CONTRACT",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-CAPABILITY-ACCESS"
       ],
@@ -520,7 +520,7 @@
     {
       "id": "ST-TEST-MEASUREMENT-CORE-UNIT1",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT",
         "ST-REQ-NATIVE"
@@ -540,7 +540,7 @@
     {
       "id": "ST-TEST-MEASUREMENT-CORE-UNIT2",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT",
         "ST-REQ-NATIVE"
@@ -554,7 +554,7 @@
     {
       "id": "ST-IMP-ACCESS-CONTRACTS",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-DES-ACCESS-BUDGET"
@@ -574,7 +574,7 @@
     {
       "id": "ST-TEST-ACCESS-CONTRACTS",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-IMP-ACCESS-CONTRACTS"
@@ -591,7 +591,7 @@
     {
       "id": "ST-IMP-USAGE-COSTS",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-DES-ACCESS-BUDGET"
@@ -608,7 +608,7 @@
     {
       "id": "ST-TEST-USAGE-COSTS",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-IMP-USAGE-COSTS"
@@ -631,7 +631,7 @@
     {
       "id": "ST-IMP-BUDGET-ADMISSION",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-DES-ACCESS-BUDGET",
@@ -653,7 +653,7 @@
     {
       "id": "ST-TEST-BUDGET-ADMISSION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-IMP-BUDGET-ADMISSION"
@@ -673,7 +673,7 @@
     {
       "id": "ST-IMP-BUDGET-SURFACES",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-DES-ACCESS-BUDGET",
@@ -703,7 +703,7 @@
     {
       "id": "ST-TEST-BUDGET-SURFACES",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-IMP-BUDGET-SURFACES"
@@ -735,7 +735,7 @@
     {
       "id": "ST-TEST-BUDGET-RECOVERY",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-ACCESS-BUDGET",
         "ST-IMP-BUDGET-ADMISSION",
@@ -756,7 +756,7 @@
     {
       "id": "ST-REQ-VOICE-CAPABILITY",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -770,7 +770,7 @@
     {
       "id": "ST-TEST-VOICE-CAPABILITY",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY"
       ],
@@ -786,7 +786,7 @@
     {
       "id": "ST-IMP-VOICE-CAPABILITY",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-TEST-VOICE-CAPABILITY"
@@ -821,7 +821,7 @@
     {
       "id": "ST-TEST-VOICE-PREFLOW",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-IMP-VOICE-CAPABILITY"
@@ -835,7 +835,7 @@
     {
       "id": "ST-TEST-VOICE-AUDIO-REFUSAL",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-IMP-BUDGET-ADMISSION"
@@ -849,7 +849,7 @@
     {
       "id": "ST-TEST-INBOUND-IMAGES",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -862,7 +862,7 @@
     {
       "id": "ST-IMP-ROUTE-MESSAGES",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-REQ-COACH-RUNTIME",
@@ -882,7 +882,7 @@
     {
       "id": "ST-TEST-VOICE-LINKAGE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY"
       ],
@@ -895,7 +895,7 @@
     {
       "id": "ST-IMP-VOICE-LINKAGE",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-TEST-VOICE-LINKAGE"
@@ -909,7 +909,7 @@
     {
       "id": "ST-REQ-VOICE-CONVERSATION",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -922,7 +922,7 @@
     {
       "id": "ST-TEST-VOICE-CONVERSATION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CONVERSATION",
         "ST-REQ-VOICE-CAPABILITY"
@@ -954,7 +954,7 @@
     {
       "id": "ST-REQ-UNIFIED",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-INT-UNIFIED",
         "ST-REQ-NATIVE",
@@ -969,7 +969,7 @@
     {
       "id": "ST-DES-UNIFIED",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UNIFIED"
       ],
@@ -990,7 +990,7 @@
     {
       "id": "ST-TEST-UNIFIED",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-DES-UNIFIED"
@@ -1004,7 +1004,7 @@
     {
       "id": "ST-TEST-VOICE-SESSION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY"
       ],
@@ -1017,7 +1017,7 @@
     {
       "id": "ST-IMP-VOICE-SESSION",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-TEST-VOICE-SESSION"
@@ -1031,7 +1031,7 @@
     {
       "id": "ST-TEST-VOICE-POPUP",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-REQ-VOICE-CONVERSATION"
@@ -1048,7 +1048,7 @@
     {
       "id": "ST-IMP-VOICE-POPUP",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CAPABILITY",
         "ST-REQ-VOICE-CONVERSATION",
@@ -1069,7 +1069,7 @@
     {
       "id": "ST-TEST-OPERATOR-HEALTH-AUTH",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY"
       ],
@@ -1082,7 +1082,7 @@
     {
       "id": "ST-IMP-UNIFIED-ENTRY",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-TEST-UNIFIED"
@@ -1111,7 +1111,7 @@
     {
       "id": "ST-TEST-UNIFIED-ENTRY",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-TEST-UNIFIED"
@@ -1125,7 +1125,7 @@
     {
       "id": "ST-VAL-UNIFIED-ENTRY",
       "stage": "validation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-IMP-UNIFIED-ENTRY",
         "ST-TEST-UNIFIED-ENTRY"
@@ -1139,7 +1139,7 @@
     {
       "id": "ST-DES-ACTIVITY-BINDING",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED"
       ],
@@ -1152,7 +1152,7 @@
     {
       "id": "ST-TEST-ACTIVITY-CANDIDATE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-DES-ACTIVITY-BINDING"
@@ -1169,7 +1169,7 @@
     {
       "id": "ST-VAL-ACTIVITY-CANDIDATE",
       "stage": "validation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-IMP-UNIFIED-ENTRY",
         "ST-TEST-ACTIVITY-CANDIDATE"
@@ -1183,7 +1183,7 @@
     {
       "id": "ST-IMP-MODEL-USAGE",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE",
         "ST-TEST-MODEL-USAGE"
@@ -1197,7 +1197,7 @@
     {
       "id": "ST-TEST-MODEL-ECHO",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE"
       ],
@@ -1210,7 +1210,7 @@
     {
       "id": "ST-IMP-MODEL-ECHO",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE",
         "ST-TEST-MODEL-ECHO"
@@ -1224,7 +1224,7 @@
     {
       "id": "ST-IMP-OPERATOR-HEALTH-AUTH",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY",
         "ST-TEST-OPERATOR-HEALTH-AUTH"
@@ -1238,7 +1238,7 @@
     {
       "id": "ST-IMP-ACTIVITY-BINDING",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-TEST-UNIFIED"
@@ -1276,7 +1276,7 @@
     {
       "id": "ST-TEST-ACTIVITY-ISOLATION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-DES-ACTIVITY-BINDING"
@@ -1302,7 +1302,7 @@
     {
       "id": "ST-IMP-UNIFIED-DELIVERY",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-TEST-UNIFIED"
@@ -1349,7 +1349,7 @@
     {
       "id": "ST-TEST-UNIFIED-DELIVERY",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-IMP-UNIFIED-DELIVERY"
@@ -1372,7 +1372,7 @@
     {
       "id": "ST-IMP-SDK-SAVE-EVIDENCE",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-TEST-UNIFIED"
@@ -1386,7 +1386,7 @@
     {
       "id": "ST-TEST-SDK-SAVE-EVIDENCE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-UNIFIED",
         "ST-IMP-SDK-SAVE-EVIDENCE"
@@ -1403,7 +1403,7 @@
     {
       "id": "ST-DES-UNIFIED-DELIVERY",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-UNIFIED"
       ],
@@ -1416,7 +1416,7 @@
     {
       "id": "ST-VAL-UNIFIED-COMPLETION",
       "stage": "validation",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-IMP-ACTIVITY-BINDING",
         "ST-TEST-ACTIVITY-ISOLATION",
@@ -1433,7 +1433,7 @@
     {
       "id": "ST-TEST-MODEL-SUBSTITUTION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME"
       ],
@@ -1446,7 +1446,7 @@
     {
       "id": "ST-IMP-MODEL-SUBSTITUTION",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME",
         "ST-TEST-MODEL-SUBSTITUTION"
@@ -1460,7 +1460,7 @@
     {
       "id": "ST-REQ-LOCAL-REVIEW",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-INT-NATIVE",
         "ST-REQ-CAPABILITY-CONTRACT"
@@ -1478,7 +1478,7 @@
     {
       "id": "ST-IMP-LOCAL-REVIEW",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-LOCAL-REVIEW"
       ],
@@ -1524,7 +1524,7 @@
     {
       "id": "ST-TEST-LOCAL-REVIEW",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-LOCAL-REVIEW",
         "ST-IMP-LOCAL-REVIEW"
@@ -1550,7 +1550,7 @@
     {
       "id": "ST-REQ-SESSION-SYNC",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-LOCAL-REVIEW"
       ],
@@ -1567,7 +1567,7 @@
     {
       "id": "ST-IMP-SESSION-SYNC",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-SESSION-SYNC"
       ],
@@ -1601,7 +1601,7 @@
     {
       "id": "ST-TEST-SESSION-SYNC",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-SESSION-SYNC",
         "ST-IMP-SESSION-SYNC"
@@ -1627,7 +1627,7 @@
     {
       "id": "ST-IMP-HAIN7-RETIREMENT",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT"
       ],
@@ -1652,7 +1652,7 @@
     {
       "id": "ST-TEST-HAIN7-RETIREMENT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT",
         "ST-IMP-HAIN7-RETIREMENT"
@@ -1696,7 +1696,7 @@
     {
       "id": "ST-REQ-MEASUREMENT-CORE",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-MEASUREMENT-CORE",
         "ST-REQ-CAPABILITY-CONTRACT"
@@ -1710,7 +1710,7 @@
     {
       "id": "ST-DES-MEASUREMENT-CORE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-MEASUREMENT-CORE"
       ],
@@ -1726,7 +1726,7 @@
     {
       "id": "ST-TEST-MEASUREMENT-CORE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-MEASUREMENT-CORE",
         "ST-DES-MEASUREMENT-CORE"
@@ -1740,7 +1740,7 @@
     {
       "id": "ST-DES-UNIFIED-STUDIO-EXPERIENCE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UNIFIED"
       ],
@@ -1756,7 +1756,7 @@
     {
       "id": "ST-TEST-UNIFIED-STUDIO-EXPERIENCE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UNIFIED"
       ],
@@ -1769,7 +1769,7 @@
     {
       "id": "ST-DES-STUDIO-NATIVE-TRIAL",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -1785,7 +1785,7 @@
     {
       "id": "ST-TEST-STUDIO-NATIVE-TRIAL",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -1798,7 +1798,7 @@
     {
       "id": "ST-REQ-LEARNING-AGENT-EXPERIENCE",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -1811,7 +1811,7 @@
     {
       "id": "ST-DES-LEARNING-AGENT-EXPERIENCE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-LEARNING-AGENT-EXPERIENCE"
       ],
@@ -1827,7 +1827,7 @@
     {
       "id": "ST-TEST-LEARNING-AGENT-EXPERIENCE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-LEARNING-AGENT-EXPERIENCE"
       ],
@@ -1840,7 +1840,7 @@
     {
       "id": "ST-DES-VOICE-CONVERSATION",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-VOICE-CONVERSATION"
       ],
@@ -1856,7 +1856,7 @@
     {
       "id": "ST-DES-MODEL-ACCESS-USAGE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE"
       ],
@@ -1872,7 +1872,7 @@
     {
       "id": "ST-TEST-MODEL-ACCESS-USAGE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "J3llyBe4n",
       "depends_on": [
         "ST-REQ-MODEL-USAGE"
       ],
@@ -1914,7 +1914,7 @@
     {
       "id": "ST-REQ-CHALK-AUTHORING",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -1927,7 +1927,7 @@
     {
       "id": "ST-DES-CHALK-AUTHORING",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-AUTHORING"
       ],
@@ -1943,7 +1943,7 @@
     {
       "id": "ST-TEST-CHALK-AUTHORING",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-AUTHORING"
       ],
@@ -1956,7 +1956,7 @@
     {
       "id": "ST-TEST-CHALK-REHEARSAL",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-AUTHORING",
         "ST-TEST-CHALK-AUTHORING"
@@ -1985,7 +1985,7 @@
     {
       "id": "ST-IMP-CHALK-REHEARSAL",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-AUTHORING",
         "ST-DES-CHALK-AUTHORING",
@@ -2018,7 +2018,7 @@
     {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-INT-NATIVE",
         "ST-INT-CLASSROOM-OPS"
@@ -2032,7 +2032,7 @@
     {
       "id": "ST-DES-CLASSROOM-ADMIN",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "rabqatab",
       "depends_on": [
         "ST-REQ-CLASSROOM-ADMIN"
       ],
@@ -2048,7 +2048,7 @@
     {
       "id": "ST-TEST-CLASSROOM-ADMIN",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-CLASSROOM-ADMIN"
       ],
@@ -2076,7 +2076,7 @@
     {
       "id": "ST-IMP-CLASSROOM-OPS",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-CLASSROOM-ADMIN",
         "ST-DES-CLASSROOM-ADMIN",
@@ -2476,7 +2476,7 @@
     {
       "id": "ST-DES-STUDIO-NATIVE-TRIAL-UX",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UX"
       ],
@@ -2492,7 +2492,7 @@
     {
       "id": "ST-TEST-STUDIO-NATIVE-TRIAL-UX",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "ico1036",
       "depends_on": [
         "ST-REQ-UX"
       ],
@@ -2505,7 +2505,7 @@
     {
       "id": "ST-REQ-CLASSROOM-DESIGN",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-INT-NATIVE",
         "ST-INT-CLASSROOM-OPS"
@@ -2519,7 +2519,7 @@
     {
       "id": "ST-DES-CLASSROOM-DESIGN",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-CLASSROOM-DESIGN"
       ],
@@ -2535,7 +2535,7 @@
     {
       "id": "ST-TEST-CLASSROOM-DESIGN",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "TJ-kr",
       "depends_on": [
         "ST-REQ-CLASSROOM-DESIGN"
       ],
@@ -2551,7 +2551,7 @@
     {
       "id": "ST-DES-CAPABILITY-MODEL-CONTRACT",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT"
       ],
@@ -2567,7 +2567,7 @@
     {
       "id": "ST-TEST-CAPABILITY-MODEL-CONTRACT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CAPABILITY-CONTRACT"
       ],
@@ -2580,7 +2580,7 @@
     {
       "id": "ST-REQ-INDEPENDENT-COURSE",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -2593,7 +2593,7 @@
     {
       "id": "ST-DES-INDEPENDENT-COURSE",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-INDEPENDENT-COURSE"
       ],
@@ -2609,7 +2609,7 @@
     {
       "id": "ST-TEST-INDEPENDENT-COURSE",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-INDEPENDENT-COURSE"
       ],
@@ -2622,7 +2622,7 @@
     {
       "id": "ST-REQ-WORK",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -2635,7 +2635,7 @@
     {
       "id": "ST-DES-WORK",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-WORK"
       ],
@@ -2648,7 +2648,7 @@
     {
       "id": "ST-IMP-WORK",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-DES-WORK"
       ],
@@ -2667,7 +2667,7 @@
     {
       "id": "ST-TEST-WORK",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-WORK"
       ],
@@ -2704,7 +2704,7 @@
     {
       "id": "ST-REQ-SX",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-SX",
         "ST-REQ-MEASUREMENT-CORE",
@@ -2724,7 +2724,7 @@
     {
       "id": "ST-DES-SX",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-SX"
       ],
@@ -2743,7 +2743,7 @@
     {
       "id": "ST-TEST-SX",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-SX",
         "ST-DES-SX"
@@ -2808,7 +2808,7 @@
     {
       "id": "ST-IMP-SX-P0",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-DES-SX",
         "ST-REQ-SX"
@@ -2877,7 +2877,7 @@
     {
       "id": "ST-IMP-SX-P1",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-DES-SX",
         "ST-REQ-SX",
@@ -2907,7 +2907,7 @@
     {
       "id": "ST-IMP-SX-P1B",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-DES-SX",
         "ST-REQ-SX",
@@ -2951,7 +2951,7 @@
     {
       "id": "ST-REQ-CR",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-INT-CR",
         "ST-REQ-SX",
@@ -2976,7 +2976,7 @@
     {
       "id": "ST-DES-CR",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CR"
       ],
@@ -2989,7 +2989,7 @@
     {
       "id": "ST-TEST-CR",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "xoqhdgh1002",
       "depends_on": [
         "ST-REQ-CR",
         "ST-DES-CR"
@@ -3006,7 +3006,7 @@
     {
       "id": "ST-REQ-MODULE-DISTRIBUTION",
       "stage": "requirement",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-STUDIO-SAFETY"
       ],
@@ -3020,7 +3020,7 @@
     {
       "id": "ST-TEST-MODULE-DISTRIBUTION",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-MODULE-DISTRIBUTION"
       ],
@@ -3042,7 +3042,7 @@
     {
       "id": "ST-IMP-MODULE-DISTRIBUTION",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JeHyeong2",
       "depends_on": [
         "ST-REQ-MODULE-DISTRIBUTION",
         "ST-TEST-MODULE-DISTRIBUTION"
