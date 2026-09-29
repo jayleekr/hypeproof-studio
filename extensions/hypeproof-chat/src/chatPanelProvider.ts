@@ -1,6 +1,7 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
 import { chalkToolsEnabled } from './chalk/tools';
+import { runInstructorTurn } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -3121,26 +3122,45 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
       const local = localRuntimeConfig(vscode.env.appName, proxyUrl);
       if (local) {
-        if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
-        if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
-        const cwd=this.resolveCoachCwd();
-        if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
-        // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
-        // #1298 (E4-3): final gate is server-verified whoami (isInstructor === true).
-        const chalkCtx = (await chalkToolsEnabled(this.context.secrets) && this._instructorMode.isInstructor === true)
-          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
-          : undefined;
-        const result=await runLocalCoach({config:local,profile,cwd,
-          history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
-          signal:ctrl.signal,onDelta,onActivity,chalkCtx,
-          // #1298 — pass instructor brief as system prompt override when in instructor mode.
-          ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
-          requestApproval:async action=>{
-            let prompted=false;
-            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
-            return {approved,actor:prompted?'user':'policy'};
-          }});
-        sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        if (this._instructorMode.isInstructor === true) {
+          // Instructor path — bypasses student token, ensureProfile, lesson gates, spool
+          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write only).
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+          const chalkCtx = (await chalkToolsEnabled(this.context.secrets))
+            ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+            : undefined;
+          const result=await runInstructorTurn({
+            local,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            brief:this._instructorMode.brief,
+            chalkCtx,
+            signal:ctrl.signal,onDelta,onActivity,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        } else {
+          if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
+          if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          const chalkCtx = undefined; // student local path never has instructor chalkCtx
+          const result=await runLocalCoach({config:local,profile,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            signal:ctrl.signal,onDelta,onActivity,chalkCtx,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        }
+      } else if (this._instructorMode.isInstructor === true) {
+        throw new Error('강사 채팅은 지금 내 Claude 구독 연결에서만 됩니다.');
       } else if (runtime === "agent-sdk") {
         if (!profile) {
           throw new Error(profileNotReadyNotice(this.coachDisplayName()));
@@ -3891,6 +3911,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         ...(isInstructor ? { isInstructor: true } : {}),
         ...(instructorBrief ? { instructorBrief } : {}),
         ...(instructorConnection ? { instructorConnection } : {}),
+        ...(isInstructor && local ? { instructorModelChoices: localModelSelection(local).choices } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight

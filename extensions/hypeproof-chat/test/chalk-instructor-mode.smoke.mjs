@@ -230,4 +230,59 @@ t("resolveInstructorTokenFromSecrets: only TOKEN_KEY present → undefined (stud
   assert.strictEqual(result, undefined, "student slot must not reach instructor auth path");
 });
 
+// --- runInstructorTurn policy ---
+console.log("=== runInstructorTurn — INSTRUCTOR_TOOL_PROFILE policy ===");
+
+t("runInstructorTurn: missing brief → throws '강사 지시문'", async () => {
+  const { runInstructorTurn } = await import("../src/chalk/instructorTurn.ts");
+  const local = { provider: "anthropic", model: "claude-opus-4-5", label: "Claude Opus" };
+  let threw = false;
+  try {
+    await runInstructorTurn({
+      local, cwd: "/tmp", history: [], userText: "안녕",
+      brief: undefined, chalkCtx: undefined,
+      signal: AbortSignal.abort(),
+      onDelta: () => {}, onActivity: undefined,
+      requestApproval: async () => false,
+    });
+  } catch (e) {
+    threw = e.message.includes("강사 지시문");
+  }
+  assert.ok(threw, "must throw with '강사 지시문' when brief is absent");
+});
+
+t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, shell/browser false", async () => {
+  // Import the module and extract the profile via a test-only export.
+  // instructorTurn.ts does not export INSTRUCTOR_TOOL_PROFILE directly, so we inspect
+  // it by stubbing runLocalCoach and capturing the profile argument.
+  const mod = await import("../src/chalk/instructorTurn.ts");
+  // We call runInstructorTurn with a stubbed runLocalCoach by patching the module's
+  // imported function. Since ESM bindings are live, we capture the profile from the
+  // error thrown by a signal-aborted stub instead.
+  let capturedProfile = null;
+  const localRuntime = await import("../src/localRuntime/index.ts");
+  const origRun = localRuntime.runLocalCoach;
+  localRuntime.runLocalCoach = async (args) => { capturedProfile = args.profile; throw new Error("stub"); };
+  try {
+    await mod.runInstructorTurn({
+      local: { provider: "anthropic", model: "claude-opus-4-5", label: "Claude Opus" },
+      cwd: "/tmp", history: [], userText: "hello",
+      brief: "강사 지시문 테스트",
+      chalkCtx: undefined,
+      signal: new AbortController().signal,
+      onDelta: () => {}, onActivity: undefined,
+      requestApproval: async () => false,
+    });
+  } catch {
+    // expected stub throw
+  } finally {
+    localRuntime.runLocalCoach = origRun;
+  }
+  assert.ok(capturedProfile, "profile must have been passed to runLocalCoach");
+  assert.strictEqual(capturedProfile.sdk_tools?.read, true, "read must be true");
+  assert.strictEqual(capturedProfile.sdk_tools?.write, true, "write must be true");
+  assert.strictEqual(capturedProfile.sdk_tools?.shell, undefined, "shell must be off (undefined)");
+  assert.strictEqual(capturedProfile.sdk_tools?.browser, undefined, "browser must be off (undefined)");
+});
+
 console.log(`\n${n} tests passed\n`);

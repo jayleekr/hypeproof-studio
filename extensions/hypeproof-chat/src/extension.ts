@@ -415,6 +415,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand("hypeproof-chat.forgetIssuerToken", async () => {
       await context.secrets.delete(ISSUER_TOKEN_KEY);
+      await provider.refreshConfig();
       vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
     }),
 

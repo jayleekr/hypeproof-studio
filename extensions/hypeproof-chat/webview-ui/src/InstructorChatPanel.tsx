@@ -83,7 +83,7 @@ export function InstructorChatPanel(props: Props) {
 
   // Surface model validation errors pushed by the host as config updates.
   // The host sets config.model back to the previous value on invalid input.
-  const choices = config?.profile?.model_selection?.choices ?? [];
+  const choices = config?.instructorModelChoices ?? config?.profile?.model_selection?.choices ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

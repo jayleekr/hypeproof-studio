@@ -546,7 +546,7 @@ export function ChatPanel(props: Props) {
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
   ) : null;
-  if (!config?.profile && !config?.activity) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  if (!config?.profile && !config?.activity && !config?.isInstructor) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <>
