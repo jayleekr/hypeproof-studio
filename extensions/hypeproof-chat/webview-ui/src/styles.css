@@ -15,7 +15,9 @@ html, body, #root {
 .hps-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* #1298 — 100vh breaks when ChatPanel is nested inside InstructorChatPanel's flex column;
+     the band gets cut off. 100% inherits from #root (height: 100%) and works in both cases. */
+  height: 100%;
 }
 
 /* ---------- Header ---------- */

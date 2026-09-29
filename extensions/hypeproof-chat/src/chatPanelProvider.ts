@@ -743,7 +743,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
   /** #751 native help — set by extension.ts. The provider only relays; the host adapter re-checks the learner on every call. */
   helpSource: import("./classroomHelpHost").ClassroomHelpHost | null = null;
-  postHelp(help: import("./classroomHelp").HelpView): void { void this.post({ type: "helpState", help }); }
+  // #1298 — called when the auto-read whoami path gets a rejected result (401/403).
+  // Extension sets this to delete the issuer token and show the student start page once.
+  onIssuerAutoRejected?: () => void;
+  postHelp(help: import("./classroomHelp").HelpView): void {
+    // #1298 — instructor has no student help-request surface; suppress even if ClassroomHelpHost pushes.
+    if (this._instructorMode.isInstructor) return;
+    void this.post({ type: "helpState", help });
+  }
   /** Shared with the start page: one rule for what a click on an instructor link may do. */
   async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
     const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
@@ -3888,6 +3895,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // Instructor auth always uses the issuer token slot, never the student token.
     const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
     const isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    // #1298 — on the auto-read path (postConfig/refresh), act on the whoami result.
+    // The setInstructorToken command has its own rejection handler; this covers the background refresh path.
+    if (issuerToken) {
+      const action = this._instructorMode.handleAutoReadResult();
+      if (action === "rejected_delete_and_show") {
+        this.onIssuerAutoRejected?.();
+      }
+    }
     const instructorBrief = (isInstructor && issuerToken)
       ? await this._instructorMode.fetchInstructorBrief(issuerToken, proxyUrl)
       : undefined;

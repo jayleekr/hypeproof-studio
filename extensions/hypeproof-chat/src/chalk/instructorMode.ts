@@ -54,6 +54,17 @@ export class InstructorModeManager {
     this._pendingPrevModelChoice = undefined;
   }
 
+  // Called after checkInstructorMode on the auto-read path (postConfig/refresh, not the setInstructorToken command).
+  // Returns what the caller should do based on the latest whoami result:
+  //   "rejected_delete_and_show" — token was rejected; delete it and show the student start page once.
+  //   "unreachable_keep"         — network failure; keep the token and do not show the start page.
+  //   "ok_noop"                  — whoami succeeded; instructor mode is active; do nothing.
+  handleAutoReadResult(): "rejected_delete_and_show" | "unreachable_keep" | "ok_noop" {
+    if (this._lastWhoamiStatus === "rejected") return "rejected_delete_and_show";
+    if (this._lastWhoamiStatus === "unreachable") return "unreachable_keep";
+    return "ok_noop";
+  }
+
   // Checks GET /admin/chalk/whoami with the current token.
   // Caches result per token so we don't hammer the server on every postConfig.
   // Sets lastWhoamiStatus: "ok" (2xx), "rejected" (401/403), or "unreachable" (network/timeout).

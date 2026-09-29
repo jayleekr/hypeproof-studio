@@ -123,7 +123,8 @@ export function InstructorChatPanel(props: Props) {
       </div>
 
       <div style={{ flex: 1, minHeight: 0 }}>
-        <ChatPanel {...props} />
+        {/* #1298 — instructor=true hides student-only surfaces (MissionHeader, HelpRequest, artifact approval). */}
+        <ChatPanel {...props} instructor={true} />
       </div>
     </div>
   );

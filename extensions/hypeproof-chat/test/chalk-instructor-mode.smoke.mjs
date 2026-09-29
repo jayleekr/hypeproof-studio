@@ -260,27 +260,28 @@ t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, shell/browser fal
   assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser, undefined, "browser must be off (undefined)");
 });
 
-// --- webview render guard (ChatPanel.tsx:549) ---
+// --- webview render guard (ChatPanel.tsx:551) ---
 // Verifies the boolean condition without DOM/React.
-// Reproduces the JY dev-review failure: instructor config (no profile, no activity)
-// was reaching DisconnectedChat before the !isInstructor guard was added.
-console.log("=== ChatPanel.tsx:549 — DisconnectedChat render guard ===");
+// #1298: now uses props.instructor (not config.isInstructor) so the guard works even when
+// the host has not yet pushed a config with isInstructor:true.
+console.log("=== ChatPanel.tsx:551 — DisconnectedChat render guard ===");
 
-function shouldShowDisconnected(config) {
-  return !config?.profile && !config?.activity && !config?.isInstructor;
+// Mirrors the condition at ChatPanel.tsx:551.
+function shouldShowDisconnected(config, instructor) {
+  return !config?.profile && !config?.activity && !instructor;
 }
 
-t("instructor config (no profile, isInstructor:true) → NOT DisconnectedChat", () => {
+t("instructor prop:true (no profile, no activity) → NOT DisconnectedChat", () => {
   assert.strictEqual(
-    shouldShowDisconnected({ profile: null, activity: null, isInstructor: true }),
+    shouldShowDisconnected({ profile: null, activity: null }, true),
     false,
     "instructor must not show DisconnectedChat"
   );
 });
 
-t("student config (no profile, no activity) → DisconnectedChat", () => {
+t("student (no profile, no activity, instructor:false) → DisconnectedChat", () => {
   assert.strictEqual(
-    shouldShowDisconnected({ profile: null, activity: null }),
+    shouldShowDisconnected({ profile: null, activity: null }, false),
     true,
     "student without profile must show DisconnectedChat"
   );
@@ -288,10 +289,37 @@ t("student config (no profile, no activity) → DisconnectedChat", () => {
 
 t("student config with activity → NOT DisconnectedChat", () => {
   assert.strictEqual(
-    shouldShowDisconnected({ profile: null, activity: { kind: "classroom", name: "test" } }),
+    shouldShowDisconnected({ profile: null, activity: { kind: "classroom", name: "test" } }, false),
     false,
     "activity presence must suppress DisconnectedChat"
   );
+});
+
+// --- handleAutoReadResult — startPage skip / delete-and-show logic ---
+// #1298: after a background whoami on the auto-read path, the extension must:
+//   rejected → delete issuer token + show start page once
+//   unreachable → keep token, no start page
+//   ok → no action
+console.log("=== InstructorModeManager.handleAutoReadResult ===");
+
+t("handleAutoReadResult: rejected → rejected_delete_and_show", async () => {
+  const mgr = new InstructorModeManager();
+  await withFetch(401, () => mgr.checkInstructorMode("issuer-token", PROXY));
+  assert.strictEqual(mgr.handleAutoReadResult(), "rejected_delete_and_show");
+});
+
+t("handleAutoReadResult: unreachable → unreachable_keep", async () => {
+  const mgr = new InstructorModeManager();
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("network"); };
+  try { await mgr.checkInstructorMode("issuer-token", PROXY); } finally { globalThis.fetch = origFetch; }
+  assert.strictEqual(mgr.handleAutoReadResult(), "unreachable_keep");
+});
+
+t("handleAutoReadResult: ok → ok_noop", async () => {
+  const mgr = new InstructorModeManager();
+  await withFetch(200, () => mgr.checkInstructorMode("issuer-token", PROXY));
+  assert.strictEqual(mgr.handleAutoReadResult(), "ok_noop");
 });
 
 // --- chalk_* tools included when chalkCtx present ---

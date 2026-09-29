@@ -199,6 +199,10 @@ export async function activate(context: vscode.ExtensionContext) {
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
+  // #1298 — when the background refresh path sees a rejected issuer token, delete it and surface the student start page.
+  provider.onIssuerAutoRejected = () => {
+    void context.secrets.delete(ISSUER_TOKEN_KEY).then(() => startPage.show());
+  };
   // #751 native help: the learner's help requests to the instructor of their live class connection (ADM-03/05, AT-47).
   // Drafts and requests live one file family per record under globalStorageUri (shared by every window; globalState is one
   // object per window and loses records written in two windows at once). globalState is only read to move the old store.
@@ -644,7 +648,15 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // The start surface owns connection and explicit course entry.
-  void startPage.show();
+  // #1298 — if an issuer-shaped token is already stored, the user is likely an instructor; skip the
+  // student start page automatically. If whoami later returns rejected the token is deleted and the
+  // start page is shown once (handled in postConfig/refresh via instructorMode.handleWhoamiRejected).
+  void (async () => {
+    const storedIssuer = await context.secrets.get(ISSUER_TOKEN_KEY);
+    if (!storedIssuer || !looksLikeIssuerTokenUnverified(storedIssuer)) {
+      startPage.show();
+    }
+  })();
 
   // E2E backdoor for REQ-E1/E2 manual-approve modal. Fires a synthetic
   // actionRequest after the panel mounts and writes the approve/deny result
