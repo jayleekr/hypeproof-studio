@@ -1,0 +1,474 @@
+{
+  "about": "CR-T01 negative-control inputs: the projection of docs/requirements/curriculum-runtime.md, docs/testing/curriculum-runtime.md, config/requirement-work.json and docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md that worker/test/cr-recon.test.mjs reads. Generated; regenerate with HPS_CR_RECON_FREEZE=1 while the recon page is being written.",
+  "requirements": [
+    "CR-01",
+    "CR-02",
+    "CR-03",
+    "CR-04",
+    "CR-05",
+    "CR-06",
+    "CR-07",
+    "CR-08",
+    "CR-09",
+    "CR-10",
+    "CR-11",
+    "CR-12",
+    "CR-13",
+    "CR-14",
+    "CR-15",
+    "CR-16",
+    "CR-17",
+    "CR-18",
+    "CR-19",
+    "CR-20",
+    "CR-21",
+    "CR-22",
+    "CR-23",
+    "CR-24",
+    "CR-25",
+    "CR-26",
+    "CR-27",
+    "CR-28",
+    "CR-29",
+    "CR-30",
+    "CR-31",
+    "CR-32",
+    "CR-33",
+    "CR-34",
+    "CR-35",
+    "CR-36",
+    "CR-37",
+    "CR-38",
+    "CR-39",
+    "CR-40",
+    "CR-41",
+    "CR-42",
+    "CR-43",
+    "CR-44",
+    "CR-45",
+    "CR-46",
+    "CR-47",
+    "CR-48",
+    "CR-49",
+    "CR-50",
+    "CR-51",
+    "CR-52",
+    "CR-53",
+    "CR-54",
+    "CR-55",
+    "CR-56",
+    "CR-57",
+    "CR-58",
+    "CR-59",
+    "CR-60",
+    "CR-61",
+    "CR-62",
+    "CR-63",
+    "CR-64",
+    "CR-65",
+    "CR-66",
+    "CR-67",
+    "CR-68",
+    "CR-69",
+    "CR-70",
+    "CR-71",
+    "CR-72",
+    "CR-73",
+    "CR-74",
+    "CR-75",
+    "CR-76",
+    "CR-77",
+    "CR-78",
+    "CR-79",
+    "CR-80",
+    "CR-81",
+    "CR-82",
+    "CR-83",
+    "CR-84"
+  ],
+  "tests": {
+    "CR-T01": [
+      "CR-01"
+    ],
+    "CR-T02": [
+      "CR-02"
+    ],
+    "CR-T03": [
+      "CR-03"
+    ],
+    "CR-T04": [
+      "CR-04"
+    ],
+    "CR-T05": [
+      "CR-05"
+    ],
+    "CR-T06": [
+      "CR-06"
+    ],
+    "CR-T07": [
+      "CR-07"
+    ],
+    "CR-T08": [
+      "CR-05",
+      "CR-08"
+    ],
+    "CR-T09": [
+      "CR-09"
+    ],
+    "CR-T10": [
+      "CR-10"
+    ],
+    "CR-T11": [
+      "CR-11"
+    ],
+    "CR-T12": [
+      "CR-12"
+    ],
+    "CR-T13": [
+      "CR-13"
+    ],
+    "CR-T14": [
+      "CR-14"
+    ],
+    "CR-T15": [
+      "CR-15"
+    ],
+    "CR-T16": [
+      "CR-16"
+    ],
+    "CR-T17": [
+      "CR-17"
+    ],
+    "CR-T18": [
+      "CR-18"
+    ],
+    "CR-T19": [
+      "CR-19"
+    ],
+    "CR-T20": [
+      "CR-20",
+      "CR-64"
+    ],
+    "CR-T21": [
+      "CR-21"
+    ],
+    "CR-T22": [
+      "CR-22"
+    ],
+    "CR-T23": [
+      "CR-23",
+      "CR-65"
+    ],
+    "CR-T24": [
+      "CR-24"
+    ],
+    "CR-T25": [
+      "CR-25"
+    ],
+    "CR-T26": [
+      "CR-26"
+    ],
+    "CR-T27": [
+      "CR-27"
+    ],
+    "CR-T28": [
+      "CR-28"
+    ],
+    "CR-T29": [
+      "CR-29"
+    ],
+    "CR-T30": [
+      "CR-30"
+    ],
+    "CR-T31": [
+      "CR-30",
+      "CR-31"
+    ],
+    "CR-T32": [
+      "CR-32"
+    ],
+    "CR-T33": [
+      "CR-33"
+    ],
+    "CR-T34": [
+      "CR-34"
+    ],
+    "CR-T35": [
+      "CR-35"
+    ],
+    "CR-T36": [
+      "CR-36"
+    ],
+    "CR-T37": [
+      "CR-37"
+    ],
+    "CR-T38": [
+      "CR-38"
+    ],
+    "CR-T39": [
+      "CR-40",
+      "CR-41",
+      "CR-42"
+    ],
+    "CR-T40": [
+      "CR-43"
+    ],
+    "CR-T41": [
+      "CR-44"
+    ],
+    "CR-T42": [
+      "CR-45"
+    ],
+    "CR-T43": [
+      "CR-46"
+    ],
+    "CR-T44": [
+      "CR-47"
+    ],
+    "CR-T45": [
+      "CR-48"
+    ],
+    "CR-T46": [
+      "CR-49"
+    ],
+    "CR-T47": [
+      "CR-50"
+    ],
+    "CR-T48": [
+      "CR-51",
+      "CR-52"
+    ],
+    "CR-T49": [
+      "CR-53"
+    ],
+    "CR-T50": [
+      "CR-54"
+    ],
+    "CR-T51": [
+      "CR-55"
+    ],
+    "CR-T52": [
+      "CR-56"
+    ],
+    "CR-T53": [
+      "CR-57"
+    ],
+    "CR-T54": [
+      "CR-58"
+    ],
+    "CR-T55": [
+      "CR-59"
+    ],
+    "CR-T56": [
+      "CR-60"
+    ],
+    "CR-T57": [
+      "CR-61"
+    ],
+    "CR-T58": [
+      "CR-62"
+    ],
+    "CR-T59": [
+      "CR-63"
+    ],
+    "CR-T60": [
+      "CR-65"
+    ],
+    "CR-T61": [
+      "CR-66"
+    ],
+    "CR-T62": [
+      "CR-67"
+    ],
+    "CR-T63": [
+      "CR-68"
+    ],
+    "CR-T64": [
+      "CR-69"
+    ],
+    "CR-T65": [
+      "CR-70"
+    ],
+    "CR-T66": [
+      "CR-71"
+    ],
+    "CR-T67": [
+      "CR-72"
+    ],
+    "CR-T68": [
+      "CR-73"
+    ],
+    "CR-T69": [
+      "CR-74"
+    ],
+    "CR-T70": [
+      "CR-75"
+    ],
+    "CR-T71": [
+      "CR-76"
+    ],
+    "CR-T72": [
+      "CR-77"
+    ],
+    "CR-T73": [
+      "CR-78"
+    ],
+    "CR-T74": [
+      "CR-79"
+    ],
+    "CR-T75": [
+      "CR-80"
+    ],
+    "CR-T76": [
+      "CR-81"
+    ],
+    "CR-T77": [
+      "CR-82"
+    ],
+    "CR-T78": [
+      "CR-83"
+    ],
+    "CR-T79": [
+      "CR-84"
+    ],
+    "CR-T80": [
+      "CR-39"
+    ]
+  },
+  "items": {
+    "cr-recon": [
+      "CR-01"
+    ],
+    "cr-browser": [
+      "CR-02",
+      "CR-03",
+      "CR-04",
+      "CR-05",
+      "CR-06",
+      "CR-07",
+      "CR-08",
+      "CR-09",
+      "CR-10",
+      "CR-11",
+      "CR-59",
+      "CR-60",
+      "CR-68"
+    ],
+    "cr-verify": [
+      "CR-02",
+      "CR-03",
+      "CR-11",
+      "CR-12",
+      "CR-13",
+      "CR-14",
+      "CR-15",
+      "CR-16",
+      "CR-61",
+      "CR-68",
+      "CR-81"
+    ],
+    "cr-publish": [
+      "CR-02",
+      "CR-11",
+      "CR-17",
+      "CR-18",
+      "CR-19",
+      "CR-20",
+      "CR-21",
+      "CR-22",
+      "CR-39",
+      "CR-64",
+      "CR-65",
+      "CR-66",
+      "CR-73"
+    ],
+    "cr-evidence": [
+      "CR-02",
+      "CR-23",
+      "CR-24",
+      "CR-25",
+      "CR-26",
+      "CR-27",
+      "CR-28",
+      "CR-65",
+      "CR-67",
+      "CR-69",
+      "CR-70",
+      "CR-72",
+      "CR-74"
+    ],
+    "cr-memory": [
+      "CR-02",
+      "CR-35",
+      "CR-36",
+      "CR-37",
+      "CR-38",
+      "CR-39",
+      "CR-40",
+      "CR-41",
+      "CR-42",
+      "CR-75",
+      "CR-76",
+      "CR-77",
+      "CR-78",
+      "CR-79",
+      "CR-82"
+    ],
+    "cr-skills": [
+      "CR-02",
+      "CR-43",
+      "CR-44",
+      "CR-45",
+      "CR-46",
+      "CR-47"
+    ],
+    "cr-gateway": [
+      "CR-02",
+      "CR-29",
+      "CR-30",
+      "CR-31",
+      "CR-32",
+      "CR-33",
+      "CR-34",
+      "CR-70",
+      "CR-80",
+      "CR-83",
+      "CR-84"
+    ],
+    "cr-review": [
+      "CR-02",
+      "CR-48",
+      "CR-49",
+      "CR-50",
+      "CR-51",
+      "CR-52",
+      "CR-53",
+      "CR-62"
+    ],
+    "cr-deck": [
+      "CR-02",
+      "CR-54",
+      "CR-55",
+      "CR-56",
+      "CR-57",
+      "CR-58",
+      "CR-63"
+    ],
+    "cr-e2e": [
+      "CR-02",
+      "CR-71"
+    ]
+  },
+  "phase0": [
+    "Embedded browser/webview implementation and upstream VS Code version.",
+    "Existing browser-agent capabilities inherited from or diverged from VS Code.",
+    "HTML artifact creation, serving, reload, and persistence flow.",
+    "Current model/provider invocation path.",
+    "Server/client credential boundary.",
+    "Workspace/project persistence model.",
+    "Existing publish/preview infrastructure.",
+    "Existing test framework, Playwright/browser automation, screenshot, console, or debug integration.",
+    "Existing skill/plugin/custom-mode abstractions.",
+    "Existing telemetry/usage accounting."
+  ]
+}

@@ -2983,6 +2983,9 @@
       "sources": [
         {
           "path": "docs/plan/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/plan/curriculum-runtime-recon.md"
         }
       ]
     },
@@ -3000,6 +3003,12 @@
         },
         {
           "path": "worker/test/cr-traceability.test.mjs"
+        },
+        {
+          "path": "worker/test/cr-recon.test.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/cdp-probe.mjs"
         }
       ]
     },

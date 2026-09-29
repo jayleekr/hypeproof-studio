@@ -2822,19 +2822,21 @@
       "negative_control": "A map entry with a non-existent path or symbol, a missing PRD area, or a CR row missing from the matrix fails CR-T01. A gap called new while an open PR already implements it is recorded as a finding.",
       "evidence_required": "Recorded origin/main SHA, the commands used to locate each symbol, the open PRs checked, the CR-T01 result, and what was not inspected.",
       "implementation_paths": [
+        "docs/plan/curriculum-runtime-recon.md",
         "docs/plan/curriculum-runtime.md",
-        "extensions/hypeproof-chat/src/browserControl.ts",
-        "extensions/hypeproof-chat/src/browserMcp.ts",
-        "extensions/hypeproof-chat/src/nativeBrowser.ts",
-        "extensions/hypeproof-chat/src/sdkCoachHelpers.ts",
-        "worker/src/routes",
-        "worker/src/lib/measurement-core"
+        "docs/testing/curriculum-runtime.md",
+        "worker/test/cr-recon.test.mjs",
+        "worker/test/fixtures/cr-recon/frozen-inputs.json",
+        "worker/package.json",
+        "e2e/curriculum-runtime"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/plan/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/plan/curriculum-runtime-recon.md",
+        "worker/test/cr-recon.test.mjs",
+        "worker/test/fixtures/cr-recon/frozen-inputs.json",
+        "e2e/curriculum-runtime/cdp-probe.mjs",
+        "e2e/curriculum-runtime/cdp-probe-extension/extension.js",
+        "e2e/curriculum-runtime/cdp-probe-extension/package.json"
       ]
     },
     {
@@ -2870,7 +2872,7 @@
       ],
       "curriculum_week": "W1",
       "next_action": "Behind the CR switch, extend BrowserControl.execute with select, scroll, hover and reload; buffer CDP console, exception and failed-request events per document generation; return URL, route, viewport and artifact version with every observation and expose them through browserMcp; add element selection that hands ref, DOM snippet, style, crop and source mapping to the coach; show the automation indicator while agent browser tools act; keep agent browser actions on the local preview origin (cr-verify extends CR-11 and CR-68 to the runner, cr-publish extends CR-11 to published test origins).",
-      "design_delta": "Extend the existing CDP stack and MCP tools; no second browser-control framework. Upstream browserView code is reached only through vscodium-base/patches, and only if cr-recon says so. Results bind to the artifact file-set digest that AE-37 (#557) uses instead of a new versioning scheme.",
+      "design_delta": "Extend the existing CDP stack and MCP tools; no second browser-control framework. The upstream browserView agent tools are not driven and vscodium-base is not patched (docs/plan/curriculum-runtime-recon.md R1). Results bind to the artifact version that recon R4 defines: the digest of the published file set. AE-37 (#557) binds single-file artifact events, and each file keeps the sha256 those events carry.",
       "positive_control": "Existing browser smokes and 09-preview.spec.ts stay green with the switch off; the kiosk fixture five-step flow succeeds; a clean page reports zero console records. Agent browser actions on the live-server origin run, with the automation indicator shown during each browser-tool step and gone after it.",
       "negative_control": "Stale refs after reload or navigation are rejected; a planted console error at step 3 is reported at step 3; an agent browser action navigating to an external origin is refused with a reason; an agent browser-tool step with no visible indicator fails; a CR surface visible with the switch off fails.",
       "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so. Timings name the machine and sample size. PRD §15 outputs for this slice: a manual demo procedure and the known limitations and risks.",
@@ -2885,8 +2887,7 @@
         "extensions/hypeproof-chat/webview-ui/src"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -2933,9 +2934,7 @@
         "worker/src/lib/measurement-core/learning-events.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -2982,8 +2981,7 @@
         "e2e/tests"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3032,8 +3030,7 @@
         "extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3084,9 +3081,7 @@
         "extensions/hypeproof-chat/src/localRecordFile.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3126,8 +3121,7 @@
         "worker/src/lib/session-design.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3186,8 +3180,7 @@
         "worker/src/prompts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3230,8 +3223,7 @@
         "extensions/hypeproof-chat/webview-ui/src"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3272,8 +3264,7 @@
         "worker/src/lib"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3316,9 +3307,7 @@
         "docs/testing/curriculum-runtime.md"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     }
   ]
