@@ -2577,7 +2577,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let preflightComplete=false;
     try {
     const connections=activityConnections(this.context);
-    if (connections) {
+    // Instructor mode has no student activity connection — skip the acquire/verify gate.
+    if (connections && !this._instructorMode.isInstructor) {
       releaseActivity=connections.acquire();
       const token=await connections.token();
       await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
