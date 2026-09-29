@@ -1,5 +1,27 @@
 # Studio behavioral requirements
 
+## Curriculum runtime proposal — 2026-09-29
+
+`REQ-STUDIO-CURRICULUM-RUNTIME`: Studio executes the AI for Good v5 loop
+(Problem → Hypothesis → Build → Test → Evidence → Decision → Product Change →
+Deck Change) with one HypeProof account. The embedded browser becomes an
+Experiment Browser the agent can observe and operate; "Test my product" verifies
+observable criteria against a specific artifact version; verified versions are
+published as immutable, revocable test links; participant events and notes become
+sourced evidence on the existing measurement-core store (SX-48, no second store);
+Venture Memory keeps hypotheses, experiments, decisions and versions; curriculum
+skills, a cached Weekly Review Pack and an evidence-aware HTML deck close the loop.
+Student apps call AI through capability names without provider keys; MU-02 stays,
+so there is no automatic cross-provider substitution. Source: HypeProof Studio
+Curriculum Runtime PRD v1.0 (2026-09-28).
+[Intent INT-CR-00–09](intents/curriculum-runtime.md),
+[CR-01–71 requirements](requirements/curriculum-runtime.md),
+[CR-T01–T66 validation](testing/curriculum-runtime.md),
+[plan, DAG and gap matrix](plan/curriculum-runtime.md),
+[epic #1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
+Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.
+New behaviour ships behind a switch that is off by default (CR-02).
+
 ## Learning experience revision — 2026-09-18
 
 `REQ-STUDIO-LEARNING-EXPERIENCE`: the student's default screen shows the current

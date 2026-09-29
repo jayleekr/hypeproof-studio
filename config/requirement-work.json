@@ -674,6 +674,88 @@
       "intent": "docs/intents/studio-learning-experience.md",
       "design": "docs/design/studio-learning-experience.md",
       "test": "docs/testing/studio-learning-experience.md"
+    },
+    {
+      "path": "docs/requirements/curriculum-runtime.md",
+      "ids": [
+        "CR-01",
+        "CR-02",
+        "CR-03",
+        "CR-04",
+        "CR-05",
+        "CR-06",
+        "CR-07",
+        "CR-08",
+        "CR-09",
+        "CR-10",
+        "CR-11",
+        "CR-12",
+        "CR-13",
+        "CR-14",
+        "CR-15",
+        "CR-16",
+        "CR-17",
+        "CR-18",
+        "CR-19",
+        "CR-20",
+        "CR-21",
+        "CR-22",
+        "CR-23",
+        "CR-24",
+        "CR-25",
+        "CR-26",
+        "CR-27",
+        "CR-28",
+        "CR-29",
+        "CR-30",
+        "CR-31",
+        "CR-32",
+        "CR-33",
+        "CR-34",
+        "CR-35",
+        "CR-36",
+        "CR-37",
+        "CR-38",
+        "CR-39",
+        "CR-40",
+        "CR-41",
+        "CR-42",
+        "CR-43",
+        "CR-44",
+        "CR-45",
+        "CR-46",
+        "CR-47",
+        "CR-48",
+        "CR-49",
+        "CR-50",
+        "CR-51",
+        "CR-52",
+        "CR-53",
+        "CR-54",
+        "CR-55",
+        "CR-56",
+        "CR-57",
+        "CR-58",
+        "CR-59",
+        "CR-60",
+        "CR-61",
+        "CR-62",
+        "CR-63",
+        "CR-64",
+        "CR-65",
+        "CR-66",
+        "CR-67",
+        "CR-68",
+        "CR-69",
+        "CR-70",
+        "CR-71"
+      ],
+      "inline_prefixes": [],
+      "sha256": "24ee278269cf807bfa387608eb76307a05f032d07ba575fe55f0fd3e1ad728f3",
+      "owner": "jayleekr",
+      "intent": "docs/intents/curriculum-runtime.md",
+      "design": "docs/plan/curriculum-runtime.md",
+      "test": "docs/testing/curriculum-runtime.md"
     }
   ],
   "work_items": [
@@ -2694,6 +2776,490 @@
       "positive_control": "리허설 모드 진입·학생 화면 체험·점검표 확인. 구독 토큰 발급·강의 열기.",
       "negative_control": "리허설 중 교사 칸 노출 없음. 구독 만료 후 강의 열기 거부.",
       "evidence_required": "제출 SHA·실행 명령·기대/관측. NOT RUN 은 NOT RUN 으로 적는다."
+    },
+    {
+      "id": "cr-recon",
+      "title": "Curriculum Runtime reconnaissance: architecture map and gap matrix",
+      "issue": 1390,
+      "kind": "design",
+      "feature_ids": [
+        "experiment-browser",
+        "ai-verify",
+        "user-test-publish",
+        "evidence-capture",
+        "venture-memory",
+        "curriculum-skills",
+        "weekly-review",
+        "ir-deck",
+        "models-usage"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-01"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "Read the ten PRD §13 Phase 0 areas on origin/main and write the architecture map (exact paths, symbols, extension points, data flows) and the per-row gap matrix into docs/plan/curriculum-runtime.md, replacing the provisional matrix. Decide whether the upstream browserView tools can be driven from hypeproof-chat through vscodium-base/patches and where the adapter boundary sits, how the CR switch (CR-02) is resolved, and which skill loader CR-43 uses.",
+      "design_delta": "No production code. Every claim names a path or symbol that exists at the recorded commit; unknowns stay unknown. Before calling a gap new, check the owners of the reused requirements (review-validity #557, publish-recovery #1018, sx-p1-evidence-capture #1172, measurement-core-dogfood #1020, model-routing #1009) and their open PRs.",
+      "positive_control": "Every map entry resolves to a path and symbol at the recorded commit; the matrix has one verdict (reuse / extend / new) for each of CR-01–71.",
+      "negative_control": "A map entry with a non-existent path or symbol, a missing PRD area, or a CR row missing from the matrix fails CR-T01. A gap called new while an open PR already implements it is recorded as a finding.",
+      "evidence_required": "Recorded origin/main SHA, the commands used to locate each symbol, the open PRs checked, the CR-T01 result, and what was not inspected.",
+      "implementation_paths": [
+        "docs/plan/curriculum-runtime.md",
+        "extensions/hypeproof-chat/src/browserControl.ts",
+        "extensions/hypeproof-chat/src/browserMcp.ts",
+        "extensions/hypeproof-chat/src/nativeBrowser.ts",
+        "extensions/hypeproof-chat/src/sdkCoachHelpers.ts",
+        "worker/src/routes",
+        "worker/src/lib/measurement-core"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md",
+        "docs/plan/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-browser",
+      "title": "Experiment Browser: observation, actions and element to AI",
+      "issue": 1391,
+      "kind": "implementation",
+      "feature_ids": [
+        "experiment-browser"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-02",
+            "CR-03",
+            "CR-04",
+            "CR-05",
+            "CR-06",
+            "CR-07",
+            "CR-08",
+            "CR-09",
+            "CR-10",
+            "CR-11",
+            "CR-59",
+            "CR-60",
+            "CR-68"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-recon"
+      ],
+      "next_action": "Behind the CR switch, extend BrowserControl.execute with select, scroll, hover and reload; buffer CDP console, exception and failed-request events per document generation; return URL, route, viewport and artifact version with every observation and expose them through browserMcp; add element selection that hands ref, DOM snippet, style, crop and source mapping to the coach; show the automation indicator; restrict runner origins.",
+      "design_delta": "Extend the existing CDP stack and MCP tools; no second browser-control framework. Upstream browserView code is reached only through vscodium-base/patches, and only if cr-recon says so. Results bind to the artifact file-set digest that AE-37 (#557) uses instead of a new versioning scheme.",
+      "positive_control": "Existing browser smokes and 09-preview.spec.ts stay green with the switch off; the kiosk fixture five-step flow succeeds; a clean page reports zero console records.",
+      "negative_control": "Stale refs after reload or navigation are rejected; a planted console error at step 3 is reported at step 3; an external origin is refused for the runner; a CR surface visible with the switch off fails.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so. Timings name the machine and sample size.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/browserControl.ts",
+        "extensions/hypeproof-chat/src/cdpSession.ts",
+        "extensions/hypeproof-chat/src/browserControlHelpers.ts",
+        "extensions/hypeproof-chat/src/browserMcp.ts",
+        "extensions/hypeproof-chat/src/nativeBrowser.ts",
+        "extensions/hypeproof-chat/src/liveServer.ts",
+        "extensions/hypeproof-chat/src/previewProvider.ts",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-verify",
+      "title": "AI Verify: test my product against observable criteria",
+      "issue": 1392,
+      "kind": "implementation",
+      "feature_ids": [
+        "ai-verify",
+        "review-results"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-03",
+            "CR-12",
+            "CR-13",
+            "CR-14",
+            "CR-15",
+            "CR-16",
+            "CR-61"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-browser"
+      ],
+      "next_action": "Add the 'Test my product' action that takes 1–5 criteria, runs them with the CR-06 actions (DOM and accessibility first), and writes an hps-verification/1 report through criterion_set / test_observed bound to the artifact version; hand failed criteria to the coach as a fix request and re-test by criterion ID.",
+      "design_delta": "The report is a view over existing learning events plus artifact references (SX-48); no new store. AI-proposed criteria stay AI-actor drafts until the student confirms (SX-14, HC-04). Stale-pass handling reuses AE-37 (#557).",
+      "positive_control": "Three student criteria on the kiosk fixture give the same verdicts on two runs of the same version; a failed criterion re-tested after a fix yields retest_confirmed.",
+      "negative_control": "Zero or six criteria are refused; an unconfirmed AI criterion does not run; a verdict without a cited observation is 'not verified'; an earlier pass shown as current after a file change fails.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/browserControl.ts",
+        "extensions/hypeproof-chat/src/browserMcp.ts",
+        "extensions/hypeproof-chat/src/nativeObservationRecorder.ts",
+        "extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx",
+        "worker/src/lib/measurement-core/learning-events.ts"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-publish",
+      "title": "Publish for user test: immutable versions, links and QR",
+      "issue": 1393,
+      "kind": "implementation",
+      "feature_ids": [
+        "user-test-publish"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-17",
+            "CR-18",
+            "CR-19",
+            "CR-20",
+            "CR-21",
+            "CR-22",
+            "CR-64",
+            "CR-65",
+            "CR-66"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-verify"
+      ],
+      "next_action": "Read galleryPublish.ts, the Lab /api/gallery/publish route and publish-recovery #1018, then generalise that path to publish a chosen verified version as a content-addressed test version with share URL, client-side QR, revocation, required expiry, anonymous participant sessions and project / experiment / version attribution.",
+      "design_delta": "One publish path, not a second one beside gallery publish; WEB-07/08 stay with #1018. Test versions are immutable and keyed by digest; experiments pin a version. Until Jay sets a default expiry, publishing requires an explicit one. The published runtime denies microphone and camera unless the experiment declares them. Lab-side changes go in a separate Lab PR linked from #1393.",
+      "positive_control": "Same bytes publish to the same version ID; a phone (emulated, and one real) opens the link at 390 px without login; publishing v1 leaves the running v0 experiment on v0.",
+      "negative_control": "Changing files behind a published version is refused; a revoked or expired link answers 410 with no content; an event whose version is not the experiment's is refused; an undeclared page calling getUserMedia is denied.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/galleryPublish.ts",
+        "worker/src/routes",
+        "worker/migrations",
+        "e2e/tests"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-evidence",
+      "title": "Evidence capture: participant events, notes and sourced drafts",
+      "issue": 1394,
+      "kind": "implementation",
+      "feature_ids": [
+        "evidence-capture"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-23",
+            "CR-24",
+            "CR-25",
+            "CR-26",
+            "CR-27",
+            "CR-28",
+            "CR-65",
+            "CR-67",
+            "CR-69",
+            "CR-70"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-publish"
+      ],
+      "next_action": "Add a lightweight event snippet to published test versions for the six participant event kinds and store them as learning events on the existing measurement-core path with source_state real and the anonymous session ID; add the five manual record kinds with provenance; build Observed / Interpreted / Assumed / Next drafts whose observed statements must resolve their source_refs.",
+      "design_delta": "SX-48: extend hps-observation/1 and learning-events; no new table, KV namespace, validator copy or scorer. Raw records are immutable; interpretation edits are revisions (MC-22). Raw participant input is not retained unless the experiment declares it, and its retention default waits for Jay. Deletion propagates to derived drafts following MC-31 and classroom-erasure.ts.",
+      "positive_control": "One scripted participant session yields the six kinds; three real citations validate; editing an interpretation leaves raw hashes unchanged; clicking a claim opens its sources.",
+      "negative_control": "Three planted fabricated statements are refused; events for a revoked version and events with identity fields are refused; typed text for an undeclared experiment is not stored; a store-inventory check finds no new evidence table.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "worker/src/lib/measurement-core",
+        "worker/src/lib/classroom-erasure.ts",
+        "extensions/hypeproof-chat/src/nativeObservationRecorder.ts",
+        "extensions/hypeproof-chat/src/sessionSpool.ts",
+        "extensions/hypeproof-chat/src/evidenceSnapshot.ts",
+        "extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-memory",
+      "title": "Venture Memory: structured learning state",
+      "issue": 1395,
+      "kind": "implementation",
+      "feature_ids": [
+        "venture-memory"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-35",
+            "CR-36",
+            "CR-37",
+            "CR-38",
+            "CR-39",
+            "CR-40",
+            "CR-41",
+            "CR-42"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-evidence"
+      ],
+      "next_action": "Implement the PRD §10 Experiment, Evidence item, Decision and Artifact contracts and the project entity set as a worker schema extension that links hypotheses, experiments, evidence (by reference), decisions, product versions and deck slides, with a director traversal API limited to the director's scope.",
+      "design_delta": "Observations and evidence items are references into the measurement-core store, never copies (SX-48). Extend hps-session-design/1 conventions without changing its schema ID unless Jay approves a breaking change. Director scope reuses the issuer identity (SX-38); no new role.",
+      "positive_control": "The four PRD §10 samples validate; a project reopened with chat history deleted shows the same state; a director walks hypothesis → evidence → decision → version.",
+      "negative_control": "Each sample missing a required field is refused; an observed evidence item with empty source_refs, slide number 9 and an artifact without entry_html are refused; a director outside scope is refused; a duplicated evidence table fails the store inventory.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "worker/src/lib/session-design.ts",
+        "worker/src/lib/measurement-core",
+        "worker/migrations",
+        "worker/src/routes",
+        "extensions/hypeproof-chat/src/localReviewService.ts",
+        "extensions/hypeproof-chat/src/localRecordFile.ts"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-skills",
+      "title": "Curriculum skills: contract, loader and seven skills",
+      "issue": 1396,
+      "kind": "implementation",
+      "feature_ids": [
+        "curriculum-skills"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-43",
+            "CR-44",
+            "CR-45",
+            "CR-46",
+            "CR-47"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-memory"
+      ],
+      "next_action": "With the loader cr-recon chose, read versioned skill contracts and curriculum v5 data, validate outputs before write-back, and ship Experiment, Evidence, Product Builder and Deck Builder first, then Interview, Critic and Demo Coach.",
+      "design_delta": "No parallel plugin framework. Skill loading must not let workspace settings add tool allow-rules (the SDK coach keeps settingSources: [] or an equivalent restriction). Curriculum content is data, never code (SX-56). Skill outputs and gateway calls carry skill ID and version.",
+      "positive_control": "A complete skill contract loads; valid Evidence output writes only its declared targets; planted-answer fixtures give the expected outputs.",
+      "negative_control": "A skill missing a contract field is not loaded; invalid output writes nothing; a workspace allow-rule has no effect; planted leading questions, weak claims, out-of-scope file changes and unaffected-slide edits are caught.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/sdkCoachHelpers.ts",
+        "worker/src/lib/lesson-help-mode.ts",
+        "worker/src/prompts",
+        "worker/src/lib/session-design.ts"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-gateway",
+      "title": "AI Gateway for student apps: capabilities, ceiling and attribution",
+      "issue": 1397,
+      "kind": "implementation",
+      "feature_ids": [
+        "models-usage",
+        "budget-settlement"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-29",
+            "CR-30",
+            "CR-31",
+            "CR-32",
+            "CR-33",
+            "CR-34",
+            "CR-70"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-memory"
+      ],
+      "next_action": "Add a student-app endpoint on the worker with app-scoped tokens and origin-bound CORS, a capability → model policy table, a normalised adapter interface with a mock adapter, a hard credit ceiling on the existing budget admission, and attribution by organisation, cohort, team, student, project, skill, capability and provider/model.",
+      "design_delta": "Adapt the existing /v1/chat/completions and /v1/messages stack, budgets and ledgers instead of a new gateway. MU-02 stays: same-provider retry of the mapped model only before output, every attempt metered; no automatic substitution to another provider or an unmapped model; failures are typed errors. The model-practice route keeps MU-02's single upstream call. Admin ceilings reuse AB-04 authorisation.",
+      "positive_control": "The kiosk app calls text.fast from its published origin without a key; the same request passes through a recorded real adapter and the mock with one shape; requests up to the ceiling succeed with full attribution.",
+      "negative_control": "A planted key pattern in a bundle is found; a token from another origin is refused; a model ID in a request is refused; after a mapped-provider failure a spy sees zero calls to another provider; the request past the ceiling gets 429 with no upstream call; 20 concurrent requests do not overshoot.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "worker/src/routes/chat.ts",
+        "worker/src/routes/messages.ts",
+        "worker/src/routes/access.ts",
+        "worker/src/env.ts",
+        "worker/src/lib/budgets.ts",
+        "worker/src/lib/budget-admission.ts",
+        "worker/src/lib/usage-costs.ts",
+        "worker/src/lib/model-usage.ts",
+        "worker/src/lib/access-contracts.ts",
+        "worker/src/lib/lesson-model-policy.ts",
+        "worker/src/lib/model-caps.ts"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-review",
+      "title": "Weekly Review Pack and director decisions",
+      "issue": 1398,
+      "kind": "implementation",
+      "feature_ids": [
+        "weekly-review"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-48",
+            "CR-49",
+            "CR-50",
+            "CR-51",
+            "CR-52",
+            "CR-53",
+            "CR-62"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-skills"
+      ],
+      "next_action": "Follow the classroom-report pattern to build a per-team pack with the ten PRD sections from structured evidence, cache the latest valid pack keyed by an input digest, add 'Prepare Weekly Review' and section-level regeneration, let the director record a decision and next experiment that write back to Venture Memory, and add the four-team overview.",
+      "design_delta": "Reuse classroom-report, classroom-evaluator and classroom-report-html rather than a second report engine. Opening a pack never calls a model; stale packs open marked stale. Claims link to sources and interpretation stays apart, reading only the existing store (SX-48).",
+      "positive_control": "The Week 2 fixture yields ten sections with linked claims; opening the cached pack makes zero model calls; the director's decision and next experiment appear in memory after reopen.",
+      "negative_control": "An unlinked factual claim fails; changing one evidence item regenerates only the sections that read it; any model call on open fails; another cohort's team never appears in the overview.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "worker/src/lib/classroom-report.ts",
+        "worker/src/lib/classroom-evaluator.ts",
+        "worker/src/lib/classroom-report-html.ts",
+        "worker/src/routes",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-deck",
+      "title": "HTML IR deck: slide state and evidence-aware patches",
+      "issue": 1399,
+      "kind": "implementation",
+      "feature_ids": [
+        "ir-deck"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-54",
+            "CR-55",
+            "CR-56",
+            "CR-57",
+            "CR-58",
+            "CR-63"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-review"
+      ],
+      "next_action": "Store the eight v5 slides as structured state rendered to HTML in the embedded browser, let the Deck Builder propose per-slide patches with evidence refs, flag unsupported numbers, and add per-slide accept / reject and a change view that shows which claims changed and why.",
+      "design_delta": "State and render are separate; editing rendered HTML never changes state. Patches touch affected slides only. Numbers without evidence refs are flagged and simulated numbers are labelled (SX-46, SX-58). Export stays out of scope.",
+      "positive_control": "The fixture deck renders the eight titles verbatim; the Week 2 fixture yields patches for slides 2–3 only; accepting slide 2 changes only slide 2.",
+      "negative_control": "Four planted unsupported numbers yield four flags; a rejected patch leaves state byte-identical; any proposal outside slides 2–3 for the Week 2 fixture fails.",
+      "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/previewProvider.ts",
+        "extensions/hypeproof-chat/src/liveServer.ts",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src/lib"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
+    },
+    {
+      "id": "cr-e2e",
+      "title": "Curriculum Runtime Week 1 to Week 2 end-to-end loop",
+      "issue": 1400,
+      "kind": "validation",
+      "feature_ids": [
+        "experiment-browser",
+        "ai-verify",
+        "user-test-publish",
+        "evidence-capture",
+        "venture-memory",
+        "curriculum-skills",
+        "weekly-review",
+        "ir-deck"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md",
+          "ids": [
+            "CR-02",
+            "CR-71"
+          ]
+        }
+      ],
+      "depends_on": [
+        "cr-deck"
+      ],
+      "next_action": "Script the fifteen PRD §14 steps on the kiosk-practice app under e2e/classroom, run it on the dev host, then run it once live on a real Mac with a real phone and record the evidence file.",
+      "design_delta": "Uses only shipped CR behaviour behind the switch; no test-only shortcuts in product code. Each step reads the previous step's record. The existing preview and HTML regressions are re-run with the switch off.",
+      "positive_control": "All fifteen steps pass on the dev host; the live run completes with a real phone; the switch-off regressions stay green.",
+      "negative_control": "A planted break between steps 8 and 10 stops the loop at step 10; a live-run step satisfied only by synthetic data is NOT RUN, not PASS.",
+      "evidence_required": "Submitted SHA · app build and machine · phone model and browser · per-step result with evidence class · the live-host run recorded in docs/testing/curriculum-runtime-<date>-evidence.md · NOT RUN list.",
+      "implementation_paths": [
+        "e2e/classroom",
+        "e2e/tests",
+        "docs/testing/curriculum-runtime.md"
+      ],
+      "verification_inputs": [
+        "docs/requirements/curriculum-runtime.md",
+        "docs/testing/curriculum-runtime.md"
+      ]
     }
   ]
 }

@@ -1,0 +1,237 @@
+# Curriculum Runtime verification contract
+
+Status: **CR-T01–T66 all NOT RUN.** 2026-09-29. Owner: jayleekr.
+Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–71](../requirements/curriculum-runtime.md) · plan: [curriculum-runtime](../plan/curriculum-runtime.md). Layer and command canon: [05-testing-requirements](../dev/05-testing-requirements.md). Judgment discipline: [.claude/rules/verification.md](../../.claude/rules/verification.md) — open the target before writing a verdict rule, run the controls before the real run, and rule out the instrument before blaming the product.
+
+This document **defines** checks. A check written here is not a check that ran. Every row starts NOT RUN; run records go to a separate evidence file (`docs/testing/curriculum-runtime-<date>-evidence.md`) with commit, environment, evidence class (live-host / captured-replay / synthetic, MC-38), expected and observed, PASS / FAIL / NOT RUN / BLOCKED. Passing unit tests of an existing feature is not a PASS for a CR row. File names below are proposals; the implementing PR fixes them after reading the code it tests.
+
+Every row has a positive control (a sample that must pass, to catch an instrument that is too strict) and a negative control (a planted defect that must fail, to catch an instrument that is too lenient). If a control misbehaves in a run, every verdict of that run is void.
+
+## Layers
+
+| Layer | What it measures | Command (existing pattern) |
+|---|---|---|
+| unit | Pure helpers: validators, contracts, gates, patch scoping, planted-answer checks | `cd worker && node --experimental-strip-types test/<name>.test.mjs` · `cd extensions/hypeproof-chat && node --experimental-strip-types test/<name>.smoke.mjs` |
+| worker D1 | Service routes and tables on local workerd/D1 (publish, events, gateway, memory, review cache) | `cd worker && npm run test:<suite>:d1` (pattern of `test:classroom-ops:d1`) |
+| extension smoke | `BrowserControl` / CDP against a fixture page, element capture, tool contracts | `cd extensions/hypeproof-chat && npm test` (pattern of `browser-control-helpers.smoke.mjs`, `live-server.smoke.mjs`) |
+| Playwright e2e | Real Electron app, webview, commands, screens, mobile emulation for the published runtime | `cd e2e && npm test` · one spec: `npx playwright test tests/<name>.spec.ts` (pattern of `09-preview.spec.ts`) |
+| real-Mac | Installed or dev-host Studio on a reference Mac; timings; the end-to-end loop | `node e2e/classroom/<name>.mjs` (pattern of `mac-devhost.mjs`, `g4-journey.mjs`) |
+| real phone | A physical phone opening a published link | manual, recorded in the evidence file |
+| doc check | Registry and recon documents | `cd worker && node --experimental-strip-types test/cr-traceability.test.mjs` (registry trace; runs in `npm test`) |
+
+The registry trace itself (every CR row has a CR-T that lists it, every CR-T is referenced, every reuse ID resolves) is `worker/test/cr-traceability.test.mjs`. It is a gate on these documents, not a CR-T row.
+
+## A. Reconnaissance and cross-cutting
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T01 | doc check | The recon map covers the ten PRD §13 areas, each entry names a path and symbol that exist at the map's commit, and the gap matrix has one verdict (reuse / extend / new) per CR row. | The committed map passes on its own commit. | A map entry with a non-existent path, a missing area, or a CR row absent from the matrix fails. | CR-01 |
+| CR-T02 | Playwright e2e | With the switch off, no CR command, panel, tool or route is reachable and the existing preview and HTML generation specs stay green; with it on, the CR surfaces appear. | `09-preview.spec.ts` and the HTML generation specs pass with the switch off. | A fixture build that registers a CR command regardless of the switch is caught. | CR-02 |
+| CR-T03 | unit | Browser-tool and verify-runner modules import no provider SDK and exchange plain data; the same tool call runs through the SDK and proxy coach adapters. | The same five-call script gives identical tool results through both adapters. | A planted `@anthropic-ai/sdk` import in the runner module is reported. | CR-03 |
+
+## B. Experiment Browser
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T04 | extension smoke | Observation on a fixture page returns URL, route, semantic snapshot with refs, screenshot and viewport, tagged with document generation. | Fixture with known title, route and three buttons yields those refs and the set viewport. | After navigation, a ref from the old generation is rejected. | CR-04 |
+| CR-T05 | extension smoke | Console, uncaught exception and failed request of the fixture are captured per document generation. | A fixture that logs one `console.error`, throws once and fetches a 404 yields exactly three records. | A clean fixture yields zero records; records from the previous document are not attributed to the new one. | CR-05 |
+| CR-T06 | extension smoke | `select`, `scroll`, `hover`, `reload` join the existing actions; every action returns the resulting observation. | Each action changes a fixture DOM state the next observation shows. | A stale ref after reload is rejected; an unknown action name returns an explicit error. | CR-06 |
+| CR-T07 | Playwright e2e | An agent-driven five-step flow on the kiosk-practice fixture app reaches the final state using CR-06 actions only. | Unmodified fixture: five steps succeed, final order screen shown. | Planted disabled button at step 4: the flow reports failure at step 4, not success. | CR-07 |
+| CR-T08 | Playwright e2e | A console error raised during step 3 of the flow is reported with the step index. | Planted error at step 3 is reported once, at step 3. | The unmodified fixture reports no failure (no false positive). | CR-05, CR-08 |
+| CR-T09 | Playwright e2e | Selecting a rendered element produces a context payload with ref, bounded DOM snippet, computed style subset, element screenshot and source mapping or "unmapped"; the student can remove it before sending. | Selecting the order button yields its ref and a mapping to the file that defines it. | A payload whose ref differs from the selected element fails; an inline-generated element yields "unmapped", never a guessed file. | CR-09 |
+| CR-T10 | unit | Every browser result carries artifact version ID and file-set digest; after a file change older results are labelled with their version. | Result taken on v0 stays readable and labelled v0 after v1. | A result without an artifact version is refused. | CR-10 |
+| CR-T11 | extension smoke | The runner may act on the local preview and the project's published origins only. | Steps on the live-server origin and a published test origin run. | A runner step navigating to an external origin is refused with a reason. | CR-11 |
+
+## C. AI Verify
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T12 | Playwright e2e | "Test my product" accepts 1–5 criteria; student-written criteria are stored with the student actor; AI-proposed criteria wait for confirmation. | Three typed criteria start a run and appear as `criterion_set` with student text. | Zero or six criteria are refused; an unconfirmed AI-proposed criterion does not start a run and is never stored as the student's. | CR-12 |
+| CR-T13 | unit | The verification report validator and its persistence through existing learning events. | A report with the PRD §6 fields plus `steps` validates and round-trips through `criterion_set` / `test_observed`. | Missing `artifact_version_id`, `tested_at` or `steps` is refused; a store-inventory check catches any new table or KV namespace. | CR-13 |
+| CR-T14 | Playwright e2e | Same criteria, same version, same viewport give the same verdicts; a file, criterion or viewport change marks the earlier verdict "re-check needed". | Two runs on v0 give identical per-criterion verdicts. | After editing a file, showing the earlier pass as current fails. | CR-14 |
+| CR-T15 | unit | Each verdict cites steps and an observation; vision is used only for criteria marked visual and is labelled. | A pass citing a snapshot ref and a fail citing a console record validate. | A verdict with no cited observation is downgraded to "not verified"; an unlabelled vision verdict is refused. | CR-15 |
+| CR-T16 | Playwright e2e | A failed criterion becomes a fix request linked to the report, and the re-test runs the same criterion ID. | Fix then re-test of criterion 2 yields `retest_confirmed` for criterion 2. | Re-testing a different criterion yields no `retest_confirmed`. | CR-16 |
+
+## D. Publish for User Test
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T17 | worker D1 | Publish creates a content-addressed immutable test version. | Publishing the same bytes twice returns the same version ID. | An attempt to replace a file behind a published version is refused. | CR-17 |
+| CR-T18 | Playwright e2e | The share URL and QR open the product at 390 px with no login (mobile emulation). | The decoded QR equals the share URL and renders without a login screen. | A link variant that redirects to login fails. | CR-18 |
+| CR-T19 | worker D1 | Revoked and expired links answer 410 with no content; live links answer 200. | Before expiry and before revocation the link serves the version. | After revocation the link, including any cached path, serves no content. | CR-19 |
+| CR-T20 | real-Mac + real phone | Publish action to published version under 10 s; publish action to first render on a second device under 60 s. | Recorded timings on the reference Mac and phone with sample size and p50/p95. | A planted slow upload shows as a recorded miss with its cause, not as a pass. | CR-20, CR-64 |
+| CR-T21 | worker D1 | Every participant session and event carries project, experiment and version. | Events from the published v0 carry the three IDs of their experiment. | An event whose version is not the experiment's is refused. | CR-21 |
+| CR-T22 | worker D1 | Publishing v1 while an experiment on v0 runs leaves the experiment on v0. | Participants of the running experiment keep getting v0 and their events stay attributed to v0. | A link of the running experiment that starts serving v1 fails. | CR-22 |
+
+## E. Evidence Capture
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T23 | worker D1 | Six participant event kinds under an anonymous session ID with `source_state` real, stored through the existing learning-event store. | One scripted participant session produces all six kinds with a random session ID and no identity fields. | Events for a revoked version are refused; an event carrying a name or e-mail field is refused; the store inventory shows no new evidence table. | CR-23, CR-65 |
+| CR-T24 | unit | Five manual record kinds with kind-specific provenance and `source_state`; KO/EN text kept verbatim. | An interview note with speaker, date and situation validates; mixed Korean/English text round-trips unchanged. | A record without provenance or `source_state` is refused. | CR-24 |
+| CR-T25 | unit | Evidence drafts keep the four sections as separate types and refuse unresolvable observed statements (planted answers). | A draft whose three observed statements cite real event and note IDs validates. | Three planted fabricated statements (missing ID, other project's ID, deleted ID) are refused — exactly three. | CR-25 |
+| CR-T26 | unit | Accept / edit / reject creates interpretation revisions; raw record bytes are unchanged. | Editing an interpretation adds a revision; raw record hashes are identical before and after. | A code path that rewrites a raw note during an edit is caught by the hash comparison. | CR-26 |
+| CR-T27 | Playwright e2e | Clicking an observed claim opens its source sessions and notes. | Clicking the "2 of 3 paused" claim opens the three session records it cites. | A claim whose reference no longer resolves shows "needs review". | CR-27 |
+| CR-T28 | unit | The review input builder reads evidence items, not chat history. | A project with evidence items yields review claims citing them. | A project with only chat history yields "no evidence recorded" and no claims. | CR-28 |
+
+## F. HypeProof AI Gateway
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T29 | worker D1 + unit | The student-app endpoint with an app-scoped token and origin-bound CORS; the generated app bundle carries no provider key. | The kiosk-practice app calls `text.fast` from its published origin and gets an answer. | A provider-key pattern planted in a bundle is found by the scan; the same token from another origin or app is refused. | CR-29 |
+| CR-T30 | unit | Capability requests map to the policy's model with the mapping revision recorded; model IDs and unmapped capabilities are explicit errors. | `text.fast` resolves to the policy model and the call record names the policy revision. | A request naming a model ID is refused; `image.generate` with no mapping returns an explicit error, not a silent text answer. | CR-30 |
+| CR-T31 | unit | One normalised request through a recorded real-adapter fixture and a mock adapter gives the same normalised shape. | Both adapters return the same fields for the same request. | An adapter returning a provider-specific shape fails the contract. | CR-31 |
+| CR-T32 | unit | Retry policy: one same-model retry for a transient failure before output, every attempt metered; no other provider; typed error. | A 503 before any output is retried once on the same model and both attempts are metered. | After partial stream output there is no retry; with the mapped provider down, a spy records zero calls to any other provider and the caller gets a typed error. | CR-32 |
+| CR-T33 | worker D1 | Hard ceiling with atomic reservation; predictable 429. | Requests up to the ceiling succeed. | The next request gets 429 with a reason code and no upstream call; 20 concurrent requests at the edge do not overshoot; an unconfigured ceiling blocks. | CR-33 |
+| CR-T34 | worker D1 | Usage rows carry organisation, cohort, team, student, project, skill, capability and provider/model on existing ledgers. | A skill-issued call produces one row with all eight dimensions. | The same attempt counted in two ledgers fails; a missing dimension recorded as a guess instead of unknown fails. | CR-34 |
+
+## G. Venture Memory
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T35 | worker D1 | Memory entities and links; observations and evidence items by reference into the existing store. | A project with hypothesis → experiment → evidence → decision → version → slide round-trips. | A store-inventory check catches a duplicated evidence or observation table. | CR-35 |
+| CR-T36 | Playwright e2e | Reopening a project reconstructs learning state without chat history. | Close, delete chat history, reopen: the same hypotheses, experiments, decisions and versions appear. | A reconstruction that changes when chat history is removed fails. | CR-36 |
+| CR-T37 | worker D1 | Director traversal hypothesis → evidence → decision → version within scope. | A director reads the chain for a directed team. | A director reading another cohort's team is refused. | CR-37 |
+| CR-T38 | unit | Decisions link evidence and affected slides and record their actor. | A student decision with two evidence refs and slides 2–3 validates. | A dangling evidence ref is refused; an AI-actor decision is never rendered as the team's decision. | CR-38 |
+| CR-T39 | unit | Validators for the Experiment, Evidence item, Decision and Artifact contracts of PRD §10. | The four PRD §10 samples validate. | Each sample with one required field removed is refused; an observed evidence item with empty `source_refs`, a slide number 9 and an artifact without `entry_html` are refused. | CR-39, CR-40, CR-41, CR-42 |
+
+## H. Curriculum Skills
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T40 | unit | The skill loader requires the eight contract fields and cannot be used to widen tool permissions. | The Experiment skill with all eight fields loads. | A skill missing `output schema` is not loaded; a workspace settings file adding an allow-rule has no effect. | CR-43 |
+| CR-T41 | unit | Output validation gates write-back to the declared targets. | Valid Evidence skill output writes only its declared targets. | Invalid output writes nothing and returns an explicit error. | CR-44 |
+| CR-T42 | unit | Curriculum v5 and the skill registry are data; outputs and gateway calls carry skill ID and version. | The v5 data file validates and a skill output carries `skill@version`. | A week string planted in extension source is caught by the scan. | CR-45 |
+| CR-T43 | unit | First four skills against fixtures with planted answers. | Product Builder's plan touches only files tied to the fixture evidence; Deck Builder patches only the affected slides. | Planted out-of-scope file changes and unaffected-slide edits are each caught. | CR-46 |
+| CR-T44 | unit | Interview, Critic and Demo Coach against fixtures with planted answers. | Interview output for the fixture has only open questions. | Planted leading questions, planted weak claims and one planted unsupported demo claim are each caught. | CR-47 |
+
+## I. Weekly Review Pack
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T45 | unit | The pack builder emits ten sections with source links for factual claims and interpretation apart. | The Week 2 fixture yields ten sections, each factual claim linked. | A factual claim without a source link fails. | CR-48 |
+| CR-T46 | worker D1 | Staleness by input digest and section-only regeneration. | Changing one evidence item marks only the sections that read it stale; regeneration calls the model once per stale section. | Regenerating an unchanged section, or presenting a stale pack as current, fails. | CR-49 |
+| CR-T47 | worker D1 | Opening the latest valid pack makes zero model calls. | A spy on the gateway records zero calls when the pack opens. | A stale pack opens with its stale marking and still makes zero calls; any call fails. | CR-50 |
+| CR-T48 | Playwright e2e | The director records decision and next experiment on the review screen and both write back to memory. | After reopening, the Decision (director actor, evidence linked) and the Experiment draft exist. | A decision stored without a director actor, or missing after reopen, fails. | CR-51, CR-52 |
+| CR-T49 | worker D1 | Four-team overview with fresh / stale / missing and no model calls. | Four fixture teams show their three states correctly. | A team from another cohort appears, or a model call occurs, and fails. | CR-53 |
+
+## J. HTML IR Deck Runtime
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T50 | unit + Playwright e2e | Eight-slide v5 state rendered to HTML in the embedded browser. | The fixture deck renders the eight titles verbatim from state. | Editing the rendered HTML does not change the state; the next render restores it. | CR-54 |
+| CR-T51 | unit | Unsupported and simulated numbers are flagged (planted answers). | Numbers with evidence refs are not flagged. | Four planted numbers without refs yield exactly four flags; a simulated-source number is labelled simulated. | CR-55 |
+| CR-T52 | unit | Patches are per affected slide; accept and reject behave per slide. | Accepting slide 2's patch changes only slide 2. | A rejected patch leaves the state byte-identical; a patch touching an unaffected slide fails. | CR-56 |
+| CR-T53 | unit | The Week 2 fixture result yields patch proposals for slides 2 and 3 only. | Proposals exist for slides 2 and 3. | Any proposal for slides 1 or 4–8 fails. | CR-57 |
+| CR-T54 | Playwright e2e | The change view shows changed claims with the evidence that caused each. | After accepting the Week 2 patches, each changed claim shows its evidence. | A changed claim without linked evidence is shown as unsupported, not justified. | CR-58 |
+
+## K. Performance
+
+Timing rows record the machine, app build, sample size, p50, p95, max and failures. Provider latency is separated from Studio processing. A miss is a recorded finding, not a failed build.
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T55 | real-Mac | Preview refresh after save, 30 samples. | p50 under 2 s on the reference Mac. | A planted 3 s delay in the refresh path is reported as a miss. | CR-59 |
+| CR-T56 | extension smoke + real-Mac | Element capture to context, 30 samples. | p50 under 1 s of local processing. | A planted full-page screenshot in place of an element crop is reported as a miss. | CR-60 |
+| CR-T57 | real-Mac | Five-step AI Verify on the kiosk fixture, 10 runs. | Typical run under 60 s. | Runs over 60 s are listed with cause (provider vs Studio). | CR-61 |
+| CR-T58 | worker D1 | Full review regeneration against a recorded provider with normal latency, 10 runs. | Under 30 s. | A recorded slow provider shows as a provider-caused miss, not a Studio pass. | CR-62 |
+| CR-T59 | worker D1 | Single slide patch proposal against a recorded provider, 10 runs. | Under 20 s. | A proposal regenerating all eight slides is flagged even when fast. | CR-63 |
+
+## L. Privacy and youth safety
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T60 | unit | The participant event schema has no identity fields and session IDs are random. | Two sessions from the same device get unrelated IDs. | A schema change adding `email` or `name` fails the schema check. | CR-65 |
+| CR-T61 | Playwright e2e | The published runtime denies microphone and camera unless the experiment declares them; automation never grants them. | A declared experiment shows the browser's own permission prompt. | An undeclared experiment's page calling `getUserMedia` is denied; an automation step that grants a device permission fails. | CR-66 |
+| CR-T62 | worker D1 | Typed participant input is not retained by default. | An experiment declaring raw-input retention stores the typed text. | Typed text stored for an undeclared experiment fails. | CR-67 |
+| CR-T63 | Playwright e2e | The automation indicator is visible while the runner or agent browser tools act and disappears after. | Indicator shown during a verify run and gone after it ends. | An automation step with no visible indicator fails. | CR-68 |
+| CR-T64 | worker D1 | Deleting an experiment's or session's test data propagates and leaves a receipt. | Events, notes and derived drafts are removed and a receipt is issued. | A derived draft still citing a deleted record fails. | CR-69 |
+| CR-T65 | worker D1 | Admin budget and data controls with authorisation. | An admin sets a team ceiling and a cohort retention policy. | A non-admin attempting either is refused. | CR-70 |
+
+## M. End-to-end
+
+| ID | Layer | What it checks | Positive control | Negative control | Targets |
+|---|---|---|---|---|---|
+| CR-T66 | real-Mac + real phone (scripted run plus one live run) | The fifteen steps of PRD §14 on the kiosk-practice app, each step reading the previous step's record. | Scripted run: all fifteen steps pass on the dev host. Live run: one real Mac and one real phone complete the loop; evidence class live-host. | A planted break between steps 8 and 10 (events not reaching the Evidence skill) stops the loop at step 10; a live-run step satisfied only by synthetic data is recorded as NOT RUN, not PASS. | CR-71 |
+
+## Coverage
+
+One line per requirement. It must equal the union of the Targets column above; the registry trace test fails otherwise.
+
+| Requirement | Verified by |
+|---|---|
+| CR-01 | CR-T01 |
+| CR-02 | CR-T02 |
+| CR-03 | CR-T03 |
+| CR-04 | CR-T04 |
+| CR-05 | CR-T05, CR-T08 |
+| CR-06 | CR-T06 |
+| CR-07 | CR-T07 |
+| CR-08 | CR-T08 |
+| CR-09 | CR-T09 |
+| CR-10 | CR-T10 |
+| CR-11 | CR-T11 |
+| CR-12 | CR-T12 |
+| CR-13 | CR-T13 |
+| CR-14 | CR-T14 |
+| CR-15 | CR-T15 |
+| CR-16 | CR-T16 |
+| CR-17 | CR-T17 |
+| CR-18 | CR-T18 |
+| CR-19 | CR-T19 |
+| CR-20 | CR-T20 |
+| CR-21 | CR-T21 |
+| CR-22 | CR-T22 |
+| CR-23 | CR-T23 |
+| CR-24 | CR-T24 |
+| CR-25 | CR-T25 |
+| CR-26 | CR-T26 |
+| CR-27 | CR-T27 |
+| CR-28 | CR-T28 |
+| CR-29 | CR-T29 |
+| CR-30 | CR-T30 |
+| CR-31 | CR-T31 |
+| CR-32 | CR-T32 |
+| CR-33 | CR-T33 |
+| CR-34 | CR-T34 |
+| CR-35 | CR-T35 |
+| CR-36 | CR-T36 |
+| CR-37 | CR-T37 |
+| CR-38 | CR-T38 |
+| CR-39 | CR-T39 |
+| CR-40 | CR-T39 |
+| CR-41 | CR-T39 |
+| CR-42 | CR-T39 |
+| CR-43 | CR-T40 |
+| CR-44 | CR-T41 |
+| CR-45 | CR-T42 |
+| CR-46 | CR-T43 |
+| CR-47 | CR-T44 |
+| CR-48 | CR-T45 |
+| CR-49 | CR-T46 |
+| CR-50 | CR-T47 |
+| CR-51 | CR-T48 |
+| CR-52 | CR-T48 |
+| CR-53 | CR-T49 |
+| CR-54 | CR-T50 |
+| CR-55 | CR-T51 |
+| CR-56 | CR-T52 |
+| CR-57 | CR-T53 |
+| CR-58 | CR-T54 |
+| CR-59 | CR-T55 |
+| CR-60 | CR-T56 |
+| CR-61 | CR-T57 |
+| CR-62 | CR-T58 |
+| CR-63 | CR-T59 |
+| CR-64 | CR-T20 |
+| CR-65 | CR-T23, CR-T60 |
+| CR-66 | CR-T61 |
+| CR-67 | CR-T62 |
+| CR-68 | CR-T63 |
+| CR-69 | CR-T64 |
+| CR-70 | CR-T65 |
+| CR-71 | CR-T66 |
+
+## Run status
+
+All rows NOT RUN as of 2026-09-29. The registry trace (`worker/test/cr-traceability.test.mjs`) runs in `worker` `npm test`; its passing means the documents agree with each other, not that any CR row is implemented.

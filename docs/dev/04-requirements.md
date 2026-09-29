@@ -196,6 +196,19 @@ The source philosophy is preserved in [ui-philosophy-2026-09-18](../design/ui-ph
 and is not edited by derived documents. Every SX-T row starts NOT RUN; document
 publication is not implementation and is not human acceptance.
 
+## Curriculum runtime (AI for Good v5)
+
+| ID | Area | Acceptance criteria | Primary paths |
+|---|---|---|---|
+| REQ-STUDIO-CURRICULUM-RUNTIME | curriculum loop runtime (CR-01..71) | Experiment Browser observes and operates the student's HTML artifact; "Test my product" verifies 1–5 criteria against an artifact version; immutable, revocable test links; participant events and notes as sourced evidence on the existing store (SX-48); Venture Memory; curriculum skills; cached Weekly Review Pack; evidence-aware HTML deck; capability-based AI for student apps without provider keys (MU-02 kept). Proposed, not yet implemented. | `docs/requirements/curriculum-runtime.md`, `extensions/hypeproof-chat/src/browserControl.ts`, `worker/src/lib/measurement-core/`, `worker/src/routes/` |
+
+[INT-CR-00–09](../intents/curriculum-runtime.md) →
+[CR-01–71](../requirements/curriculum-runtime.md) →
+[CR-T01–T66](../testing/curriculum-runtime.md) →
+[plan, DAG and gap matrix](../plan/curriculum-runtime.md).
+Every CR-T row starts NOT RUN. `worker/test/cr-traceability.test.mjs` checks that the
+three documents and the ledger agree; it does not check implementation.
+
 ## Remote classroom operations design
 
 2026-09-18 proposal: [ADM-01–14 detailed remote operations contract](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18),
