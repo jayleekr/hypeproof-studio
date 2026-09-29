@@ -2822,19 +2822,17 @@
       "negative_control": "A map entry with a non-existent path or symbol, a missing PRD area, or a CR row missing from the matrix fails CR-T01. A gap called new while an open PR already implements it is recorded as a finding.",
       "evidence_required": "Recorded origin/main SHA, the commands used to locate each symbol, the open PRs checked, the CR-T01 result, and what was not inspected.",
       "implementation_paths": [
+        "docs/plan/curriculum-runtime-recon.md",
         "docs/plan/curriculum-runtime.md",
-        "extensions/hypeproof-chat/src/browserControl.ts",
-        "extensions/hypeproof-chat/src/browserMcp.ts",
-        "extensions/hypeproof-chat/src/nativeBrowser.ts",
-        "extensions/hypeproof-chat/src/sdkCoachHelpers.ts",
-        "worker/src/routes",
-        "worker/src/lib/measurement-core"
+        "worker/test/cr-recon.test.mjs",
+        "e2e/curriculum-runtime"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/plan/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/plan/curriculum-runtime-recon.md",
+        "worker/test/cr-recon.test.mjs",
+        "e2e/curriculum-runtime/cdp-probe.mjs",
+        "e2e/curriculum-runtime/cdp-probe-extension/extension.js",
+        "e2e/curriculum-runtime/cdp-probe-extension/package.json"
       ]
     },
     {
@@ -2885,8 +2883,7 @@
         "extensions/hypeproof-chat/webview-ui/src"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -2933,9 +2930,7 @@
         "worker/src/lib/measurement-core/learning-events.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -2982,8 +2977,7 @@
         "e2e/tests"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3032,8 +3026,7 @@
         "extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3084,9 +3077,7 @@
         "extensions/hypeproof-chat/src/localRecordFile.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3126,8 +3117,7 @@
         "worker/src/lib/session-design.ts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3186,8 +3176,7 @@
         "worker/src/prompts"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3230,8 +3219,7 @@
         "extensions/hypeproof-chat/webview-ui/src"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3272,8 +3260,7 @@
         "worker/src/lib"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     },
     {
@@ -3316,9 +3303,7 @@
         "docs/testing/curriculum-runtime.md"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
-        "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        "docs/requirements/curriculum-runtime.md"
       ]
     }
   ]
