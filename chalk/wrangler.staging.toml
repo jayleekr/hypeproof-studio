@@ -1,0 +1,37 @@
+# Staging Chalk for the remote classroom operations rollout (#751). Pairs with worker/wrangler.staging.toml and uses the
+# SAME staging D1 / KV / R2 as that Worker — never production's. Checked by worker/scripts/classroom-ops-staging-check.mjs.
+#
+#   npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml   # the staging Worker's value, not production's
+#   npx wrangler deploy -c wrangler.staging.toml
+name = "hypeproof-chalk-staging"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+compatibility_flags = ["nodejs_compat"]
+account_id = "f1da7073b98021b4117c82a4a219eef0"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[kv_namespaces]]
+binding = "HPS_KV"
+id = "REPLACE_WITH_STAGING_KV_ID"
+
+[[d1_databases]]
+binding = "HPS_DB"
+database_name = "hypeproof-studio-staging"
+database_id = "REPLACE_WITH_STAGING_D1_ID"
+
+[[r2_buckets]]
+binding = "HPS_TRACES"
+bucket_name = "hps-traces-staging"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.md", "**/*.html"]
+fallthrough = true
+
+[vars]
+ENVIRONMENT = "staging"
+# The staging Worker's workers.dev URL (printed by its first deploy).
+HPS_SERVICE_ORIGIN = "REPLACE_WITH_STAGING_SERVICE_ORIGIN"

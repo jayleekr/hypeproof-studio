@@ -18,7 +18,7 @@ local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.
 local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)').run('effort',local.cohort,local.profileId,new Date(Date.now()-1000).toISOString(),new Date(Date.now()+3600000).toISOString());
 const profile=getProfile(local.profileId),originalModel=profile.model,originalRuntime=profile.coach_runtime;
 const base='/admin/cohorts/'+local.cohort+'/authoring/';
-const content={schema:'hps-session-design/1',title:'가상 꽃집',audience:'합성 사용자',duration_minutes:60,objective:'영업시간 확인',prerequisites:'',starter:'연습',steps:[{id:'one',title:'확인',instructions:'영업시간 비교',hint:'',acceptance:'수정 이유'}]};
+const content={schema:'hps-session-design/1',title:'가상 꽃집',audience:'합성 사용자',duration_minutes:60,objective:'영업시간 확인',prerequisites:'사전 지식 불필요',starter:'연습',steps:[{id:'one',title:'확인',instructions:'영업시간 비교',hint:'',acceptance:'수정 이유'}]};
 const call=async(path,method='GET',body,token=local.token,headers={})=>{
   const ctx=makeCtx();const response=await app.fetch(new Request(local.origin+path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})}),local.env,ctx);
   const json=await response.json();await ctx.settle();return {status:response.status,json};

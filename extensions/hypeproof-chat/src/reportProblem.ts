@@ -50,7 +50,9 @@ export interface ReportProblemDeps {
   getRecentTurns: () => ChatMessage[];
 }
 
-const REPORT_VERSION = "0.1.2"; // hypeproof-chat extension version (matches package.json)
+// Fallback only. The installed extension reports its own package version (#751 R1):
+// a constant here drifted to 0.1.2 while the package was 0.1.5.
+const REPORT_VERSION_UNKNOWN = "unknown";
 
 interface SubmitResult {
   ok: true;
@@ -107,7 +109,7 @@ async function submitReport(
  */
 function collectMetadata(deps: ReportProblemDeps, jtiHash?: string): Record<string, unknown> {
   return {
-    studio_version: REPORT_VERSION,
+    studio_version: typeof deps.context.extension?.packageJSON?.version === "string" ? deps.context.extension.packageJSON.version : REPORT_VERSION_UNKNOWN,
     extension: "hypeproof-chat",
     os: `${os.platform()}-${os.release()}-${os.arch()}`,
     locale: vscode.env.language,

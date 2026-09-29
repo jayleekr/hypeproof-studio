@@ -1,4 +1,4 @@
 interface:
-  display_name: "HAIN7 Report"
-  short_description: "수업 로그로 HAIN7 기반 1페이지 관찰 결과지를 만듭니다"
-  default_prompt: "$hain7-report 스킬로 HP Studio 수업 로그를 검토하고 증거 기반 7역량 1페이지 PDF를 생성해줘."
+  display_name: "HAIN7 historical replay"
+  short_description: "종료된 HAIN7 과거 기록의 재현·내보내기 전용"
+  default_prompt: "$hain7-report 스킬로 명시적으로 선택한 과거 HAIN7 기록만 원래 기준으로 재현해줘. 신규 측정은 여섯 역량 멤버 측정 작업대로 안내해줘."

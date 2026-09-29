@@ -20,6 +20,9 @@ export interface TokenPayload {
   native_trial?: true;
   /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
   lesson?: { course_id: string; version: string; sha256: string };
+  /** #1012 · #751 G2 — names the instructor's rehearsal record this learner code was issued for. Grants nothing: the
+   *  Service records requests against it only where the record names this token's jti. */
+  rehearsal?: string;
   u: string;       // user id (cohort-local), e.g. "kid01"
   c: string;       // cohort id, e.g. "sk-biopharm-2026-a"
   p: string;       // profile id, e.g. "sk-biopharm-kids-2026-grade-3-4-s1"
@@ -58,6 +61,10 @@ export interface IssuerScope {
   // `max_hours` (which bounds STUDENT tokens, not sessions). Only consulted
   // when `can_start_session === true`.
   max_session_hours?: number;
+  // #751 — remote classroom operations capabilities (lib/classroom-ops.ts
+  // OPS_CAPABILITIES). Absent on every issuer minted before this landed:
+  // holding a cohort scope never implies operations authority.
+  ops?: string[];
 }
 
 export type TokenErrorCode = "malformed" | "signature" | "expired" | "version" | "revoked";
@@ -260,6 +267,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.scopes !== undefined) out.scopes = p.scopes;
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   if (p.lesson !== undefined) out.lesson = p.lesson;
+  if (p.rehearsal !== undefined) out.rehearsal = p.rehearsal;
   if (p.native_trial !== undefined) out.native_trial = p.native_trial;
   if (p.account !== undefined) out.account = p.account;
   return JSON.stringify(out);
@@ -270,4 +278,28 @@ export function bearer(authHeader: string | null | undefined): string | null {
   if (!authHeader) return null;
   const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
   return m && m[1] ? m[1].trim() : null;
+}
+
+// #751 — operations connection credential. Deliberately NOT a TokenPayload:
+// verify() rejects it (no JSON payload), so it can never be replayed against
+// chat/messages/trace as a student token. The HMAC only proves the Service
+// minted this grant id; liveness, scope and epoch are re-read from D1
+// ops_grants on every request.
+const OPS_CREDENTIAL_PREFIX = "hpsops1";
+const opsCredentialMessage = (grantId: string) => new TextEncoder().encode(`hps-ops-credential/1:${grantId}`);
+
+export async function signOpsCredential(grantId: string, secret: string): Promise<string> {
+  assertSigningSecret(secret);
+  return `${OPS_CREDENTIAL_PREFIX}.${grantId}.${b64uEncode(await sign(opsCredentialMessage(grantId), secret))}`;
+}
+
+/** Returns the grant id, or null for anything that is not a credential this Service signed. */
+export async function verifyOpsCredential(credential: string, secret: string): Promise<string | null> {
+  assertSigningSecret(secret);
+  const parts = credential.split(".");
+  if (parts.length !== 3 || parts[0] !== OPS_CREDENTIAL_PREFIX || !/^[A-Za-z0-9-]{8,64}$/.test(parts[1]!)) return null;
+  let sig: Uint8Array;
+  try { sig = b64uDecode(parts[2]!); } catch { return null; }
+  const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, opsCredentialMessage(parts[1]!));
+  return ok ? parts[1]! : null;
 }

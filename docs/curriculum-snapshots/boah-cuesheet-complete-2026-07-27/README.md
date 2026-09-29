@@ -10,6 +10,8 @@
 구간     12:52 ~ 15:00 · 턴 11개 · 55분
 ```
 
+The raw session log (`session.jsonl`) moved to the private lab repo with personal data redacted (2026-09-23).
+
 ## 결과물 4종 — 전부 독립 확인
 
 | # | 결과물 | 확인 방법 | 결과 |

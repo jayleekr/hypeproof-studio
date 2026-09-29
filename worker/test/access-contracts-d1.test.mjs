@@ -1,12 +1,12 @@
 import './harness/loader.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Miniflare } from 'miniflare';
+import { createMiniflare } from './harness/miniflare.mjs';
 import { accessHarness, syntheticPlan, syntheticEvent } from './harness/access.mjs';
 const { publishAccessPlan, applyAccessEvent, accessChoices }=await import('../src/lib/access-contracts.ts');
 const compatibilityDate=readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
 assert(compatibilityDate);
-const mf=new Miniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local access test")}}'});
+const mf=createMiniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local access test")}}'});
 try {
   const db=await mf.getD1Database('HPS_DB');
   const sql=readFileSync(new URL('../migrations/0007-access-contracts.sql',import.meta.url),'utf8').replace(/--[^\n]*/g,'').split(';').map(s=>s.trim()).filter(Boolean);

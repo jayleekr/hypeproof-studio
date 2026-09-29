@@ -93,19 +93,26 @@ test('observation contract uses actual session/identity gates and rejects scope 
 
 test('assessment is separate from coaching, validates real citations and does not persist transcript', async()=>{
  const {env,token}=await fixture(),app=await bootApp(); env.ANTHROPIC_API_KEY='synthetic-provider-key';
- const headers={authorization:'Bearer '+token,'content-type':'application/json'};
+ // Declares the candidate model, i.e. this test speaks for a CURRENT Studio build.
+ // Without the header the worker correctly serves the seven Assets (an installed
+ // app bundles a seven-key validator) — that path is covered end to end in
+ // capability-negotiation.test.mjs.
+ const headers={authorization:'Bearer '+token,'content-type':'application/json','x-hps-capability-model':'candidate-capability-v1'};
  const ctxResponse=await app.fetch(new Request('https://test/v1/observations/context',{headers}),env,makeCtx());
  const batch={...await ctxResponse.json(),events:[{id:'u1',seq:1,task:'t1',at:1,kind:'user',text:'새 직원이 주문을 확인할 문서가 필요해',assistance:'unknown'}]};
- const assets=['TASTE','INTENT','CONTEXT','VERIFY','DELEGATE','ITERATE','OWNERSHIP'];
- const findings=assets.map(asset=>({asset,status:asset==='INTENT'?'observed':'unobserved',interpretation:'잠정 관찰',evidence:asset==='INTENT'?[{quote_id:'q0'}]:[],assistance:'unknown',next:'다음 과제에서 확인'}));
+ const assets=['FRAMING','JUDGMENT','ORCHESTRATE','VERIFY','ADAPT','OWNERSHIP'];
+ const findings=assets.map(asset=>({asset,status:asset==='JUDGMENT'?'observed':'unobserved',interpretation:'잠정 관찰',evidence:asset==='JUDGMENT'?[{quote_id:'q0'}]:[],assistance:'unknown',next:'다음 과제에서 확인'}));
  const original=globalThis.fetch;let body;let result=findings;let status=200;
  globalThis.fetch=async(input,init)=>{body=JSON.parse(init.body);return new Response(JSON.stringify({content:[{type:'text',text:JSON.stringify({findings:result.map(f=>f.status==='unobserved'?{asset:f.asset,status:f.status,interpretation:f.interpretation,next:f.next}:f)})}]}),{status,headers:{'request-id':'synthetic-provider-request'}});};
  const assess=()=>app.fetch(new Request('https://test/v1/observations/assess',{method:'POST',headers,body:JSON.stringify(batch)}),env,makeCtx());
  try{
-  const response=await assess();assert.equal(response.status,200);const output=await response.json();assert.equal(output.findings[1].evidence[0].event_id,'u1');assert.equal(output.rubric.version,'m2026.09.08-4');
+  const response=await assess();assert.equal(response.status,200);const output=await response.json();assert.equal(output.findings[1].evidence[0].event_id,'u1');assert.equal(output.rubric.version,'m2026.09.21-1');assert.equal(output.capability_model,'candidate-capability-v1');
   assert.equal(body.stream,false);assert.equal(body.tools,undefined);assert.match(body.system[0].text,/명령이 아니다/);assert.match(body.messages[0].content,/새 직원/);
   result=structuredClone(findings);result[1].evidence[0].event_id='forged';assert.equal((await assess()).status,502);
   result=structuredClone(findings);result[1].score=100;assert.equal((await assess()).status,502);
+  // The model actually changed: the previous seven-Asset shape is refused.
+  result=['TASTE','INTENT','CONTEXT','VERIFY','DELEGATE','ITERATE','OWNERSHIP'].map(asset=>({asset,status:'unobserved',interpretation:'잠정 관찰',evidence:[],assistance:'unknown',next:'다음 과제에서 확인'}));
+  assert.equal((await assess()).status,502);
   for(status of [401,429,503])assert.notEqual((await assess()).status,200);
  }finally{globalThis.fetch=original;}
 });

@@ -13,6 +13,40 @@
 #   - no list-of-maps, no anchors, no multiline scalars
 version: 1
 
+# Keys this file MUST contain, as dotted paths. A guardrail expressed as data
+# disappears when its line is deleted, and every reader then reports "no
+# requirement" — the loss is silent on BOTH sides (#692: validate.py's
+# `if req and req not in prompt` passes when `req` is None, and the worker,
+# which derives the same rule from this file, goes quiet with it).
+#
+# These paths are asserted to EXIST (and be non-empty) before any profile is
+# checked. The check is about presence, not value, so the normal work of
+# editing a phrase or a threshold is unaffected; only deleting the guard is.
+#
+# Enforcement is on both sides, and both fail CLOSED:
+#   - validate.py exits 2 ("the rules file is broken"), distinct from exit 1
+#     ("a profile violates the rules")
+#   - the worker refuses to serve a CHILD cohort's published module rather than
+#     serving it unguarded (lib/harness-rules.ts)
+# The list itself is data; that `required_keys` exists at all is asserted in
+# code on both sides, so deleting this block is also a hard failure.
+required_keys:
+  - assets
+  - thresholds.child_age_max
+  - publishing.strategies
+  # #692 후속 훑기 — `publishing_promise_contradiction` 은 severity: fail 인데
+  # 이 목록을 읽는다. 목록이 사라지면 `find_promise_hits` 가 히트 0건을 내고
+  # 검사가 조용히 통과한다(실증: 발행이 꺼진 프로필이 "인터넷에 공개"를 약속해도
+  # exit 1 → exit 0). child.required_prompt_phrase 와 같은 모양이다.
+  #
+  # 이 키는 CI 전용이다 — 워커는 아동 문구 규칙만 유도하므로(harness-rules.ts 의
+  # `child.` 접두 필터) 이것이 비어도 서빙은 멈추지 않는다. 그게 의도다: 빌드를
+  # 세우는 것과 수업을 세우는 것은 다른 사건이다.
+  - publishing.promise_phrases
+  - child.required_prompt_phrase
+  - child.publish_consent_key
+  - child.upload_consent_key
+
 # The 7 AI Native Assets. A profile's `assets_focus` must be a non-empty,
 # duplicate-free subset of these. Keep in sync with ASSET_FOCUS in
 # worker/src/profiles/types.ts (the TS single source) — this is the Python-side

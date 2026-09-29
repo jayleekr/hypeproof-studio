@@ -28,7 +28,7 @@ P1~P5의 실제 실행 범위는 아래 기록과 [충족 현황](access-intent-
 | CA-T15 | 동일 행동의 유료/무료·높은/낮은 Effort 조건에서 평가가 가격만으로 달라지지 않음; 예산 차단 시 수행 실패 대신 관측 제약 | AB-17, HC-04/07; evaluator 대조, 아래 연구와 구분 |
 | CA-T16 | 원본 legacy evidence/키/hash/이전 export 보존; 두 버전 해석 공존; Intent+Context 산술결합 거부; LLM model과 capability version 혼동 거부 | HC-01/02/03; 기존 관측 schema·read/write/export |
 | CA-T17 | null·needs_review·provisional/confirmed와 모델 타당화 상태 구분; 철회/삭제·미관찰·새 해석으로 원본 덮어쓰기 거부 | HC-02/03/05/06; API+화면 |
-| CA-T18 | AI가 생성한 목표/검수와 사람 채택 구별, 도움 조건 누락 시 독립 수행 확정 거부, 연구 audit 없으면 새 evaluator 활성화 거부 | AB-17, HC-04/05/07/08; provenance/evaluator 계약 |
+| CA-T18 | AI가 생성한 목표/검수와 사람 채택 구별, 도움 조건 누락 시 독립 수행 확정 거부, Jay dogfood의 여섯 모델 관찰·서술 검토는 허용하되, 연구 audit 없는 수치 평가 rubric 활성화는 거부 | AB-17, HC-04/05/07/08; provenance/evaluator 계약 |
 | CA-T19 | 실제 사람의 pre-task·intervention·다른 post-task, 평가자 2명 원판정/불일치, 다른 도메인·2–4주 후 과제의 실행 여부 보고 | HC-08; human study, 자동 제품 테스트로 대체 불가 |
 
 100/10/20은 합성 경쟁 시나리오의 단위이며 운영 기본 예산이 아니다. SQLite 테스트만으로

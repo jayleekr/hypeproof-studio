@@ -166,7 +166,7 @@ true today. Tracked in #811 for the image half.
 | AE-10 | PARTIAL | The 기능 half is fully served by the derived catalogue. 교수 전략 is not — see AE-36. |
 | AE-11 | UNMET | Rehearsal is a hard-coded literal. It needs a record, a student-condition credential, and an attribution of policy revision and app/SDK compatibility — three mechanisms, none of them a narrowing. |
 | AE-12 | PARTIAL | The projection removes the hazard for this block by construction: an old app cannot fail to honour a narrowing it never had to learn. A general capability handshake, and the split between "setting missing", "policy refused" and "runtime absent", is separate. |
-| AE-36 | UNMET | The four help modes have no representation at any layer. They need a per-step slot, a per-seat mutable state store, and a runtime carrier. |
+| AE-36 | PARTIAL (#1008, 2026-09-13) | Per-step slot and runtime carrier exist: a frozen step may carry `help: { default, allowed[] }`; the chat gate resolves `x-hps-lesson-step` + `x-hps-help-mode`, refuses modes outside the offer with a reason, changes only the system prompt, and returns an `x-hps-help-mode` receipt that always says `performance=unobserved`. Still missing: a per-seat stored selection (the App must resend the choice each run), the App/Chalk UI, and any real-model behavior evidence (AE-T28 NOT RUN). The step ID is a client-declared teaching pointer, not a verified transition — acceptable only because help widens nothing. |
 
 **Not expressible as a narrowing, needs new authority — do not fake it.** AE-09's
 역할 and 담당 수업: the issuer scope has no course dimension, ownership is a single
@@ -210,3 +210,25 @@ the gate's single return spread, the schema's optional-key list and its validato
 branch, the three validation sites, and the `/v1/profile` serializer. Landing them in
 parallel would conflict in all four files, which is how this epic already produced one
 duplicate pair of PRs.
+
+## Proposed amendment, 2026-09-21 — which lesson the two call sites narrow by (U3 design; not implemented, not accepted)
+
+Decision §2 stays: the narrowing is applied at the shared chat gate **and** at the
+`/v1/profile` serializer. What the targeted-settings design
+([classroom ADM, U3](../requirements/classroom-admin.md#remote-management-u3-20260921))
+would change is how those two sites obtain the lesson. Today each calls
+`resolveTokenLesson` on its own. Under the proposal both call one
+`resolveEffectiveLesson`, which may return another **frozen version of the same course**
+recorded for that participant and class run. Nothing in this ADR's rules moves: the
+version is still read through `readLesson`, so `allowed ⊆ granted(profile)` is
+re-checked on every read and a grant that shrank closes the lesson rather than serving
+a wider set. A setting cannot add a feature the compiled profile does not grant.
+
+The section "Where this is not a boundary" is the reason for one rule in that design.
+SDK tools are enforced on the device from the profile the app cached. If the Service
+resolved a narrower version while an app still held the wider cached profile, the two
+would disagree on exactly the route where the Service is not the boundary. So an app
+that does not send the binding expectation is refused new execution on a seat whose
+effective lesson differs from its token lesson, and an in-flight turn keeps the
+execution snapshot the Service recorded when it admitted that turn. A storage failure
+holds execution; it never falls back to the token lesson.

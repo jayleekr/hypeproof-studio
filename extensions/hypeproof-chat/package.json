@@ -100,6 +100,10 @@
         "title": "HypeProof Chat: 저장된 issuer 토큰 지우기"
       },
       {
+        "command": "hypeproof-chat.chalk.checkPlan",
+        "title": "Chalk: 초안 검사 (강사용)"
+      },
+      {
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"
@@ -121,6 +125,30 @@
       {
         "command": "hypeproof-chat.diagnoseVoiceCapability",
         "title": "HypeProof: 음성 기능 진단 (개발용)"
+      },
+      {
+        "command": "hypeproof-chat.localReview",
+        "title": "HypeProof: 나의 변화 기록"
+      },
+      {
+        "command": "hypeproof-chat.classroomConnect",
+        "title": "HypeProof: 수업 연결 (강사가 준 코드 입력)"
+      },
+      {
+        "command": "hypeproof-chat.classroomDisconnect",
+        "title": "HypeProof: 수업 연결 끊기"
+      },
+      {
+        "command": "hypeproof-chat.classroomNotes",
+        "title": "HypeProof: 강사가 보낸 질문·확인 지점 보기"
+      },
+      {
+        "command": "hypeproof-chat.classroomCollectionConsent",
+        "title": "HypeProof: 수업 기록 보내기 동의·철회"
+      },
+      {
+        "command": "hypeproof-chat.classroomApproveArtifact",
+        "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소"
       }
     ],
     "menus": {
@@ -139,6 +167,11 @@
           "command": "hypeproof-chat.previewViewport",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@3"
+        },
+        {
+          "command": "hypeproof-chat.localReview",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@4"
         }
       ],
       "editor/title": [
@@ -251,10 +284,12 @@
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "build:webview": "cd webview-ui && npm install && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done",
+    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
     "watch:webview": "cd webview-ui && npm run dev",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "test:classroom-ops:review": "node --experimental-strip-types --test test/classroom-ops-review.test.mjs test/classroom-ops-expiry-review.test.mjs test/classroom-ops-recovery.test.mjs test/sdk-terminal-failure.test.mjs",
+    "test:chalk-tools": "node --experimental-strip-types test/chalk-tools.test.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",

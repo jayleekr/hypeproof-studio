@@ -774,3 +774,62 @@ export function classifyTurnError(err: unknown): string {
   if ("requestId" in e) return "transport";
   return name && name !== "Error" ? name.slice(0, 60) : "error";
 }
+
+/**
+ * #751 U4 — a turn the SDK ended with an error result, in the fields every consumer of a finished turn already reads
+ * (spool `error_kind`, the ops failure status, closeTurn/observation outcome = failed). `status` passes through only when
+ * this turn's stream carried it; otherwise the cause stays unclassified.
+ */
+export function sdkTurnEndFailure(end: { failed: boolean; subtype?: string; status?: number }): { errorKind: string; failure: { status?: number } } | null {
+  if (!end.failed) return null;
+  const subtype = end.subtype && end.subtype !== "success" ? end.subtype : "is_error";
+  return { errorKind: `sdk_result:${subtype}`, failure: end.status !== undefined ? { status: end.status } : {} };
+}
+
+
+/** 파일을 실제로 바꾸는 SDK 도구 — 이 셋의 성공만이 "고쳤다"의 근거다. */
+export const WRITE_TOOL_NAMES = ["Write", "Edit", "MultiEdit"] as const;
+
+/**
+ * 침묵 구간 안내 줄(`✍️ 고치는 중…`)을 닫을 때 뭐라고 적을지.
+ *
+ * #628 이 이 줄을 넣어 3분짜리 침묵을 메웠는데, 닫을 때 **무조건** "고쳤어요" 를
+ * 적었다. 그래서 코치가 아무것도 안 고치고 거절하거나 되묻기만 한 턴도
+ * `✍️ 고쳤어요 ✓` 로 닫혔다 — 실기기에서 관측(2026-08-20: 아이가 "웹서치로
+ * 가져와봐" → 코치 "저는 웹 검색 기능이 없어요" → 그 위에 `고쳤어요 ✓`).
+ *
+ * 아이는 그 줄을 보고 화면을 본다. 안 바뀌어 있으면 그게 최악의 실패다
+ * (지어낸 성공 금지 — R0). 그래서 **쓰기 도구가 실제로 성공했을 때만** 고쳤다고
+ * 적고, 아니면 그 사이에 실제로 일어난 일(생각)을 적는다.
+ */
+export function pendingCloseLabel(wroteOk: boolean): string {
+  return wroteOk ? "고쳤어요" : "생각했어요";
+}
+
+/**
+ * #751 F4 — turn the lesson panel's message into a step signal, or nothing.
+ * Only a step of the CONFIRMED lesson this profile carries counts, and only the two statuses a learner can state
+ * themselves. "submitted" is the learner's own statement (self-reported); nothing here infers completion.
+ */
+export function lessonStepSignal(
+  lesson: { version: string; content: { steps: Array<{ id: string }> } } | null | undefined,
+  msg: { stepId?: unknown; status?: unknown },
+): { lesson_version: string; step_id: string; status: "in_progress" | "submitted"; source_state: "real" | "self_reported" } | null {
+  if (!lesson || typeof msg.stepId !== "string" || (msg.status !== "in_progress" && msg.status !== "submitted")) return null;
+  const step = lesson.content.steps.find((x) => x.id === msg.stepId);
+  return step ? { lesson_version: lesson.version, step_id: step.id, status: msg.status, source_state: msg.status === "submitted" ? "self_reported" : "real" } : null;
+}
+
+/**
+ * #751 U4 — the work folder a newly entered code should open. A code for the activity that is ALREADY open in this window
+ * (a re-issued code: same class, same learner) keeps the folder the learner is working in — the saved record's folder, or,
+ * for a window entered before records existed, the open folder. Any other activity takes its own default (undefined).
+ * Seen on a real Mac: without this, typing a re-issued code moved the learner to the profile's default folder and away from
+ * their files, draft and conversation.
+ */
+export function reentryWorkspace(o: { candidateActivity?: string; record?: { serverId: string; workspace: string } | null; recordServiceMatches: boolean; openFolder?: string; runningActivity?: string }): string | undefined {
+  const a = o.candidateActivity;
+  if (!a) return undefined;
+  if (o.record) return o.recordServiceMatches && o.record.serverId === a ? o.record.workspace : undefined;
+  return o.openFolder && o.runningActivity === a ? o.openFolder : undefined;
+}

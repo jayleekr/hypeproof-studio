@@ -1,0 +1,52 @@
+{
+  "format": "hps-observer-delta/1",
+  "host": "codex",
+  "project": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "session": "synthetic-session",
+  "generation": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sequence": 1,
+  "previous_digest": null,
+  "source": {
+    "from": 0,
+    "to": 100,
+    "size": 100,
+    "pending_bytes": 0,
+    "reset_reason": "new-source"
+  },
+  "events": [
+    {
+      "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "task": "synthetic-task",
+      "at": "2026-09-15T00:00:00.000Z",
+      "kind": "tool_result",
+      "actor": "ai",
+      "model": "synthetic-model",
+      "source": {
+        "line": 1,
+        "from": 0,
+        "to": 100,
+        "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "tool": {
+        "call_id": "synthetic-call",
+        "name": "exec_command",
+        "category": "shell",
+        "status": "success",
+        "exit_code": 0,
+        "interrupted": false
+      }
+    }
+  ],
+  "coverage": {
+    "records": 1,
+    "eligible": 1,
+    "omitted": 0,
+    "hidden": 0,
+    "unsupported": 0,
+    "oversized": 0,
+    "redacted": 0,
+    "malformed": 0,
+    "excerpted": 0
+  },
+  "digest": "sha256:d7afb427c152609cc87c71371cd59cda732dbef623076762db7aa60981e8bbec"
+}

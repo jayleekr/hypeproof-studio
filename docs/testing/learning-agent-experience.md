@@ -45,6 +45,11 @@
 | AE-T35 | AE-09/11/12/16/38/41 | 구버전 App/Service, 미지 binding/schema, 다른 수업/workspace event, 중복/역순/누락, 제외 문맥의 재개를 교차 실행. 정상 기존 수업은 열리고 새 기능만 명시적 차단. 기존 observation·share drift lock 유지 | 계약+실제 SDK / NOT RUN |
 | AE-T36 | AE-01~12, AE-14~16, AE-18, AE-20/22, AE-25~28/33, AE-35~41 | 실제 Studio의 학생 코드 진입→수업 허용 모델/실제 모델 확인→목표/대안→선택 자료→모델 편집→390/1280 검수→결함 수정·복구→선택 공유→종료 후 재열기를 연결. 기준 과제별 개별 시나리오 증거와 최종 파일 해시 대조. 화면 시안이나 웹 대체 실행은 종단 PASS가 아님 | 실제 App+API+Browser / NOT RUN |
 
+AE-T28의 선행 Service 계약(#1008)은 `worker/test/lesson-help-mode.test.mjs`가 합성 upstream으로
+검사한다: 단계 기본값·학생 선택의 전달, 제공 밖 모드·위조 단계·수업 없는 좌석의 거절, 모드 간
+upstream 본문(system 제외) 동일, 영수증의 `performance=unobserved`. 이것은 실제 모델 행동·App·사람
+인수가 아니므로 AE-T28은 여전히 **NOT RUN**이다.
+
 AE-T36은 종단 연결 검사다. 그 한 번의 성공으로 연결된 요구사항의 모든 부정·장애 조건을
 통과했다고 처리하지 않는다. 특히 AE-T06/07/10/11/33/35의 경계 검사가 별도로 필요하다.
 

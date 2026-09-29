@@ -1,5 +1,11 @@
 # Handoff — the four things only a human can do
 
+> Scope clarification (2026-09-13): the completion statement below is historical
+> and limited to the vessel/modules plan and PR #691. For remaining Studio/Chalk
+> product work, run `python3 scripts/next-work.py` and read
+> [the requirement execution index](requirements-activation.md). These four gates
+> do not block unrelated local implementation, design or test preparation.
+
 > Everything else in this plan is done and green on `plan/all` (PR #691).
 > These four are **repo/Cloudflare settings and one tag**. No code changes.
 >

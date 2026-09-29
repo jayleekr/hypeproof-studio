@@ -16,6 +16,9 @@ db.exec('PRAGMA foreign_keys=ON');
 const migration = readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8');
 db.exec(migration);
 db.exec(migration); // additive migration is safe to retry
+// #1012 · #751 G2 — rehearsal and confirmation tables (additive, retry-safe like 0002).
+const rehearsalMigration = readFileSync(new URL('../migrations/0026-authoring-rehearsal.sql',import.meta.url),'utf8');
+db.exec(rehearsalMigration); db.exec(rehearsalMigration);
 const env = createMockEnv();
 let failDatabase = false;
 let beforeWrite;
@@ -35,7 +38,7 @@ const alice = await token('author-a'), bob=await token('author-b');
 const outsider=await token('outsider',[{cohort:'other',profiles:[profileId]}]);
 const student=(await issue({u:'student',c:cohort,p:profileId},1,TEST_SECRET)).token;
 const base=`/admin/cohorts/${cohort}/authoring/site-1`;
-const content={schema:'hps-session-design/1',title:'진료시간 수정',audience:'치과의사',duration_minutes:120,objective:'진료시간을 수정하고 검수한다',prerequisites:'',starter:'정적 홈페이지 예제',steps:[{id:'edit',title:'시간 변경',instructions:'진료시간을 변경하세요',hint:'',acceptance:'모바일에서 확인'}]};
+const content={schema:'hps-session-design/1',title:'진료시간 수정',audience:'치과의사',duration_minutes:120,objective:'진료시간을 수정하고 검수한다',prerequisites:'코딩 경험 불필요. 예제 폴더 사본 제공',starter:'정적 홈페이지 예제',steps:[{id:'edit',title:'시간 변경',instructions:'진료시간을 변경하세요',hint:'',acceptance:'모바일에서 확인'}]};
 const save=(revision,id,data=content)=>({expected_revision:revision,request_id:id,profile_id:profileId,content:data});
 async function request(path=base,method='GET',body,credential=alice) {
  const headers={authorization:`Bearer ${credential}`};
@@ -115,12 +118,28 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  assert.equal(received.json.lesson.content.title,content.title); // draft already changed to new
  const legacy=await request('/v1/profile','GET',undefined,student);assert.equal(legacy.status,200);assert.equal(legacy.json.lesson,undefined);
  assert.deepEqual(received.json.sdk_tools,legacy.json.sdk_tools);
- assert.equal(received.json.display_name,content.title);assert.match(received.json.welcome.greeting_md,/진료시간 수정/);
+ assert.equal(received.json.display_name,content.title);
+ // #1222 G4 — a lesson supplies the lesson; it does not rewrite the cohort's copy.
+ //
+ // This line used to assert the opposite: `/진료시간 수정/`, i.e. that the served
+ // greeting had become the lesson's own text. That is what made attaching a lesson to
+ // a kids seat replace "아래 친구 버튼을 눌러요 👇" — the sentence that points a child
+ // at the only affordance that works — with "내 수업에서 과제와 확인 기준을 읽고
+ // 시작하세요." The assertion is re-pointed at the corrected contract, not relaxed:
+ // both directions are now pinned, where before only one was.
+ assert.equal(received.json.welcome.greeting_md,legacy.json.welcome.greeting_md,
+   '수업을 붙였더니 코호트 인사말이 바뀌었다 — 코호트 프로필은 코호트의 것이다');
+ assert.doesNotMatch(received.json.welcome.greeting_md,/진료시간 수정/,
+   '수업 본문이 인사말로 새어 나왔다');
+ // Positive control: the lesson still reaches the seat, through the channels that own
+ // it. Without this the case above is satisfied by a route that drops the lesson.
+ assert.equal(received.json.lesson.content.learning?.mission ?? null,content.learning?.mission ?? null);
+ assert.equal(received.json.display_name,content.title);
  const {verify}=await import('../src/lib/tokens.ts');const claim=await verify(r.json.token,TEST_SECRET);
  const bad=(await issue({u:'student',c:cohort,p:profileId,lesson:{...claim.lesson,sha256:'0'.repeat(64)}},1,TEST_SECRET)).token;
  assert.equal((await request('/v1/profile','GET',undefined,bad)).status,409);
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const gate=credential=>gateChatRequest({env,req:{header:()=> 'Bearer '+credential},header(){},json:(body,status)=>Response.json(body,{status})});
+ const gate=credential=>gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+credential:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  const goodGate=await gate(r.json.token);assert.equal(goodGate.ok,true);assert.ok(goodGate.profile.system_prompt.includes(JSON.stringify(frozen.content)));
  const plainGate=await gate(student);assert.equal(plainGate.ok,true);assert.deepEqual(goodGate.profile.sdk_tools,plainGate.profile.sdk_tools);
  const badGate=await gate(bad);assert.equal(badGate.ok,false);assert.equal(badGate.response.status,409);
@@ -159,7 +178,7 @@ await check('AE-07 lesson assistant name: draft → frozen → student profile s
  assert.deepEqual(p.json.sdk_tools,(await request('/v1/profile','GET',undefined,student)).json.sdk_tools);
  // The model is told the name in the shared gate (proxy and Agent SDK routes both go through it).
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ const g=await gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+d.json.token:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  assert.equal(g.ok,true);assert.match(g.profile.system_prompt,/당신의 이름은 '제작 파트너'입니다/);
  assert.deepEqual(g.profile.sdk_tools,compiled.sdk_tools);
 });
@@ -179,7 +198,7 @@ await check('AE-08 two lessons keep separate names; old-schema lesson leaves ux.
  const pl=await request('/v1/profile','GET',undefined,legacyLesson.json.token);assert.equal(pl.status,200);
  assert.equal(pl.json.lesson.content.assistant,undefined);assert.deepEqual(pl.json.ux.coach,compiled.ux.coach);
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+legacyLesson.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ const g=await gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+legacyLesson.json.token:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  assert.equal(g.ok,true);assert.doesNotMatch(g.profile.system_prompt,/당신의 이름은/);
  // No-lesson credential: unchanged.
  assert.deepEqual((await request('/v1/profile','GET',undefined,student)).json.ux.coach,compiled.ux.coach);

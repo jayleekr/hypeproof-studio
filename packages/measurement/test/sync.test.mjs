@@ -1,0 +1,150 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp,mkdir,writeFile,readFile,rm,stat,realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const exec = promisify(execFile);
+import { SessionSync,projectId,digestOf,makeSnapshots,validateServer,SyncHttpError } from '../dist/sync.mjs';
+import { parseLocalTranscript,parseLocalTranscriptFile } from '../dist/adapters.mjs';
+const at=Date.now();
+const msg=(text,role='user')=>({type:'response_item',timestamp:new Date(at).toISOString(),payload:{type:'message',role,content:[{type:'input_text',text}]}});
+const codex=(project,session='sample',extra=[])=>[{type:'session_meta',payload:{id:session,cwd:project}},{type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'test-model',effort:'medium'}},msg('Please verify both normal and empty input.'),msg('Checks passed (unverified claim).','assistant'),...extra].map(JSON.stringify).join('\n')+'\n';
+async function fixture(t){
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'hps-sync-test-')));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const home=join(dir,'home'),project=join(dir,'project');await mkdir(project,{recursive:true});
+ const date=new Date(at),codexDir=join(home,'.codex/sessions',String(date.getFullYear()),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0'));
+ const claudeDir=join(home,'.claude/projects',project.replace(/[^a-zA-Z0-9]/g,'-'));await mkdir(codexDir,{recursive:true});await mkdir(claudeDir,{recursive:true});
+ const source=join(codexDir,'one.jsonl');await writeFile(source,codex(project));
+ await writeFile(join(claudeDir,'one.jsonl'),JSON.stringify({type:'user',sessionId:'claude-one',cwd:project,timestamp:new Date(at).toISOString(),message:{role:'user',content:'Compare alternatives before choosing.'}})+'\n');
+ const rows=[];let fail=false,corrupt=false,postCount=0,unauthorized=false,token='x'.repeat(40),owner='b'.repeat(64),scopes=[await projectId(project)];
+ const deletedSessions=new Set(),getProblems=new Map();let workbench=null,uploadProblem=null;
+ const server=createServer(async(req,res)=>{
+  res.setHeader('content-type','application/json');
+  const send=(status,b)=>{res.writeHead(status);res.end(JSON.stringify(b));};
+  if(unauthorized||req.headers.authorization!=='Bearer '+token)return send(401,{error:'unauthorized'});
+  const u=new URL(req.url,'http://localhost');
+  if(req.method==='POST'){
+   postCount++;if(fail)return send(503,{});if(uploadProblem)return send(uploadProblem.status,uploadProblem.body);
+   let body='';for await(const c of req)body+=c;const snapshot=JSON.parse(body);
+   if(deletedSessions.has(snapshot.host+':'+snapshot.session))return send(410,{error:'session_deleted'});
+   assert.equal(digestOf(snapshot.payload),snapshot.digest);
+   let row=rows.find(r=>r.snapshot.digest===snapshot.digest&&r.snapshot.host===snapshot.host&&r.snapshot.project===snapshot.project&&r.snapshot.session===snapshot.session);
+   if(!row){row={snapshot,receipt:{state:'accepted-server',id:randomUUID(),digest:snapshot.digest,accepted_at:new Date().toISOString()}};rows.push(row);}
+   return send(200,{receipt:corrupt?{...row.receipt,digest:'bad'}:row.receipt});
+  }
+  if(u.pathname==='/api/measurement/workbench'){if(workbench)return send(workbench.status,workbench.body);const row=rows.find(r=>r.receipt.id===u.searchParams.get('id'));return send(200,u.searchParams.has('id')?{...row,draft:{state:'draft'},result:{state:'held',reason:'insufficient_evidence'},revision:1,history:[{revision:1}],actions:[]}:{sessions:rows.map(r=>({...r.receipt,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session})),assessments:[],actions:[],comparisons:[]});}
+  if(u.searchParams.has('id')&&getProblems.has(u.searchParams.get('id'))){const problem=getProblems.get(u.searchParams.get('id'));return send(problem.status,problem.body);}
+  if(u.searchParams.has('id')){const row=rows.find(r=>r.receipt.id===u.searchParams.get('id'));return send(200,corrupt?{...row,snapshot:{...row.snapshot,digest:'bad'}}:row);}
+  const cursor=u.searchParams.get('cursor');const index=cursor?rows.findIndex(r=>r.receipt.id===cursor)+1:0;
+  return send(200,{owner,projects:scopes,snapshots:rows.slice(index).map(r=>({...r.receipt,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session})),next_cursor:null});
+ });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
+ const origin='http://127.0.0.1:'+server.address().port;
+ const root=join(dir,'state'),sync=new SessionSync({root,home,now:()=>at,discover:async()=>[]});await sync.connect({server:origin,token:'x'.repeat(40),projects:[project]});
+ return {dir,home,project,root,source,sync,rows,origin,codexDir,fail:v=>fail=v,corrupt:v=>corrupt=v,deny:v=>unauthorized=v,posts:()=>postCount,rotate:v=>token=v,owner:v=>owner=v,grant:v=>scopes=v,deletedSessions,getProblems,uploadProblem:(body,status=410)=>uploadProblem={body,status},workbench:(body,status=200)=>workbench={body,status}};
+}
+async function seedLegacy(f){const c=await f.sync.read('config');for(const host of ['codex','claude-code']){const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,host),'codex'),await projectId(f.project))[0];snapshot.host=host;await f.sync.write('outbox/'+c.namespace+'/'+host,snapshot);}}
+test('bounded chunks reuse source parser, redact secrets, and never invent interpretation',()=>{
+ const rows=Array.from({length:180},(_,i)=>msg('Evidence '+i+' '+ 'a'.repeat(19000)));
+ const parsed=parseLocalTranscript(codex('/project','large',rows),'codex');const snapshots=makeSnapshots(parsed,'a'.repeat(64));assert.ok(snapshots.length>1);
+ assert.equal(snapshots.reduce((n,s)=>n+s.payload.batch.events.length,0),182);
+ for(const s of snapshots){assert.ok(Buffer.byteLength(JSON.stringify(s))<=1536*1024);assert.equal(s.digest,digestOf(s.payload));assert.equal(s.payload.interpretation_status,'unreviewed');assert.ok(s.payload.batch.incomplete);}
+ const secret='sk-'+'a'.repeat(48);const redacted=makeSnapshots(parseLocalTranscript(codex('/project','secret',[msg(secret)]),'codex'),'a'.repeat(64));assert.ok(!JSON.stringify(redacted).includes(secret));
+ assert.throws(()=>validateServer('http://example.com'),/invalid_server/);assert.throws(()=>validateServer('https://u:password@example.com'),/invalid_server/);
+});
+test('Codex subagent ordinal boundary excludes inherited history and preserves child identity',async t=>{
+ const f=await fixture(t);
+ const rows=[
+  {ordinal:0,type:'session_meta',payload:{id:'child',cwd:f.project,forked_from_id:'parent',subagent_history_start_ordinal:5}},
+  {ordinal:1,type:'session_meta',payload:{id:'parent',cwd:'/unselected-parent'}},
+  {ordinal:2,...msg('Inherited parent message must not transfer.')},
+  {ordinal:3,type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'parent-model'}},
+  {ordinal:4,type:'event_msg',payload:{type:'task_started'}},
+  {ordinal:5,type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'child-model'}},
+  {ordinal:6,...msg('Delegated child task.')},
+  {ordinal:7,...msg('Child result.','assistant')},
+ ];
+ const raw=rows.map(JSON.stringify).join('\n')+'\n';await writeFile(f.source,raw);
+ const text=parseLocalTranscript(raw,'codex'),stream=await parseLocalTranscriptFile(f.source,'codex');
+ assert.deepEqual(stream,text);assert.equal(text.batch.session,'child');assert.equal(text.project,f.project);
+ assert.deepEqual(text.models,['child-model']);assert.deepEqual(text.batch.events.map(e=>e.text),['Delegated child task.','Child result.']);
+ assert.ok(text.exclusions.some(x=>x.includes('not direct evidence of human behavior')));
+ const noParent=structuredClone(rows);delete noParent[0].payload.forked_from_id;
+ assert.deepEqual(parseLocalTranscript(noParent.map(JSON.stringify).join('\n'),'codex').batch,text.batch);
+ const emptyPrefix=[{ordinal:0,type:'session_meta',payload:{id:'empty-prefix',cwd:f.project,subagent_history_start_ordinal:0}},{ordinal:1,...msg('First child message.')}];
+ assert.equal(parseLocalTranscript(emptyPrefix.map(JSON.stringify).join('\n'),'codex').batch.events.length,1);
+ const missing=structuredClone(rows);delete missing[6].ordinal;
+ assert.throws(()=>parseLocalTranscript(missing.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_ordinal/);
+ const bad=structuredClone(rows);bad[0].payload.subagent_history_start_ordinal=-1;
+ assert.throws(()=>parseLocalTranscript(bad.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_boundary/);
+ const foreign=[...rows,{ordinal:8,type:'session_meta',payload:{id:'foreign',cwd:f.project}}];
+ assert.throws(()=>parseLocalTranscript(foreign.map(JSON.stringify).join('\n'),'codex'),/mixed_sessions/);
+});
+test('results CLI reads scoped server list and verified detail, preserves held state and never writes a review',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const posts=f.posts();await f.sync.pause();
+ const cli=new URL('../dist/cli.mjs',import.meta.url).pathname;
+ const list=JSON.parse((await exec(process.execPath,[cli,'results','--state',f.root])).stdout);
+ assert.equal(list.sessions.length,2);assert.deepEqual(list.assessments,[]);
+ const id=f.rows[0].receipt.id;
+ const output=(await exec(process.execPath,[cli,'results','--id',id,'--state',f.root])).stdout;
+ const detail=JSON.parse(output);assert.equal(detail.receipt.id,id);assert.equal(detail.result.state,'held');assert.equal(detail.revision,1);assert.equal(detail.history.length,1);assert.ok(!output.includes('x'.repeat(40)));assert.equal(f.posts(),posts);
+ await assert.rejects(f.sync.results('../escape'),/invalid_snapshot_id/);
+ f.workbench({sessions:[],assessments:[],actions:[{note:'x'.repeat(40)}],comparisons:[],token:'x'.repeat(40)});
+ assert.equal(JSON.stringify(await f.sync.results()).includes('x'.repeat(40)),false);
+ f.workbench({error:'snapshot_deleted'},410);
+ await assert.rejects(exec(process.execPath,[cli,'results','--id',id,'--state',f.root]),e=>{const body=JSON.parse(e.stdout);return e.code===1&&body.status===410&&body.code==='snapshot_deleted'&&!e.stdout.includes('x'.repeat(40));});
+});
+
+test('results fail closed on malformed lists and digest corruption; offline is an explicit error',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();
+ f.workbench({sessions:[],assessments:{},actions:[],comparisons:[]});await assert.rejects(f.sync.results(),/invalid_server_results/);
+ const row=f.rows[0];f.workbench({...row,snapshot:{...row.snapshot,digest:'bad'},draft:null,result:null,revision:0,history:[],actions:[]});await assert.rejects(f.sync.results(row.receipt.id),/invalid_server_results/);
+ f.workbench({error:'service_unavailable'},503);await assert.rejects(f.sync.results(),e=>e.status===503&&e.code==='service_unavailable');
+});
+
+test('remote import is validated before cursor advances and resumes after repair',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const cfg=await f.sync.read('config');
+ for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);await f.sync.store.remove('cursor/'+cfg.namespace);
+ f.corrupt(true);let r=await f.sync.tick();assert.equal(r.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
+ f.corrupt(false);r=await f.sync.tick();assert.equal(r.downloaded,2);assert.ok(await f.sync.read('cursor/'+cfg.namespace));
+ await f.sync.pause();await writeFile(f.source,codex(f.project,'sample',[msg('Do not upload while paused.')]));assert.equal((await f.sync.tick()).state,'disconnected');assert.equal(f.rows.length,2);
+});
+test('scope expansion replays B history skipped while only A was selected',async t=>{
+ const f=await fixture(t);await seedLegacy(f);const b=join(f.dir,'project-b');await mkdir(b);const bid=await projectId(b);
+ f.grant([await projectId(f.project),bid]);
+ const snapshot=makeSnapshots(parseLocalTranscript(codex(b,'earlier-b'),'codex'),bid)[0];
+ const receipt={state:'accepted-server',id:randomUUID(),digest:snapshot.digest,accepted_at:new Date().toISOString()};f.rows.push({snapshot,receipt});
+ await f.sync.tick();assert.equal((await f.sync.records()).length,2);
+ await f.sync.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project,b]});
+ assert.equal((await f.sync.tick()).downloaded,1);assert.equal((await f.sync.records()).length,3);
+});
+test('disabled project backlog cannot starve an active project upload',async t=>{
+ const f=await fixture(t);await seedLegacy(f);const c=await f.sync.read('config');
+ const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,'disabled'),'codex'),'c'.repeat(64))[0];
+ for(let i=0;i<50;i++)await f.sync.write('outbox/'+c.namespace+'/000'+String(i).padStart(3,'0'),snapshot);
+ const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,50);
+ assert.equal(result.issues.find(i=>i.code==='queued_project_not_enabled').count,50);
+});
+
+
+test('only snapshot_deleted 410 races are skipped before cursor advancement',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const cfg=await f.sync.read('config');
+ for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);
+ await f.sync.store.remove('cursor/'+cfg.namespace);
+ const first=f.rows[0].receipt.id;
+ f.getProblems.set(first,{status:410,body:{error:'different_gone_reason'}});
+ let result=await f.sync.tick();assert.equal(result.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
+ await assert.rejects(f.sync.request(cfg,'/api/measurement/snapshots?id='+first),e=>e instanceof SyncHttpError&&e.status===410&&e.code==='different_gone_reason');
+ f.getProblems.set(first,{status:410,body:{error:'snapshot_deleted'}});
+ result=await f.sync.tick();assert.equal(result.deleted_snapshots,1);assert.equal(result.downloaded,1);assert.equal(await f.sync.read('cursor/'+cfg.namespace),f.rows.at(-1).receipt.id);
+ const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at,discover:async()=>[]});assert.equal((await reopened.tick()).downloaded,0);assert.equal((await reopened.records()).length,1);
+});
+
+test('unrelated 410 upload errors never discard or suppress a session',async t=>{
+ const f=await fixture(t);await seedLegacy(f);f.uploadProblem({error:'snapshot_deleted'});
+ const result=await f.sync.tick();assert.equal(result.pending,2);assert.equal(result.discarded_uploads,0);assert.equal(result.uploaded,0);
+ assert.deepEqual(await f.sync.store.list('suppressed/'),[]);assert.ok(result.issues.some(i=>i.code==='server_410'));
+});

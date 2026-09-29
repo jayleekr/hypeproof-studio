@@ -1,7 +1,8 @@
+import type { LocalReviewRequest } from "../../src/localReviewProtocol";
 import type { HostMessage, WebviewMessage } from "../../src/protocol";
 
 interface VSCodeApi {
-  postMessage(msg: WebviewMessage): void;
+  postMessage(msg: WebviewMessage | LocalReviewRequest): void;
   getState<T>(): T | undefined;
   setState<T>(state: T): void;
 }
@@ -33,3 +34,5 @@ export function onHostMessage(handler: (m: HostMessage) => void): () => void {
   window.addEventListener("message", listener);
   return () => window.removeEventListener("message", listener);
 }
+
+export function postLocalReview(msg: LocalReviewRequest): void { api?.postMessage(msg); }

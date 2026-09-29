@@ -196,8 +196,8 @@ export function logModeration(env: Env, l: ModerationLogEntry): void {
 // this promise, the row silently vanished. Accounting must never be lost to
 // attribution: log loudly, then retry once with session_id=NULL (the column
 // is nullable). This function never rejects — it is always fire-and-forget.
-export async function persistUsage(env: Env, l: ChatLog & { session_id: string | null }): Promise<void> {
-  const insert = (session_id: string | null) =>
+export async function persistUsage(env: Env, l: ChatLog & { session_id: string | null }, link?: { class_run_id: string; student_id: string; request_id: string; non_lesson?: boolean } | null): Promise<void> {
+  const statement = (session_id: string | null) =>
     env.HPS_DB
       .prepare(
         `INSERT INTO usage_log
@@ -217,8 +217,22 @@ export async function persistUsage(env: Env, l: ChatLog & { session_id: string |
         l.cache_create,
         l.latency_ms,
         l.status,
-      )
-      .run();
+      );
+  // #751 U3 — under enforced lesson bindings the usage row and the note "this row is THAT permitted request" are one batch:
+  // `last_insert_rowid()` is the row the statement before it stored. If the batch cannot be written, the usage row is
+  // still stored the old way below and stays unlinked — which the collection seal reads as "cannot attribute", never as fine.
+  const insert = async (session_id: string | null) => {
+    if (link) {
+      // `non_lesson`: a model call that is not an execution of the learner's lesson (the opt-in observation assessment). It has no
+      // permitted-request row to point at; it is recorded as such with an EMPTY lesson, so that it is neither a basis nor unattributed.
+      const note = link.non_lesson
+        ? env.HPS_DB.prepare("INSERT INTO classroom_lesson_requests(class_run_id,student_id,request_id,turn_id,binding_seq,lesson_sha256,permitted_at,usage_row_id) VALUES(?,?,?,'',0,'',?,last_insert_rowid()) ON CONFLICT DO NOTHING").bind(link.class_run_id, link.student_id, link.request_id, Date.now())
+        : env.HPS_DB.prepare('UPDATE classroom_lesson_requests SET usage_row_id=last_insert_rowid() WHERE class_run_id=? AND student_id=? AND request_id=? AND usage_row_id IS NULL').bind(link.class_run_id, link.student_id, link.request_id);
+      try { await env.HPS_DB.batch([statement(session_id), note]); return; }
+      catch (err) { console.error('persistUsage: usage row not linked to its permitted request — retrying unlinked:', err); }
+    }
+    await statement(session_id).run();
+  };
   try {
     await insert(l.session_id);
   } catch (err) {

@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, useRef } from "react";
-import type { AssetScoreChunk, ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
 import {
   emptyTimeline,
   timelineCitations,
@@ -14,6 +14,7 @@ import {
 import { onHostMessage, postToHost } from "./vscode";
 import { runVoiceCapabilityProbe } from "./voiceProbe";
 import { ChatPanel } from "./ChatPanel";
+import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
 interface State {
@@ -27,7 +28,6 @@ interface State {
   error: string | null;
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
-  assetScore: AssetScoreChunk | null;
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
@@ -48,12 +48,11 @@ type Action =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
   | { type: "streamCitations"; citations: Citation[] }
-  | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
-  | { type: "streamStopped" }
+  | { type: "streamStopped"; by?: "instructor" }
   | { type: "worldOpened"; id: string }
   | { type: "publishStart" }
   | { type: "publishResult"; state: "uploading" | "done" | "error"; url?: string; message?: string }
@@ -63,6 +62,8 @@ type Action =
 // #497 — 사용자가 Stop 을 눌렀을 때의 안내. 오류가 아니므로 에러 배너를 쓰지
 // 않는다 ("문제가 생겼어요" + 🚨 신고하기 는 정상 조작을 사고로 만든다).
 const STOP_NOTICE = "답변 생성이 중지되었습니다. 다시 채팅을 입력해주세요.";
+// #751 — a classroom stop is not a fault and not the learner's own click: say who stopped it and that nothing was lost.
+const INSTRUCTOR_STOP_NOTICE = "강사가 지금 실행 중이던 작업을 멈췄어요. 대화와 파일은 그대로예요. 준비되면 다시 입력해 주세요.";
 
 const initialState: State = {
   config: null,
@@ -71,7 +72,6 @@ const initialState: State = {
   error: null,
   errorRequestId: null,
   errorRunbookUrl: null,
-  assetScore: null,
   pageNotice: null,
   aiNotice: null,
   stopNotice: null,
@@ -94,7 +94,6 @@ function reducer(state: State, action: Action): State {
         streamId: action.streamId,
         error: null,
         stopNotice: null,   // #497 — 새 턴이 시작되면 이전 중지 안내는 사라진다
-        assetScore: null,
         // #503 — 직전 턴의 툴 줄을 **비우지 않는다**. 예전에는 여기서 toolLog 를
         // [] 로 밀어서, 다음 턴이 시작되는 순간 이전 턴이 무슨 도구를 썼는지가
         // 통째로 증발했다(스크롤을 올려도 말풍선만 남았다).
@@ -104,8 +103,6 @@ function reducer(state: State, action: Action): State {
       return { ...state, timeline: timelineDelta(state.timeline, action.delta, Date.now()) };
     case "streamCitations":
       return { ...state, timeline: timelineCitations(state.timeline, action.citations) };
-    case "streamAssetScore":
-      return { ...state, assetScore: action.assetScore };
     case "toolLog":
       // 같은 id 는 제자리 갱신(running → done/error), 새 id 는 지금 이 자리에 삽입.
       return { ...state, timeline: timelineTool(state.timeline, action.entry, Date.now()) };
@@ -150,7 +147,7 @@ function reducer(state: State, action: Action): State {
         error: null,
         errorRequestId: null,
         errorRunbookUrl: null,
-        stopNotice: STOP_NOTICE,
+        stopNotice: action.by === "instructor" ? INSTRUCTOR_STOP_NOTICE : STOP_NOTICE,
       };
     case "streamError":
       return {
@@ -215,14 +212,13 @@ export function App() {
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
-        case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
-        case "streamStopped": dispatch({ type: "streamStopped" }); break;
+        case "streamStopped": dispatch({ type: "streamStopped", by: msg.by }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
         case "attachImage": setIncomingImage({ dataUrl: msg.dataUrl, nonce: Date.now() }); break;
@@ -241,12 +237,12 @@ export function App() {
   // 전에 role:"tool" 이 걸러진다(chatTimeline.modelHistory).
   const messages = state.timeline.items;
 
-  const send = (text: string, images?: string[]) => {
+  const send = (text: string, images?: string[], imports?: Array<{ object_id: string; revision: number; hash16: string }>) => {
     const trimmed = text.trim();
     const hasImages = !!images && images.length > 0;
     if ((!trimmed && !hasImages) || state.streamId) return;
     dispatch({ type: "userSent", text: trimmed, images });
-    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images });
+    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images, ...(imports?.length ? { imports } : {}) });
   };
 
   const retry = (prompt: string) => {
@@ -289,6 +285,46 @@ export function App() {
   return (
     <ChatErrorBoundary onReset={() => { setShouldCrash(false); postToHost({ type: "ready" }); }}>
       <CrashIfFlagged crash={shouldCrash} />
+      {/* #1298 — instructor tokens get the extended panel; student tokens get the standard one. */}
+      {state.config?.isInstructor ? (
+        <InstructorChatPanel
+          key={state.config?.activity?.id ?? "disconnected-instructor"}
+          incomingImage={incomingImage}
+          config={state.config}
+          messages={messages}
+          pageNotice={state.pageNotice}
+          aiNotice={state.aiNotice}
+          stopNotice={state.stopNotice}
+          openWorldId={state.openWorldId}
+          publish={state.publish}
+          onPublish={() => {
+            dispatch({ type: "publishStart" });
+            postToHost({ type: "publishToGallery" });
+          }}
+          streaming={!!state.streamId}
+          streamingId={state.timeline.openId}
+          error={state.error}
+          errorRequestId={state.errorRequestId}
+          errorRunbookUrl={state.errorRunbookUrl}
+          canRetryLast={hasLastUserPrompt && !state.streamId}
+          onSend={send}
+          onRetry={retry}
+          onRetryLast={retryLast}
+          onDismissError={dismissError}
+          onCancel={cancel}
+          onClear={() => postToHost({ type: "clearHistory" })}
+          onSetToken={() => postToHost({ type: "setToken" })}
+          onSettings={() => postToHost({ type: "openSettings" })}
+          onRunCode={(html) => postToHost({ type: "runCode", html })}
+          onNamingRitual={() => postToHost({ type: "namingRitual" })}
+          onSaveCoach={(name, personality) =>
+            postToHost({ type: "saveCoach", name, personality })
+          }
+          onReportProblem={() => postToHost({ type: "openReportModal" })}
+          onInstallUpdate={() => postToHost({ type: "installUpdate" })}
+          onDismissUpdate={(version) => postToHost({ type: "dismissUpdate", version })}
+        />
+      ) : (
       <ChatPanel
         key={state.config?.activity?.id ?? "disconnected"}
         incomingImage={incomingImage}
@@ -328,6 +364,7 @@ export function App() {
         onInstallUpdate={() => postToHost({ type: "installUpdate" })}
         onDismissUpdate={(version) => postToHost({ type: "dismissUpdate", version })}
       />
+      )}
     </ChatErrorBoundary>
   );
 }

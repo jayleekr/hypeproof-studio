@@ -33,12 +33,17 @@ import {
   type LLMProvider,
 } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
-import { gateChatRequest } from "../lib/chat-gate";
+import { recordRehearsalRequest } from '../lib/lesson-rehearsal-store';
+import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
-import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { resolveEffectiveLesson, recordDispatch, recordOutcome, closeTurn, readTurn, bindingsEnforced, type BindingView } from '../lib/lesson-binding-store';
+import { BINDING_HEADER, CLOSE_OUTCOMES, TURN_ID_RE, classifyOutcome, turnState } from '../lib/lesson-binding';
+import { profileServesCohort } from '../lib/cohort-binding';
 import { lessonAssistantName } from '../lib/session-design';
-import { isTokenRevoked, getRoster } from '../lib/kv';
+import { isTokenRevoked, getRoster, getActiveSession, isSessionLive } from '../lib/kv';
+/** #751 U3 — the first dispatch of a turn could not be put on record, so the provider is not called. */
+class LessonHold extends Error { code: string; constructor(code: string) { super(code); this.code = code; } }
 import { translate, translateOpenAI, modelAnnouncement, type CoachContext } from "../lib/translate";
 import { callAnthropic, callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
@@ -67,6 +72,7 @@ import {
   MODERATION_BLOCK_MESSAGE_KO,
 } from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
+import { isObservationFormat, servedObservationFormat, observationCapability } from "../lib/measurement-core/legacy-observation.ts";
 
 // #358 — request-shaped upstream 4xx that /v1/chat passes through with its REAL
 // status + a sanitized OpenAI-shaped error `type`, instead of masking it as a
@@ -105,7 +111,7 @@ chat.get("/health", (c) =>
 // the active LLM provider (incl. anthropic proxy URL when set), KV, D1.
 // Used by:
 //   - the 15-min heartbeat cron (#45) when it needs richer diagnostics
-//   - operator console during 보아치과 티저 세션 (Jay polls)
+//   - operator console during the 보아치과 teaser session (Jay polls)
 //   - manual `wrangler tail` smoke before deploy
 //
 // Auth: admin Basic only. Operator surface — never a path the student app calls.
@@ -162,11 +168,12 @@ chat.get("/health/deep", async (c) => {
 // ---------------------------------------------------------------------------
 
 
-// GET /v1/worlds/:id — 게스트의 세상 사전 완성본 HTML (2026-08-19).
-// 학생 토큰이면 누구나. 코치가 만들 필요 없이 Studio 가 즉시 띄운다.
-// GET /v1/worlds/:id/engine.js — **그 세상만의** 엔진 (2026-08-20).
-// 공용본에는 9개 세상 스프라이트가 다 들어 있어, 코치가 읽으면 남의 세상이 섞인다
-// (실기기: 초코 세상에서 얼음). 이 경로는 그 세상이 쓰는 그림만 남겨 내려준다.
+// GET /v1/worlds/:id — the pre-built HTML of a guest's world (2026-08-19).
+// Any student token. Studio shows it instantly, with nothing for the coach to build.
+// GET /v1/worlds/:id/engine.js — the engine for **that world only** (2026-08-20).
+// The shared copy carries all 9 worlds' sprites, so when the coach reads it another
+// world's art bleeds in (on a real device: ice in 초코's world). This route serves
+// down only the art that world uses.
 chat.get("/worlds/:id/engine.js", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
@@ -175,8 +182,9 @@ chat.get("/worlds/:id/engine.js", async (c) => {
   return new Response(js, { status: 200, headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } });
 });
 
-// GET /v1/worlds/engine.js — 9개 세상이 공유하는 도트 엔진 + 스프라이트 (#629).
-// Studio 가 index.html 과 같은 폴더에 저장하고, 세상 HTML 이 <script src="engine.js"> 로 부른다.
+// GET /v1/worlds/engine.js — the dot engine + sprites the 9 worlds share (#629).
+// Studio saves it in the same folder as index.html, and a world's HTML loads it with
+// <script src="engine.js">.
 chat.get("/worlds/engine.js", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
@@ -211,6 +219,38 @@ chat.get('/activity', async c => {
   if (!gate.ok) return gate.response;
   c.header('cache-control', 'no-store');
   return c.json({ activity_id: await activityIdentity(gate.payload) });
+});
+
+// #751 U3 — what the Service has on record about ONE turn of THIS token, and the host's statement that the turn ended.
+// The SDK host cannot read a refused request's body, so it asks here before it decides whether the learner's input goes
+// back into the composer (nothing dispatched) or the turn is marked partially executed (something dispatched). "Not
+// started" is answered only from a successful read of an enforced Service; everything else is `unknown`.
+async function turnCaller(c: any): Promise<{ payload: TokenPayload; run: string | null } | Response> {
+  c.header('cache-control', 'no-store');
+  const auth = await authenticateToken(c.req.header('authorization'), c.env.HPS_SIGNING_SECRET);
+  if (!auth.ok) return c.json({ error: { type: 'auth', code: auth.code, message: auth.message } }, 401);
+  if (auth.payload.role === 'issuer') return c.json({ error: { type: 'auth', code: 'wrong_role', message: 'issuer tokens have no turns' } }, 401);
+  if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
+  if (!TURN_ID_RE.test(c.req.param('turn') ?? '')) return c.json({ error: { type: 'request', code: 'turn_id', message: 'turn id' } }, 400);
+  const active = await getActiveSession(c.env.HPS_KV, auth.payload.c);
+  return { payload: auth.payload, run: active?.session_id ?? null };
+}
+chat.get('/lesson-turns/:turn', async (c) => {
+  const who = await turnCaller(c); if (who instanceof Response) return who;
+  // Looked up where the turn was admitted (any run of this cohort), not only in the run that is active now.
+  const read = await readTurn(c.env, who.payload, who.run, c.req.param('turn')!);
+  if (!read.known) return c.json({ turn_id: c.req.param('turn'), state: 'unknown' });
+  const row = read.row;
+  return c.json({ turn_id: c.req.param('turn'), state: turnState(row), admitted: !!row, closed: !!row?.closed_at, binding_key: row?.binding_key ?? null, ...(row?.last_failure_kind ? { last_failure: row.last_failure_kind } : {}) });
+});
+chat.post('/lesson-turns/:turn/close', async (c) => {
+  const who = await turnCaller(c); if (who instanceof Response) return who;
+  let b: any = null; try { b = await c.req.json(); } catch { b = null; }
+  const outcome = b && typeof b === 'object' && Object.keys(b).every((k) => k === 'outcome') && (CLOSE_OUTCOMES as readonly unknown[]).includes(b.outcome) ? b.outcome as string : null;
+  if (!outcome) return c.json({ error: { type: 'request', code: 'outcome', message: `outcome is one of ${CLOSE_OUTCOMES.join(', ')}` } }, 400);
+  if (!bindingsEnforced(c.env)) return c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'not_tracked' });
+  const r = await closeTurn(c.env, who.payload, { classRunId: who.run, turnId: c.req.param('turn')!, outcome, now: Date.now() });
+  return r === 'unavailable' ? c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'storage' }, 503) : c.json({ turn_id: c.req.param('turn'), closed: r !== 'not_found', reason: r });
 });
 
 chat.get("/profile", async (c) => {
@@ -261,16 +301,69 @@ chat.get("/profile", async (c) => {
   let { profile, module } = resolved;
   if(auth.payload.account){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;profile=gate.profile;c.header('cache-control','no-store');}
   let observationScope:string|undefined;
-  if(auth.payload.native_trial||profile.observation?.enabled){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
+  // ADR 0010 step 2 — the session gate no longer rides on observation.
+  //
+  // It used to read `observationCapability(profile.observation).record`, which
+  // meant the day `record` defaults on (ADR step 4) seven cohorts would have
+  // flipped from 200 to 403 here and no longer been able to read their class,
+  // greeting and model list before the instructor opened the session. Nothing
+  // about reading a profile depends on being observed. The condition is now
+  // the cohort's own `session.requires_open_session`, and `native_trial` keeps
+  // its own disjunct because for a trial seat this gate is the grant / expiry /
+  // revocation check (chat-gate.ts), not a class check.
+  //
+  // Only this route moves. `/v1/chat/completions`, `/v1/messages` and
+  // `/v1/observations/*` each call `gateChatRequest` unconditionally, so a seat
+  // that can now read its profile before class still cannot send anything.
+  if(auth.payload.native_trial||profile.session.requires_open_session){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
+  // One decision, read twice below (the block and the stale-app banner).
+  //
+  // `&& observationScope` is the guard that makes the line above safe to
+  // loosen. `nativeObservationScope` needs a `session_id`, so a recording seat
+  // that did not take the gate has no scope — and an observation block WITHOUT
+  // a scope is worse than none at all: the shipped app tests the block's bare
+  // truthiness and falls back to `sha256(token)` for the chat-history bucket
+  // (v0.1.56 chatPanelProvider.ts:660), which moves every existing
+  // conversation out of view and moves it again on each token reissue.
+  // Identical for all 9 profiles today — the two recording cohorts are exactly
+  // the two that declare `requires_open_session`, so the serving snapshot's 36
+  // cells do not move. It is a guard against a future step, not a change.
+  const observationCapabilities = observationCapability(profile.observation);
+  const servedObservation = observationCapabilities.record && observationScope
+    ? {
+        format: servedObservationFormat(
+          profile.observation?.format,
+          c.req.header("x-hps-observation-format"),
+        ),
+        scope: observationScope,
+        assess: observationCapabilities.assess,
+      }
+    : null;
 
   let lesson = null;
+  let lessonBinding: BindingView | null = null;
   if (auth.payload.lesson) {
     c.header('cache-control', 'no-store');
     if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
-    if (profile.session.cohort_id !== auth.payload.c || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
+    const cohortDecision = await profileServesCohort(c.env, profile, auth.payload);
+    if (!cohortDecision.ok || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
       return c.json({ error: { type: 'auth', code: 'not_in_roster', message: '수업 명단을 강사에게 확인하세요.' } }, 403);
-    lesson = await resolveTokenLesson(c.env, auth.payload);
-    if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
+    // #751 U3 — the SAME resolver the chat gate uses, with the same class run: the app's tool policy, model list and steps
+    // come from the binding the Service would execute this seat under. An unreadable binding is a 503 here — the app keeps
+    // the profile it already has rather than being handed the (possibly wider) token lesson.
+    const active = bindingsEnforced(c.env) ? await getActiveSession(c.env.HPS_KV, auth.payload.c) : null;
+    const resolved = await resolveEffectiveLesson(c.env, auth.payload, { classRunId: active && isSessionLive(active) && active.profile_id === profile.id ? active.session_id : null, lessonCohort: cohortDecision.lessonCohort, mode: 'read', now: Date.now() });
+    if (!resolved.ok) return resolved.code === 'lesson_unavailable'
+      ? c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409)
+      : c.json({ error: { type: 'lesson_binding', code: resolved.code, message: '수업 설정을 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' } }, 503);
+    lesson = resolved.lesson; lessonBinding = resolved.binding;
+  }
+  // #1012 · #751 G2 — a rehearsal code tells the App it runs an instructor's learner-condition rehearsal of this candidate.
+  // Data only: the lesson, tools and model above are exactly what a learner invited to that version would get.
+  let rehearsal: { id: string; course_id: string; version: string; expires_at: number; judged: boolean } | null = null;
+  if (lesson && auth.payload.rehearsal && auth.payload.jti) {
+    const row = await c.env.HPS_DB.prepare('SELECT rehearsal_id,course_id,version,lesson_sha256,expires_at,verdict FROM authoring_rehearsals WHERE rehearsal_id=? AND token_jti=?').bind(auth.payload.rehearsal, auth.payload.jti).first<{ rehearsal_id: string; course_id: string; version: string; lesson_sha256: string; expires_at: number; verdict: string | null }>().catch(() => null);
+    if (row && row.lesson_sha256 === lesson.sha256) rehearsal = { id: row.rehearsal_id, course_id: row.course_id, version: row.version, expires_at: row.expires_at, judged: !!row.verdict };
   }
 
   const assistantName = lessonAssistantName(lesson?.content);
@@ -284,12 +377,37 @@ chat.get("/profile", async (c) => {
   const served = lesson?.content.features ? applyLessonFeatures(profile, lesson.content.features) : profile;
   return c.json({
     ...(lesson ? { lesson } : {}),
+    // Served only where bindings are enforced: without enforcement the response is byte-identical to what it was.
+    ...(lessonBinding?.enforced ? { lesson_binding: lessonBinding } : {}),
+    ...(rehearsal ? { rehearsal } : {}),
     activity_id: await activityIdentity(auth.payload),
     activity_kind: auth.payload.native_trial ? "trial" : auth.payload.account ? "personal" : "classroom",
     profile_id: profile.id,
     ...(auth.payload.account?{access_identity:{kind:'account',scope:'account-'+await accessDigest(auth.payload.account)}}:{}),
     model_selection: servedModelSelection(c.env, profile, lesson?.content.model),
-    ...(profile.observation?.enabled ? { observation: { format: 'hps-observation/1', scope:observationScope } } : {}),
+    // The format is the cohort's to declare (design §관측 이벤트와 필드). It used
+    // to be hardcoded to /1 here, which meant a seat could never be served /2 —
+    // so the learning events, the completion gate and the Evidence drawer were
+    // all built and all unreachable. That is exactly the failure the comment
+    // above warns about: every gate test passed and the feature shipped INERT.
+    //
+    // `servedObservationFormat` also DOWNGRADES: `x-hps-observation-format` is
+    // the client telling us what its bundled validator understands, and an
+    // older app that only knows /1 would reject a /2 batch outright. Serving a
+    // cohort's /2 to that app would break observation for it entirely, so the
+    // cohort's declaration is a ceiling, not an order.
+    //
+    // SX-59, quoted rather than paraphrased because a wider paraphrase is how
+    // a citation starts meaning more than its row: "작업 중 어떤 화면에도 역량
+    // 점수·등급·'개선 필요' 배지가 없다". The observation RESULTS panel shows
+    // per-capability verdicts, so it is drawn only where a cohort has opted
+    // into assessment — the remedy the same row names ("학습 경험 프로필에서
+    // 비활성"), because the trial's own row (TUX-OBS-07) wants that screen.
+    // That opt-in is what `assess` carries. Recording is a separate switch and
+    // stays on: the student is just not graded at themselves while working.
+    //
+    // Decided once, above, so the block and the banner below cannot disagree.
+    ...(servedObservation ? { observation: servedObservation } : {}),
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and
     // the instructor tell "which curriculum" without a D1 query.
@@ -299,18 +417,43 @@ chat.get("/profile", async (c) => {
     series_index: profile.session.series_index,
     series_total: profile.session.series_total,
     assets_focus: profile.assets_focus,
-    welcome: lesson ? {
-      greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
-      example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
-    } : profile.observation?.enabled && c.req.header("x-hps-observation-format") !== "hps-observation/1" ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
+    // A lesson NO LONGER replaces the cohort's welcome (#1222 G4).
+    //
+    // It used to overwrite both fields wholesale. `greeting_md` is the one the
+    // client actually reads (`webview-ui/src/ChatPanel.tsx`), and for the kids
+    // cohort that string is not decoration — it is the instruction that points
+    // a child at the only affordance that works. Its own profile says why:
+    //
+    //   sk-biopharm-kids-s1.ts — "이름을 타이핑하면 세상이 안 열리고 그냥 코치
+    //   턴이 된다. 화면에서 가장 큰 글씨가 안 되는 길을 가리키면 안 되므로,
+    //   작성란 바로 위 친구 스트립을 가리킨다."
+    //
+    // Attaching a lesson replaced that with "내 수업에서 과제와 확인 기준을 읽고
+    // 시작하세요." — adult register, and it stops pointing at the friend strip.
+    // The 8-year-old is then told to read a thing the screen no longer shows.
+    //
+    // Nothing is lost by keeping the cohort's copy: the lesson's title, mission
+    // and steps already reach the student through `lesson`, which is what the
+    // mission header renders (SX-01/SX-02 put week · mission · 1–3 actions
+    // there). The replacement was a second, worse copy of the same thing.
+    //
+    // A cohort profile is the cohort's. A lesson supplies the lesson.
+    welcome: servedObservation && !isObservationFormat(c.req.header("x-hps-observation-format"))
+      // The banner reads `servedObservation`, not `record`, for the same reason
+      // the block does: telling a student to update Studio for a screen this
+      // response is not offering them is noise, and the two answers drifting is
+      // how the P1 repair shipped a "please update" banner to every seat.
+      ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."}
+      : profile.welcome,
     // #747 feature A — a frozen lesson may fix the AI's display name for this
     // seat. It is projected onto the existing ux.coach contract (fixed +
     // fallback_name) so every app version shows it through the same
     // fixed-name precedence; no new top-level key, no capability change.
     ux: assistantName ? { ...profile.ux, coach: { ...profile.ux.coach, naming_mode: 'fixed', fallback_name: assistantName } } : profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
-    // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를
-    // 낼지만 판단한다 — 강제는 어차피 PUT /v1/logs 가 서버에서 한다(fail closed).
+    // #596 — session-log upload opt-in. The client uses it only to decide whether to
+    // show the "기록 보내기" UI — enforcement is done server-side by PUT /v1/logs
+    // anyway (fail closed).
     analytics: { upload_session_logs: profile.analytics.upload_session_logs === true },
     preview: profile.preview,
     // #422 — the cohort's on-disk workspace folder. The chat extension opens
@@ -319,8 +462,9 @@ chat.get("/profile", async (c) => {
     // lets the client stop hardcoding "~/HypeProofGames" for every cohort.
     workspace_root: profile.sandbox.workspace_root ?? null,
     ...(profile.workspace_start ? {workspace_start:profile.workspace_start} : {}),
-    // 2026-08-19 — 게스트의 세상 사전 완성본 목록. kids-quest tier 에서만. 확장이
-    // 아이의 "🐕 초코 세상에 가볼래"를 이 목록으로 매칭해 GET /v1/worlds/:id 를 즉시 띄운다.
+    // 2026-08-19 — the list of pre-built guest worlds. kids-quest tier only. The
+    // extension matches the child's "🐕 초코 세상에 가볼래" against this list and opens
+    // GET /v1/worlds/:id immediately.
     worlds: profile.game?.template_tier === "kids-quest" ? listWorlds() : undefined,
     // #278 — input capabilities, default off (minor-safe). Drives whether the
     // chat panel exposes "페이지를 코치에게" / image paste.
@@ -379,22 +523,24 @@ chat.get("/profile", async (c) => {
     // a profile mistake can never route a child to the file/exec-capable
     // runtime. Absent → proxy. The client still gates every tool via
     // canUseTool and honors the machine-scoped runtime setting.
-    // 2026-08-11 결정 — 미성년 코호트도 프로필이 명시적으로 opt-in 하면
-    // agent-sdk 에 도달한다. SK 아동 워크숍의 커리큘럼이 "코치가 워크스페이스의
-    // 파일을 읽고 고친다" 를 전제로 바뀌었고, 그러려면 파일 도구가 실행될
-    // 런타임이 필요하다. 이전에는 여기서 무조건 proxy 로 핀했다.
+    // 2026-08-11 decision — a minor cohort reaches agent-sdk too, when its profile
+    // explicitly opts in. The SK kids workshop curriculum changed to assume "the
+    // coach reads and fixes files in the workspace", and that needs a runtime where
+    // the file tools actually execute. Before, this place pinned to proxy
+    // unconditionally.
     //
-    // **무엇이 바뀌지 않았는가 (중요):**
-    //   - 모더레이션 — 인바운드/아웃바운드 스크린은 isMinorCohort 로 그대로 돈다
-    //     (이 파일 322·513행, messages.ts 298·444행). 이 변경과 무관한 계층이다.
-    //   - 도구 범위 — shell·browser·subagents 는 아동 프로필에 여전히 없고
-    //     하네스가 hard fail 로 막는다. 열린 것은 read/write 뿐이다.
-    //   - 경로 봉쇄 + 승인 모달 — 모든 툴 호출은 canUseTool 을 지나고
-    //     워크스페이스 밖 경로는 거부된다(evaluateSdkToolUse).
+    // **What did NOT change (important):**
+    //   - Moderation — the inbound/outbound screens still run off isMinorCohort
+    //     (this file lines 322·513, messages.ts 298·444). A layer unrelated to this
+    //     change.
+    //   - Tool scope — shell·browser·subagents are still absent from child profiles
+    //     and the harness blocks them with a hard fail. What opened is read/write only.
+    //   - Path sealing + approval modal — every tool call goes through canUseTool and
+    //     a path outside the workspace is refused (evaluateSdkToolUse).
     //
-    // 즉 "미성년은 무조건 proxy" 가 아니라 "미성년은 프로필이 명시하지 않으면
-    // proxy" 로 바뀐 것이다. 프로필에 sdk_tools 를 두지 않은 아동 코호트는
-    // 이전과 동작이 완전히 같다.
+    // That is, it went from "minors are proxy, always" to "minors are proxy unless the
+    // profile says otherwise". A child cohort with no sdk_tools in its profile behaves
+    // exactly as it did before.
     coach_runtime: profile.coach_runtime === "agent-sdk" ? "agent-sdk" : "proxy",
   });
 });
@@ -482,6 +628,13 @@ chat.post("/chat/completions", async (c) => {
   let reportedUsage: Record<string, unknown> = {};
   let returnedModel: string | null = null;
   let costComplete=false, costEnded=false;
+  // #751 U3 — execution evidence of the turn this request was admitted into (see `admit` below).
+  const lessonTurn = gate.turn;
+  // #751 U3 — under enforcement every permitted request is recorded with its lesson before it runs, turn id or not, and the
+  // usage row it produces is linked to that record. With enforcement unset both are null and nothing is added to this route.
+  const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
+  const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
+  let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
   const requestSignal = (multi||executionAccess) ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
 
   let effortReceipt: EffortReceipt | undefined;
@@ -511,6 +664,9 @@ chat.post("/chat/completions", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
+    // #1012 · #751 G2 — the rehearsal's own execution record. On this route the Service builds the upstream tool list itself.
+    if (dispatched && payload.rehearsal && gate.lessonSha) c.executionCtx.waitUntil(recordRehearsalRequest(env, payload, { requestId: usageRequestId, lessonSha: gate.lessonSha, step: c.req.header('x-hps-lesson-step')?.trim() ?? '', help: gate.help ?? '', runtime: 'proxy', model: modelLabel, toolNames: [], outcome: classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), status: upstreamStatus, now: Date.now() }));
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
       region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
@@ -529,7 +685,7 @@ chat.post("/chat/completions", async (c) => {
 
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }, usageLink()));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -554,8 +710,9 @@ chat.post("/chat/completions", async (c) => {
     // cannot re-title the AI or attach a personality on that seat.
     name: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-name")),
     personality: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-personality")),
-    // #507 — 프록시 경로의 브라우저 루프도 같은 주소를 알아야 한다. 클라이언트는
-    // 주소만 보내고, 문구는 워커가 만든다(주입 통로가 되지 않게).
+    // #507 — the proxy path's browser loop has to know the same URL. The client sends
+    // the URL only; the worker writes the wording (so it cannot become an injection
+    // channel).
     previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),
   };
 
@@ -602,12 +759,14 @@ chat.post("/chat/completions", async (c) => {
     }
   }
 
-  // Pick the upstream LLM. 우선순위는 **프로필 → 배포 기본값** 이다.
+  // Pick the upstream LLM. The precedence is **profile → deployment default**.
   //
-  // 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은 비싸도
-  // 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없어서, 프로필이 `model.provider` 를
-  // 선언하면 그 요청만 그쪽으로 나간다. 선언하지 않은 프로필은 지금까지와 똑같이
-  // LLM_PROVIDER 를 따른다 (기존 배포의 동작이 바뀌지 않는다).
+  // Different uses want different models — a kids' lesson wants the cheap, fast one;
+  // a high-risk artifact wants the accurate one even if it costs more. There is no
+  // reason to tie the whole deployment to one model, so when a profile declares
+  // `model.provider`, only that profile's requests go that way. A profile that does
+  // not declare one follows LLM_PROVIDER exactly as it did until now (the behaviour
+  // of existing deployments does not change).
   //
   // translate / translateOpenAI both drop client system+tool messages — the
   // trust model is identical either way.
@@ -654,7 +813,16 @@ chat.post("/chat/completions", async (c) => {
     c.header('x-hps-usage-request-id',usageRequestId);
     if (!reserved) return c.json({error:{code:'model_usage_limit',message:'실행 중인 작업이 있거나 이 수업의 요청 한도에 도달했습니다.'}},429);
   }
+  // #751 U3 — called by every provider branch right before its upstream call, AFTER budget admission: a request that is
+  // refused for its body, its effort or its budget has left no execution evidence. The first dispatch of a turn is a
+  // durable record that precedes the call; if it cannot be written the provider is not called (LessonHold).
   const admit=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
+    await reserve(wire,protocol);
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'proxy', model: String(wire.model ?? modelLabel), now: Date.now(), untracked: lessonUntracked });
+    if (!intent.ok) throw new LessonHold(intent.code);
+    dispatched = true;
+  };
+  const reserve=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
     if(!executionAccess)return;
     await reserveBudgetAttempt(env,executionAccess,{request_id:usageRequestId,turn_id:c.req.header('x-hps-turn-id'),session_id:session.session_id,payload,
       provider,model:wire.model,runtime:'proxy',features:permittedFeatureKeys(profile),effort:effortReceipt?.applied,protocol,body:wire});
@@ -691,14 +859,17 @@ chat.post("/chat/completions", async (c) => {
       await admit(oBody,'openai-chat');
       upstream = await callOpenAI(oBody, apiKey, requestSignal, c.env.OPENAI_BASE_URL);
     } else if (provider === "glm") {
-      // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
-      // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
+      // GLM (Z.ai) — an Anthropic-compatible path, so **the translator and the stream
+      // handling are reused as they are**. The only new thing is one URL (the measured
+      // evidence is written down in lib/glm.ts).
       //
-      // Anthropic 프록시/시크릿은 붙이지 않는다 — 그건 지역 차단된 api.anthropic.com
-      // 우회용이고 z.ai 에는 해당이 없다. 붙이면 프록시가 403 을 낸다.
+      // Do NOT attach the Anthropic proxy/secret — that is for getting around a
+      // region-blocked api.anthropic.com and does not apply to z.ai. Attach it and the
+      // proxy returns 403.
       //
-      // 캐시는 자동이 아니다: cache_control 을 명시해야 걸린다 (실측 81% 절감).
-      // 그 지시를 넣는 것은 translate() 쪽 일이라 이 wrapper 범위 밖이다 — #545.
+      // Caching is not automatic: it only applies when cache_control is explicit
+      // (measured 81% saving). Putting that instruction in is translate()'s job, so it
+      // is outside this wrapper's scope — #545.
       const gBody = translate(body as any, profile, coach, "glm");
       gBody.stream = stream;
       modelLabel = gBody.model;
@@ -734,6 +905,10 @@ chat.post("/chat/completions", async (c) => {
     }
   } catch (err) {
     if (err instanceof AccessError) return budgetErrorResponse(c,err);
+    if (err instanceof LessonHold) {
+      recordFailure(403, ERROR_KIND.BAD_REQUEST);
+      return c.json({ error: { type: 'lesson_binding', code: err.code, message: bindingRefusalMessage(err.code) } }, 403);
+    }
     if (err instanceof EffortPolicyError) {
       recordFailure(403, ERROR_KIND.BAD_REQUEST);
       return c.json({error:{type:'permission_error',message:err.message,code:'effort_not_allowed'}},403);
@@ -754,6 +929,7 @@ chat.post("/chat/completions", async (c) => {
   }
 
   // 7. Upstream guard
+  upstreamStatus = upstream.status;
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
     costEnded=upstream.status>=400&&upstream.status<500;
@@ -800,6 +976,8 @@ chat.post("/chat/completions", async (c) => {
     reportedUsage = {...(j.usage??{}),...(typeof j.service_tier==='string'?{service_tier:j.service_tier}:{})};
     returnedModel = typeof j.model === 'string' ? j.model : null;
     costComplete=true;costEnded=true;
+    // The provider's own end marker, not "a 2xx with a body": Anthropic `stop_reason`, OpenAI-shape `finish_reason`.
+    protocolDone = typeof j?.stop_reason === 'string' || typeof j?.choices?.[0]?.finish_reason === 'string';
     let text = "";
     let tin = 0;
     let tout = 0;
@@ -895,8 +1073,9 @@ chat.post("/chat/completions", async (c) => {
     }
     c.header("x-hps-model", modelLabel);
     if (fellBack) c.header("x-hps-fallback", "1");
-    // 요청한 모델을 못 지켰으면 **말한다** — alias 번역과 요청 무시가 선에서 구별되지
-    // 않던 것이 #897 H-05 관측이다. 서빙 모델은 바꾸지 않는다.
+    // If the requested model was not honoured, **say so** — #897 H-05 observed that
+    // alias translation and an ignored request were indistinguishable on the wire. The
+    // served model itself is not changed.
     const announce = modelAnnouncement((body as any)?.model, profile, modelLabel);
     if (announce.substituted) {
       c.header("x-hps-model-substituted", "1");
@@ -921,12 +1100,12 @@ chat.post("/chat/completions", async (c) => {
   //    (passthrough + usage tap); Anthropic events are transformed to OpenAI
   //    chunks.
   let streamedAssistantText = "";
-  // #684 — the "중단" case from the issue. The stream opened 200, so the client
+  // #684 — the "aborted" case from the issue. The stream opened 200, so the client
   // already has a status; the only place the gateway learns the turn actually
   // died is this hook, which the SSE layer fires BEFORE onUsage.
   let streamFailed = false;
   const streamOptions = {
-    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;protocolDone=true;},
     // #257 — lets the SSE layer emit a sanitized stream_error carrying the
     // request_id instead of raw internal prose.
     requestId: c.get("requestId"),
@@ -939,7 +1118,7 @@ chat.post("/chat/completions", async (c) => {
       streamedAssistantText += delta;
     },
     onStreamError: () => {
-      streamFailed = true;
+      streamFailed = true; streamBroke = true;
     },
     onBeforeDone: () => ({
       type: "asset_score",
@@ -1003,14 +1182,19 @@ chat.post("/chat/completions", async (c) => {
     ...((multi||executionAccess) ? { "x-hps-usage-request-id":usageRequestId } : {}),
     "x-hps-module": module.version,
     ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
-    // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
-    // (Hono 는 핸들러가 만든 Response 에 미들웨어 헤더를 합치지 않는다). 4xx
-    // (c.json) 경로에만 있던 x-request-id 를 스트리밍 200 에도 직접 싣는다 —
-    // 클라이언트 스풀의 usage requestKey 와 #64 신고 플로우가 이 값을 쓴다.
+    // #580 — returning a raw Response bypasses the request-id middleware's c.header()
+    // (Hono does not merge middleware headers into a Response the handler built). The
+    // x-request-id that existed only on the 4xx (c.json) path is carried explicitly on
+    // the streaming 200 as well — the client spool's usage requestKey and the #64
+    // report flow both use this value.
     "x-request-id": c.get("requestId"),
   };
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
-  // 스트리밍에도 같이 싣는다. 한쪽만 실으면 "스트림이면 조용하다" 는 새 구멍이 된다.
+  // #1008 — the gate's c.header() receipt does not survive a raw Response.
+  if (gate.help) streamHeaders["x-hps-help-mode"] = gate.help;
+  if (gate.binding) streamHeaders[BINDING_HEADER] = gate.binding.key;
+  // Carry it on the streaming path too. Carrying it on only one side opens a new
+  // hole: "it goes quiet when it streams".
   const streamAnnounce = modelAnnouncement((body as any)?.model, profile, modelLabel);
   if (streamAnnounce.substituted) {
     streamHeaders["x-hps-model-substituted"] = "1";

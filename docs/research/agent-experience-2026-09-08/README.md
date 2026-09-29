@@ -28,7 +28,7 @@ AI 이름/역할은 모델과 독립적으로 설정한다.
 수행한 채팅 UI 비교 보고서는 찾지 못했다.** 검색 범위는 현재 저장소의 추적 문서와
 접근 가능한 이슈이며 모든 과거 브랜치·외부 Notion/개인 자료의 부재를 단정하지 않는다.
 
-- [고교 트랙 전략](../../strategy/highschool-startup-track.md): Replit 등 시장 언급. 채팅 상호작용 비교는 아니다.
+- 고교 트랙 전략 (moved to the private lab repo on 2026-09-23): Replit 등 시장 언급. 채팅 상호작용 비교는 아니다.
 - [Vessel §4](../../plan/vessel-and-modules.md): 강사 보드와 인접 제품군 비교. 채팅·SDK 조합 분석과 범위가 다르다.
 - [브라우저 ADR](../../adr/0002-native-browser-via-webcontentsview.md), [SDK ADR](../../adr/0003-agent-sdk-coach-runtime.md): 구현 결정의 근거.
 - [Chalk 작성](../../requirements/chalk-authoring.md), [강사 운영](../../requirements/classroom-admin.md),

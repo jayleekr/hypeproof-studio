@@ -59,6 +59,34 @@ export class LiveServer {
     return this.server ? this.baseUrl : undefined;
   }
 
+  /**
+   * #751 — bring the preview back for the SAME root without touching any file.
+   * A healthy server only gets a reload push (its port, and so every open
+   * preview URL, stays valid). A dead one is started again; the OS picks a new
+   * port, which the caller must report instead of claiming the old tab works.
+   */
+  async recover(probe: (url: string) => Promise<boolean>): Promise<{ state: "no_preview" | "reloaded" | "restarted"; url?: string }> {
+    const root = this.root;
+    if (!root) return { state: "no_preview" };
+    if (this.server && this.baseUrl && (await probe(this.baseUrl))) { this.reload(); return { state: "reloaded", url: this.baseUrl }; }
+    const url = await this.start(root);
+    return { state: "restarted", url };
+  }
+
+  /**
+   * #751 U4 — test builds only (extension.ts arms it under HPS_TEST_PREVIEW_FAULT). The listening socket and every open
+   * connection die the way a crashed server's do, while root and address are kept — so `recover` meets a dead server and
+   * has to start one on a new port, as it would in class. No file, process or port outside this server is touched.
+   */
+  simulateCrashForTest(): void {
+    const server = this.server;
+    if (!server) return;
+    for (const res of this.sseClients) res.destroy();
+    this.sseClients.clear();
+    server.close();
+    server.closeAllConnections();
+  }
+
   /** Push a reload to all connected browser pages. */
   reload(): void {
     for (const res of this.sseClients) {

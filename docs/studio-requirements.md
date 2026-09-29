@@ -1,5 +1,35 @@
 # Studio behavioral requirements
 
+## Learning experience revision — 2026-09-18
+
+`REQ-STUDIO-LEARNING-EXPERIENCE`: the student's default screen shows the current
+task, customer and artifact; the coach asks and hints instead of answering;
+evidence (criteria, reasons, before/after, real vs simulated) is captured in
+the flow; reflection opens only at submit, session end and week end; no
+capability score, level or badge appears on a work screen; six-week content is
+session-design data, never code. Source: Jay's 2026-09-18 UI/UX design
+philosophy. [Intent INT-SX-00–10](intents/studio-learning-experience.md),
+[breakdown](design/ux-principles-breakdown-2026-09-18.md),
+[SX-01–60 requirements](requirements/studio-learning-experience.md),
+[design](design/studio-learning-experience.md),
+[SX-T validation](testing/studio-learning-experience.md),
+[plan and DAG](plan/studio-learning-experience.md).
+Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.
+Overnight execution governance: `.claude/hypeproof/ux/`.
+
+## Measurement core proposal — 2026-09-13
+
+`REQ-STUDIO-MEASUREMENT-CORE`: extract the existing observation/evidence/interpretation
+implementation into a common core consumed by Studio, Claude Code and Codex.
+Jay's real product work is the first use case, with local review, submission receipts
+and a follow-up improvement. New work uses the six-item model selected by Jay;
+legacy seven-item evidence remains readable in its original model.
+[Intent](intents/measurement-core.md), [MC-01–48 requirements](requirements/measurement-core.md),
+[MC-T01–24 validation](testing/measurement-core.md),
+[epic #1020](https://github.com/jayleekr/hypeproof-studio/issues/1020).
+Status: criteria proposed; runtime and human acceptance NOT RUN. Existing classroom
+policies and deployed legacy clients are unchanged by this documentation.
+
 ## Native trial revision — 2026-09-08
 
 `REQ-STUDIO-NATIVE-TRIAL`: a participant enters the existing Studio application
@@ -74,7 +104,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-B5 | Auth error 분류 (4 sub) | 401/expired·missing → 재-prompt. 403/session_inactive·session_window·not_in_roster·mismatch → 친절한 토스트 (raw JSON 노출 금지) | U + R |
 | REQ-B6 | 첫 실행 토큰 실패는 **원인**을 말한다 (#381) | `fetchProfile()` 이 모든 실패를 `null` 로 뭉개서 만료·강사토큰·모르는 회차·서버다운·네트워크단절이 한 문장("확인이 안 돼요")으로 보였다 — 신규 참가자가 스스로 풀 방법이 없어 강사를 불러야만 했다. 계약: ① worker `GET /v1/profile` 의 **모든** 실패가 `error.code` 를 싣는다 — 401 `expired`/`malformed`/`signature`, issuer 토큰은 `wrong_role`(401, 기존엔 `p` 가 placeholder 라 400 "unknown profile" 로 떨어졌다), 모르는 프로필은 400 `unknown_profile`. `request_id` 동봉(#49); ② 클라이언트 `fetchProfileResult()` 가 `null` 대신 `ProfileFailure{reason,friendly,status,requestId}` 를 돌려주고 `classifyProfileFailure` 가 원인별 문장을 고른다. **401 이 `expired` 가 아니면 만료를 단정하지 않는다** (REQ-M13 이 태운 이틀); ③ 강사 토큰은 네트워크 이전에 로컬에서 판정(`looksLikeIssuerTokenUnverified` — payload `role:"issuer"` 또는 `__issuer__` placeholder). **진단 전용, 게이트 아님** — 저장도 하지 않고 재입력을 준다(저장하면 채팅 못 하는 토큰에 "Token ✓" 가 뜬다); ④ 붙여넣기 형식 오류(`looksLikeWorkshopToken` 불일치)가 서버 원인보다 우선 — 서버까지 못 간 실패다 | U (`test/profile-failure`) + R (`worker/test/chat-integration`) |
 | REQ-B7 | 세션만 열면 roster 는 비어 있다 (#381) | `POST /admin/cohorts/:id/session` 은 세션 시작 **only** — roster 는 별개 키라, 이 엔드포인트로 수업을 열면 정상 발급된 학생 토큰도 전부 `not_in_roster` 로 막힌다(원인을 수업 중 학생 입으로 알게 됨). 응답에 `roster_size` 를 싣고, 0 이면 `warning` 으로 `not_in_roster` 위험 + `/session/open`(guard→mint→roster→start) 경로를 명시한다. roster 가 이미 차 있으면 warning 없음(잡음 금지) | R (`worker/test/smoke.mjs` §issuer-self-service) |
-| REQ-B8 | 커리큘럼은 배포가 아니라 배포판이다 — 모듈 층 (dag task H) | 코호트 시스템 프롬프트(`prompts/<cohort>.md`)는 **Module 층**(`m*`)이다: 워커 바이너리에 컴파일된 사본은 폴백일 뿐이고, 실서빙 텍스트는 KV 의 `module:curriculum:<profile_id>:pin` 이 가리키는 불변 버전 문서(`hps-module/1`, `lib/modules.ts`)다. 계약: ① **핀 없음 → 컴파일 텍스트**, 버전은 `compiled:<sha256[:12]>` — 발행 전에도 턴이 귀속된다(조용함, 정상 상태); ② **핀 → 그 버전의 `system_prompt` 로 교체**, 나머지 프로필(정책·안전 플래그·UX)은 컴파일본 그대로 — 하네스 게이트를 우회하지 않는다; ③ **커리큘럼 교체에 코드 배포 없음** — `npm run module -- publish\|pin\|unpin\|status`(wrangler kv) 만으로 1~2분 내 전 PoP 반영, 롤백 = 이전 버전 재핀(핀 레코드가 `previous` 를 든다); ④ **음성 대조군 — 잘못된 모듈은 자기만 끈다**: 검증(봉투·`m*` 버전·sha256·길이 밴드) 실패 시 `previous` → 컴파일 순으로 폴백하고, `console.error` 한 줄(핀 갱신당 1회) + Analytics `module_fallback` 데이터포인트 + 응답 헤더 `x-hps-module-fallback` + 사용 행 blob[6] 으로 **보이게** 한다. 빈 프롬프트는 절대 서빙하지 않는다(REQ-M30 계열 — 무성 폴백 금지). 형제 프로필은 영향 없음; ⑤ **양성 대조군 — 프롬프트 캐시**: 프리픽스는 버전당 바이트 동일, 버전 문자열은 프리픽스에 들어가지 않으며, KV 일시 장애에도 마지막 관측 핀을 유지해 프리픽스가 요동치지 않는다(실측: 교체 직후 1회 miss 후 `cache_read_input_tokens > 0`); ⑥ **턴 기록에 버전이 있다** — 두 LLM 경로 모두 Analytics blob[5]=서빙 버전, 응답 헤더 `x-hps-module`, `GET /v1/profile` 의 `module:{version,source,fallback}`. `usage_log` D1 컬럼은 마이그레이션이 사람 게이트라 이 태스크에 없다(후속); ⑦ **텍스트에 사는 하네스 규칙은 텍스트와 함께 간다** (attempt 2): `rules.yaml child.required_prompt_phrase`(CI `child_missing_url_ban`, fail)는 프로필 키가 아니라 **프롬프트 문장**을 검사하므로, 프롬프트가 런타임 로드가 되는 순간 CI 를 우회했다. 워커가 `lib/harness-rules.ts` 로 **같은 rules.yaml 을 읽어**(validate.py 파서의 포트, 파서 동치는 테스트가 잠근다) 하네스 기준 아동 코호트(`parent_coaching` 또는 `age_range[1] ≤ child_age_max`)의 모듈에 그 문구를 요구하고, 없으면 sha256 불일치와 똑같이 거부·폴백·공지한다. 발행기는 같은 함수로 쓰기 전에 거부한다(빠른 피드백일 뿐, 보증은 워커). 두 번째 사본은 없다; ⑧ **모든 저하 상태가 기록에 남는다**: 폴백 `cause ∈ missing·malformed·bad_pin·transport` — 잘못된 핀 레코드와 KV 장애도 `module_fallback` 데이터포인트(blob[5]=cause)와 턴 기록의 `fallback` 을 남기며, transport 는 "bad publish 가 아니다"라고 말한다. transport 시엔 컴파일본이 아니라 **마지막으로 서빙한 모듈**을 다시 낸다(프리픽스 무요동 — 핀 읽기·문서 읽기 모두). 컴파일 상태로 남긴 것: `_*.md` 계약 문서(코드 불변식을 서술하므로 코드와 롤백 단위를 공유), 프로필 정책 객체, skills·skeletons(코호트 간 공유 — 핀 모델이 프로필 단위) | U (`worker/test/module-distribution.test.mjs` — 형식 드리프트 락 · 양성/음성 대조군 · 두 경로 e2e; `worker/test/module-child-guard.test.mjs` — 심은 정답(문구 없는 아동 모듈은 워커·발행기 모두 거부) · rules.yaml ⇄ 워커 파서 동치 · validate.py 와 같은 판정) |
+| REQ-B8 | 커리큘럼은 배포가 아니라 배포판이다 — 모듈 층 (dag task H) | 코호트 시스템 프롬프트(`prompts/<cohort>.md`)는 **Module 층**(`m*`)이다: 워커 바이너리에 컴파일된 사본은 폴백일 뿐이고, 실서빙 텍스트는 KV 의 `module:curriculum:<profile_id>:pin` 이 가리키는 불변 버전 문서(`hps-module/1`, `lib/modules.ts`)다. 계약: ① **핀 없음 → 컴파일 텍스트**, 버전은 `compiled:<sha256[:12]>` — 발행 전에도 턴이 귀속된다(조용함, 정상 상태); ② **핀 → 그 버전의 `system_prompt` 로 교체**, 나머지 프로필(정책·안전 플래그·UX)은 컴파일본 그대로 — 하네스 게이트를 우회하지 않는다; ③ **커리큘럼 교체에 코드 배포 없음** — `npm run module -- publish\|pin\|unpin\|status`(wrangler kv) 만으로 1~2분 내 전 PoP 반영, 롤백 = 이전 버전 재핀(핀 레코드가 `previous` 를 든다); ④ **음성 대조군 — 잘못된 모듈은 자기만 끈다**: 검증(봉투·`m*` 버전·sha256·길이 밴드) 실패 시 `previous` → 컴파일 순으로 폴백하고, `console.error` 한 줄(핀 갱신당 1회) + Analytics `module_fallback` 데이터포인트 + 응답 헤더 `x-hps-module-fallback` + 사용 행 blob[6] 으로 **보이게** 한다. 빈 프롬프트는 절대 서빙하지 않는다(REQ-M30 계열 — 무성 폴백 금지). 형제 프로필은 영향 없음; ⑤ **양성 대조군 — 프롬프트 캐시**: 프리픽스는 버전당 바이트 동일, 버전 문자열은 프리픽스에 들어가지 않으며, KV 일시 장애에도 마지막 관측 핀을 유지해 프리픽스가 요동치지 않는다(실측: 교체 직후 1회 miss 후 `cache_read_input_tokens > 0`); ⑥ **턴 기록에 버전이 있다** — 두 LLM 경로 모두 Analytics blob[5]=서빙 버전, 응답 헤더 `x-hps-module`, `GET /v1/profile` 의 `module:{version,source,fallback}`. `usage_log` D1 컬럼은 마이그레이션이 사람 게이트라 이 태스크에 없다(후속); ⑦ **텍스트에 사는 하네스 규칙은 텍스트와 함께 간다** (attempt 2): `rules.yaml child.required_prompt_phrase`(CI `child_missing_url_ban`, fail)는 프로필 키가 아니라 **프롬프트 문장**을 검사하므로, 프롬프트가 런타임 로드가 되는 순간 CI 를 우회했다. 워커가 `lib/harness-rules.ts` 로 **같은 rules.yaml 을 읽어**(validate.py 파서의 포트, 파서 동치는 테스트가 잠근다) 하네스 기준 아동 코호트(`parent_coaching` 또는 `age_range[1] ≤ child_age_max`)의 모듈에 그 문구를 요구하고, 없으면 sha256 불일치와 똑같이 거부·폴백·공지한다. 발행기는 같은 함수로 쓰기 전에 거부한다(빠른 피드백일 뿐, 보증은 워커). 두 번째 사본은 없다; ⑧ **모든 저하 상태가 기록에 남는다**: 폴백 `cause ∈ missing·malformed·bad_pin·transport` — 잘못된 핀 레코드와 KV 장애도 `module_fallback` 데이터포인트(blob[5]=cause)와 턴 기록의 `fallback` 을 남기며, transport 는 "bad publish 가 아니다"라고 말한다. transport 시엔 컴파일본이 아니라 **마지막으로 서빙한 모듈**을 다시 낸다(프리픽스 무요동 — 핀 읽기·문서 읽기 모두). ⑨ **규칙이 사라지는 것과 규칙을 통과하는 것은 다르다** (#692·#693): ⑦의 보증은 `rules.yaml` 의 한 줄과 호출자가 넘기는 인자 하나에 걸려 있었다. 둘 다 없어지면 양쪽 검사기가 동시에 "요구사항 없음"이 되어 **아무것도 빨개지지 않는다**. 이제 ⓐ `rules.yaml` 이 `required_keys` 로 자기 필수 키를 선언하고, `validate.py` 는 그것이 비면 **exit 2**(규칙 파일이 깨졌다 — 프로필 위반인 exit 1 과 구분)로 죽으며, 워커는 아동 코호트의 발행 모듈을 **문구가 맞더라도 거부**하고 컴파일본으로 폴백한다(검사할 수 없음 ≠ 통과). `required_keys` 블록 자체의 존재는 양쪽 코드가 주장한다. **같은 모양을 전수로 훑었다**(#692 의 마지막 요청): `validate.py` 가 읽는 모든 rules 키 대비 `severity: fail` 규칙을 대조해 하나를 더 찾았다 — `publishing_promise_contradiction` 이 읽는 `publishing.promise_phrases` 다. 목록이 사라지면 히트 0건으로 조용히 통과한다(실증: 발행이 꺼진 프로필이 공개를 약속해도 exit 1 → exit 0). 이제 `required_keys` 에 있다. `deferral_markers` 는 사라지면 오히려 더 엄격해지므로(완화 신호 소실) 대상이 아니고, `severity` 블록의 개별 항목은 `add()` 기본값이 `fail` 이라 안전하다. **CI 키와 서빙 관문을 가른다** — 워커는 `child.` 접두 키만 유도하므로 `publishing.promise_phrases` 가 비어도 수업은 계속 돈다. 빌드를 세우는 것과 교실을 세우는 것은 다른 사건이다. ⓑ `validateModuleDoc` 의 `requirements` 는 선택 인자가 아니라 `profile_id` 에서 **유도**된다 — 넘기지 않는 호출자(`lib/lesson-delivery.ts`·`lib/native-assessment.ts`)가 이미 존재했고, 잊는 것이 가능한 인자는 언젠가 잊힌다. 명시적 `null` 만이 "텍스트 규칙 없음"이고, 분류할 수 없는 profile id 는 거부한다. 성인 코호트는 아동 키 상실에 영향받지 않는다(대조군). 컴파일 상태로 남긴 것: `_*.md` 계약 문서(코드 불변식을 서술하므로 코드와 롤백 단위를 공유), 프로필 정책 객체, skills·skeletons(코호트 간 공유 — 핀 모델이 프로필 단위) | U (`worker/test/module-distribution.test.mjs` — 형식 드리프트 락 · 양성/음성 대조군 · 두 경로 e2e; `worker/test/module-child-guard.test.mjs` — 심은 정답(문구 없는 아동 모듈은 워커·발행기 모두 거부) · rules.yaml ⇄ 워커 파서 동치 · validate.py 와 같은 판정) |
 
 ## C. Chat round-trip
 
@@ -95,7 +125,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-C13 | 이미지 입력 profile 게이트 (default OFF) | `Profile.input.image_paste` 미설정/false 면 (1) 웹뷰 paste 핸들러가 텍스트 전용으로 동작 + (2) **워커가 `filterMessages` 에서 image 블록 server-side strip** (클라가 보내도 차단). 현 3개 cohort 전부 OFF — 미성년 cohort 가 이미지 흐름에 노출되지 않음. `/v1/profile` 이 resolved boolean 으로 노출 | U |
 | REQ-C14 | AI 상호작용 고지 (세션 시작) (#320) | Anthropic Usage Policy — consumer-facing chat 은 최소 세션 시작 시 "AI 와 대화 중" 고지. `AiDisclosureGate`(호스트측): 세션 첫 webview mount 에서 1회 + history clear 직후 재고지; 같은 세션 내 hide/show remount 에는 미재노출. 문구는 오답 가능성·확인 권고 문장 포함(ToS §D.3, verification_reflex). webview 는 메시지 리스트 상단에 `role=note` + `aria-live=polite` 배너로 렌더 | U (`test/ai-disclosure`) |
 | REQ-C15 | 요청-shaped 업스트림 4xx 분류 (#358) | worker `/v1/chat` 이 업스트림 4xx(400/413/422/429)를 502 로 뭉개지 않고 **실제 status + sanitized `type`** 으로 통과(raw prose 는 로그만; `routes/messages.ts` PASSTHROUGH_4XX 와 동형). 클라는 `friendlyTransportMessage(status)` 로 413→"이미지가 너무 커요" 친절 메시지, 그 외는 generic 카드. 5xx/네트워크는 여전히 502 | U (`test/proxy-transport-friendly`) |
-| REQ-C16 | 응답 중 입력 + 예약 전송 (#416) | 입력창은 스트리밍 중에도 **절대 `disabled` 가 아니다**. 프록시 턴 20~30 s 시절엔 티가 안 났지만 agent-sdk 턴은 실측 5~10분(실강의 9분 사례) — 그동안 참가자는 떠오른 것을 적어둘 수조차 없었다. **적어두지 못한 생각은 사라진다 (iteration_reflex 직접 방해).** 계약(pure `webview-ui/src/sendQueue.ts`): ① `decideEnter` — 유휴면 즉시 전송(기존 그대로, 이미지만 있어도 전송), 스트리밍 중 Enter 는 **예약**; ② 예약은 **정확히 1건** — 다시 Enter 하면 교체(먼저 친 문장 소실)도 무한 큐(다음에 뭐가 갈지 예측 불가)도 아닌 **줄바꿈 덧붙이기**로 한 건에 누적; ③ `shouldFlushQueue` — 자동 전송은 `streaming → idle` **엣지에서만** (스트림이 열린 채 flush 하면 `submit()` 자체 가드에 걸려 **에러 없이 증발**); ④ `draftAfterStop` — Stop·예약취소는 예약 문장을 입력창으로 되돌린다(예약 이후 더 친 문장은 그 아래에 순서대로). 어떤 경로로도 사용자가 친 글자를 버리지 않는다; ⑤ 한글 IME 조합 중 Enter 는 여전히 전송/예약이 아님(`composing`·`isComposing`·keyCode 229 유지); ⑥ Send 버튼은 기존대로 스트리밍 중 Stop — 예약은 Enter 경로 전용. 화면엔 "다음에 보낼 메시지" 한 줄 + × (× 는 삭제가 아니라 되돌리기) | U (`test/send-queue`) |
+| REQ-C16 | 응답 중 입력 + 예약 전송 (#416) | 입력창은 스트리밍 중에도 **절대 `disabled` 가 아니다**. 프록시 턴 20~30 s 시절엔 티가 안 났지만 agent-sdk 턴은 실측 5~10분(실강의 9분 사례) — 그동안 참가자는 떠오른 것을 적어둘 수조차 없었다. **적어두지 못한 생각은 사라진다 (iteration_reflex 직접 방해).** 계약(pure `webview-ui/src/sendQueue.ts`): ① `decideEnter` — 유휴면 즉시 전송(기존 그대로, 이미지만 있어도 전송), 스트리밍 중 Enter 는 **예약**; ② 예약은 **정확히 1건** — 다시 Enter 하면 교체(먼저 친 문장 소실)도 무한 큐(다음에 뭐가 갈지 예측 불가)도 아닌 **줄바꿈 덧붙이기**로 한 건에 누적; ③ `shouldFlushQueue` — 자동 전송은 `streaming → idle` **엣지에서만** (스트림이 열린 채 flush 하면 `submit()` 자체 가드에 걸려 **에러 없이 증발**); ④ `draftAfterStop` — Stop·예약취소는 예약 문장을 입력창으로 되돌린다(예약 이후 더 친 문장은 그 아래에 순서대로). **강사가 원격으로 끊은 turn도 같다(#751 U4, `shouldRestoreQueue`)** — 끊긴 turn의 끝에서는 flush 하지 않는다: 강사가 멈춘 순간 학생이 아직 보내지 않은 문장으로 새 AI 실행이 시작되면 안 된다. 어떤 경로로도 사용자가 친 글자를 버리지 않는다; ⑤ 한글 IME 조합 중 Enter 는 여전히 전송/예약이 아님(`composing`·`isComposing`·keyCode 229 유지); ⑥ Send 버튼은 기존대로 스트리밍 중 Stop — 예약은 Enter 경로 전용. 화면엔 "다음에 보낼 메시지" 한 줄 + × (× 는 삭제가 아니라 되돌리기) | U (`test/send-queue`) |
 | REQ-C17 | 대화와 툴 실행은 하나의 타임라인 (#503) | 실행은 말풍선 → 툴 → 말풍선 순서로 일어나는데 화면은 [말풍선 전부] 아래 [툴 전부] 두 덩어리였다 — 참가자가 "코치가 무슨 말을 하고 나서 무슨 일을 했는지"를 읽을 수 없다(**verification_reflex** 정면 훼손: 확인하려면 말과 행동이 시간 순으로 붙어 있어야 한다). 원인은 리듀서가 `messages[]` 와 `toolLog[]` 두 배열로 갈라 담은 것(교점 없음)이고, 같은 뿌리에서 두 번째 결함이 나왔다 — `streamStart` 의 `toolLog: []` 때문에 **다음 턴이 시작되는 순간 직전 턴의 툴 기록이 통째로 증발**. 계약(pure `src/chatTimeline.ts`, 호스트·웹뷰가 **같은 리듀서**를 돌린다 — 규칙이 두 벌이면 창을 다시 열 때 순서가 달라진다): ① 툴 도착 시 열린 말풍선을 닫고 `role:"tool"` 아이템을 그 자리에 넣으며, 다음 델타가 **새 말풍선**을 연다 → `[말풍선]→[툴]→[말풍선]`; ② 같은 id 는 제자리 갱신(running → done/error) — 줄이 늘면 같은 툴을 두 번 실행한 것처럼 보인다; ③ **코드펜스가 열려 있는 동안 도착한 툴은 보류**했다가 펜스가 닫힐 때(또는 턴 종료 시) 흘려 넣는다 — 펜스가 두 말풍선에 걸리면 `extractRenderableHtml` 이 못 찾아 자동 프리뷰(REQ-D2)가 죽는다; ④ 툴 줄은 대화 기록의 일부라 턴이 넘어가도 남고 workspaceState 에 함께 저장된다(창을 다시 열어도 보인다). `Clear`/history 는 대화와 툴을 **함께** 비운다; ⑤ **모델에 나가는 히스토리에는 `role:"tool"` 이 절대 들어가지 않는다**(`modelHistory()` — 호스트 진입점 + `proxyClient` 이중 방어); ⑥ 순서의 출처는 단일 postMessage 채널의 도착순이다(별도 시퀀스 번호 없음) — 2026-07-28 벤더 SDK 0.3.207 실측에서 assistant 메시지 12/12 의 `message.content` 길이가 1이라 한 이벤트가 텍스트와 툴을 동시에 내지 않는다. 툴 줄의 `createdAt` 은 SDK 가 실어 보낸 `timestamp`; ⑦ DOM 클래스(`.hps-tool-log-line`/`.hps-tool-icon`/`.hps-tool-label`/`.hps-tool-<state>`)는 e2e·관측기 셀렉터 호환으로 **유지**, 컨테이너 `.hps-tool-log` 는 삭제; ⑧ 히스토리 상한(REQ-C3, 200)은 **말한 것(user/assistant) 기준**으로 센다(`clampTimeline`) — 전체 메시지 수로 세면 SDK 턴 한 번의 툴 수십 줄이 대화를 통째로 밀어낸다 | U (`test/chat-timeline` — 양성/음성 대조군) + E |
 | REQ-C18 | 붙여넣은 이미지를 워크스페이스 파일로 남긴다 (#421) | 붙여넣기는 모델로만 가고 **디스크에는 안 남았다** — 그래서 코치가 `<img src>` 로 걸 대상이 없어 참가자에게 "파일로 저장해 주시겠어요?" 라고 일을 떠넘겼다(2026-07-24 실강의 실측 발화). 워크숍에서 참가자가 원하는 건 대개 "이 사진을 우리 홈페이지에 넣어줘" 이고, 그러려면 파일이 어차피 필요하다. 계약(pure `src/pastedImages.ts` + 호스트 `savePastedImages`): ① 그 턴에 첨부된 이미지를 `<작업폴더>/assets/pasted-<YYYYMMDD-HHMMSS>-<n>.<ext>` 로 쓴다 — 작업 폴더는 `resolveCoachCwd()`(라이브 서버가 서빙하는 루트와 동일), 그래서 상대경로 `assets/…` 가 페이지에서 바로 뜬다; ② **mime 화이트리스트**(`image/{png,jpeg,webp,gif}`)를 통과한 base64 data URL 만 저장 — `image/svg+xml`·`text/html`·비-base64·비-data URL 은 전부 거절(값의 출처가 샌드박스 웹뷰다); ③ 파일명은 시각+순번+mime 확장자로만 조립 — **참가자·모델 문자열이 파일명에 닿는 경로가 없다**(경로 이탈 불가). 같은 초 충돌은 접미사를 올려 가며 피한다(덮어쓰면 참가자가 앞서 붙인 사진이 소리 없이 사라진다); ④ 저장한 경로를 `<pasted-images>` 블록으로 **그 턴의 모델 입력에만** 얹는다 — 프록시·SDK 두 런타임이 같은 문구를 본다. 문구는 존재를 사실로 알리고 "저장해 달라"는 되묻기를 명시적으로 막는다; ⑤ 화면에도 저장 사실을 남긴다(`toolLog` 한 줄) — 조용히 저장하면 참가자도 코치도 확인할 근거가 없다(REQ-C17 과 같은 이유); ⑥ 실패는 삼키지 않는다 — 저장 못 한 장수를 한 줄로 알리고 그 턴의 문구를 비운다(코치가 없는 파일을 있다고 믿는 것보다 낫다); ⑦ **저장 대상은 참가자가 붙인 이미지뿐**이다 — #278 의 페이지 캡처(`pendingPageImage`)는 참가자가 간직하겠다고 붙인 자료가 아니라 브라우저 캡처라 저장하지 않는다. **승인 게이트와의 관계**: 이건 모델발 쓰기가 아니라 참가자 자기 자료의 호스트측 보관이라 `resolveActionApproval` 모달을 태우지 않는다 — `saveGameToWorkspace`(index.html)·`saveAgentMdIfPresent`(agent.md) 와 같은 계열이고, 그 정책의 핵심인 "워크스페이스 밖 절대경로 금지"는 ③ 으로 구조적으로 성립한다 | U (`test/pasted-images` — 양성/음성 대조군) |
 
@@ -250,7 +280,7 @@ Service 집행이 없다는 뜻이다.
 | 도구 배열 | 워커가 **직접 만든다** | 클라이언트가 선언하고 **클라이언트가 실행한다** | REQ-M38, [ADR-0007](adr/0007-lesson-feature-binding.md) |
 | 수업 기능 좁히기 | 실제 경계 | 정상 클라이언트에만 유효 | REQ-M38 |
 | `web_search` · 브라우저 | 워커가 주입/생략 | 클라이언트 선언 | REQ-M38 |
-| 이미지 필터 (`input.image_paste`) | 워커가 거른다 | **없다** | [#811](https://github.com/jayleekr/hypeproof-studio/issues/811) (미해결) |
+| 이미지 필터 (`input.image_paste`) | 워커가 거른다 | **워커가 거른다** (참가자 제공분만) | REQ-M43 |
 | 잘림 안내 (max_tokens) | 워커가 끼워 넣는다 | 클라이언트가 낸다 (#749 이전엔 **없었다**) | REQ-M39 ⑥ |
 | 종료 오류 안내 | — | 클라이언트가 낸다 | REQ-M39 |
 | 모델 clamp | Service | Service (+ fast 예외) | REQ-M11, REQ-M36 |
@@ -277,7 +307,7 @@ Service 집행이 없다는 뜻이다.
 | REQ-M11 | 모델 정책 clamp와 fast 예외 | `/v1/messages`는 default/fallback에 `hypeproof-fast`를 항상 추가해 요청 alias/id를 clamp하며 `claude-*haiku*`도 fast 핀으로 보낸다. 프로필에 fast fallback이 없어도 허용된다. SDK 보조 호출 비용이 도입 이유이지만 현재 resolver는 일반 요청과 보조 요청을 구분하지 않음. 그 외는 프로필 default 강제. 이 예외를 수업의 엄격한 단일 모델 제한으로 표현하지 않으며 AE-25/26의 수업별 정책 집행은 별도 계획 | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M13 | 로컬 자격증명 불요·불허 | agent-sdk 경로의 유일한 자격증명은 workshop 토큰. `buildSdkGatewayEnv` 가 ambient `ANTHROPIC_API_KEY`(AUTH_TOKEN 보다 우선순위 높음)·`CLAUDE_CODE_OAUTH_TOKEN`·`CLAUDE_CODE_USE_BEDROCK`·`CLAUDE_CODE_USE_VERTEX` 를 스크럽하고, **`CLAUDE_CONFIG_DIR` 을 코치 전용 디렉터리로 격리**(`sdkConfigDirFor`) — env 스크럽은 **디스크에 저장된** 자격증명에 닿지 못한다. CLI 는 자기 config dir 의 Claude Code/Desktop OAuth 자격증명을 `ANTHROPIC_AUTH_TOKEN` 보다 **우선**하므로, 격리 없이는 `claude` 를 한 번이라도 쓴 머신에서 코치가 그 사람 개인 계정으로 게이트웨이에 붙고 401 로 죽는다(2026-07-28 Windows 실측: 유효 토큰인데 401×9 → 격리 후 1회 성공). 개인 자격증명이 게이트웨이로 **유출되지도** 않는다. classroom Anthropic key 는 worker 밖으로 안 나감 | U (`test/sdk-gateway`) |
-| REQ-M31 | 미성년은 어느 경로로도 agent-sdk 에 닿지 않는다 | 런타임 선택은 `resolveCoachRuntime`(chatPanelHelpers, pure)이 소유한다. 워커가 미성년 프로필의 `coach_runtime` 을 proxy 로 강제하는 것(routes/chat.ts)과 **짝을 이루는 클라이언트 측 가드**다. 2026-08-11 실측에서 비대칭이 드러났다 — 인라인 판단이 프로필 경로만 미성년을 걸렀고 머신 스코프 `hypeproofChat.coachRuntime` 경로는 안 걸러, 그 설정이 켜진 기기에서 워커의 핀이 우회됐다. 권한 침해는 아니다(도구는 `sdk_tools` 가 소유하고 미성년 프로필은 이를 두지 않아 `permittedToolsFor` 가 빈 배열을 낸다). 그러나 **도구 0개로 SDK 루프가 돌면서 툴 호출 원문이 아이 화면에 그대로 렌더되고, 쓰지도 않은 파일을 썼다고 단언**했다(R0 위반) — 실기기 관측. 계약: 설정·프로필 두 경로의 **합집합 바깥**에 미성년 검사를 둔다. `minor_cohort` 를 모르는 응답(구 워커)에서는 기존 동작을 유지한다 — fail-closed 로 바꾸면 성인 코호트가 조용히 강등된다 | U (`test/coach-runtime`) |
+| REQ-M31 | ~~미성년은 어느 경로로도 agent-sdk 에 닿지 않는다~~ **대체됨(2026-08-11 d116c2a7, REQ-M32)** | 런타임 선택은 `resolveCoachRuntime`(chatPanelHelpers, pure)이 소유한다. 워커가 미성년 프로필의 `coach_runtime` 을 proxy 로 강제하는 것(routes/chat.ts)과 **짝을 이루는 클라이언트 측 가드**다. 2026-08-11 실측에서 비대칭이 드러났다 — 인라인 판단이 프로필 경로만 미성년을 걸렀고 머신 스코프 `hypeproofChat.coachRuntime` 경로는 안 걸러, 그 설정이 켜진 기기에서 워커의 핀이 우회됐다. 권한 침해는 아니다(도구는 `sdk_tools` 가 소유하고 미성년 프로필은 이를 두지 않아 `permittedToolsFor` 가 빈 배열을 낸다). 그러나 **도구 0개로 SDK 루프가 돌면서 툴 호출 원문이 아이 화면에 그대로 렌더되고, 쓰지도 않은 파일을 썼다고 단언**했다(R0 위반) — 실기기 관측. 계약: 설정·프로필 두 경로의 **합집합 바깥**에 미성년 검사를 둔다. `minor_cohort` 를 모르는 응답(구 워커)에서는 기존 동작을 유지한다 — fail-closed 로 바꾸면 성인 코호트가 조용히 강등된다 | U (`test/coach-runtime`) |
 | REQ-M32 | 아동 코호트의 workspace read/write (2026-08-11 결정) | 커리큘럼이 "코치가 워크스페이스 파일을 읽고 고친다" 를 전제로 바뀌어, SK 두 아동 트랙이 `sdk_tools: {read,write}` + `coach_runtime: "agent-sdk"` 를 명시적으로 opt-in 한다. 이전 불변식("minors never gain workspace write capability", #282 P2)을 이 행이 대체한다. **함께 유지되는 것:** ① 인바운드/아웃바운드 모더레이션(REQ-O2/O3)은 `isMinorCohort` 로 그대로 돈다 — 이 변경과 무관한 계층이다; ② `shell`·`browser`·`subagents` 는 아동에게 여전히 닫혀 있고 하네스가 `child_sdk_browser`/`child_sdk_subagents` HARD FAIL 로 막는다; ③ 모든 툴 호출은 `canUseTool` 승인 게이트를 지나고 `workspace_root` 밖 경로는 `evaluateSdkToolUse` 가 거부한다. **새 배선 검사:** `write` 를 열었으면 실행될 런타임이 있어야 한다 — `coach_runtime != "agent-sdk"` 이면 워커가 proxy 로 내려주고 코치는 도구가 있다고 믿은 채 실패한다(#476 오진 패턴). 하네스 `child_sdk_write_without_runtime` HARD FAIL. 클라이언트의 minor-tier write 스트립도 제거했다 — 정책 owner 는 프로필이며(ADR 0003) 클라이언트가 다시 깎으면 권한이 조용히 사라진다 | R (`worker/test/chat-integration`, `worker/test/smoke`) + U (`extensions/…/test/sdk-coach-helpers`) |
 | REQ-M33 | 톤 문구는 tier 를 따라간다 (게임 프레임 금지 트랙) | `appToneOf` 가 `template_tier` → 톤을 정하고 `TONE_LABELS` 가 문구를 소유한다. **웹뷰는 같은 로직을 손으로 미러링**한다 — `chatPanelHelpers` 가 Node `Buffer` 를 쓰기 때문에 import 할 수 없다(extension-dev.md Boundaries). 미러는 없앨 수 없으므로 **어긋나면 잡는다**: `test/tone-mirror.smoke.mjs` 가 tier 분기·buildingLabel·namingEmoji 일치를 강제하고, "게임 프레임 금지" 트랙(world)의 문구에 `게임`·🎮 가 없음을 검사한다. 2026-08-17 Windows 실기기에서 `kids-world` 가 톤 판정에 없어 `game` 으로 떨어졌고, 커리큘럼이 금지한 "게임" 낱말이 UI 8곳에 노출됐다 | U (`test/tone-mirror`) |
 | REQ-M34 | "띄워줘" 는 다시 만들지 않는다 | `isShowIntent` 가 참이면 기존 산출물을 **여는** 것으로 처리하고 코치에게 넘기지 않는다. 동사 목록에 `띄워`·`띄어` 가 없어 2026-08-17 실기기에서 "띄워봐" 가 생성 요청으로 흘러 **세계를 처음부터 다시 그렸다** — 아이는 보려던 것을 더 오래 기다렸다. 접두사도 `게임` 뿐이라 `미래/그림/세계/동네 보여줘` 가 전부 빠져나갔다. 대조군: 양성(띄워봐·미래 보여줘·run) / 음성(별이 떨어지는 게임 보여줘·비 내리게 해줘 — 생성 요청은 통과해야 한다) | U (`test/chat-panel-helpers`) |
@@ -314,6 +344,7 @@ Service 집행이 없다는 뜻이다.
 
 
 | REQ-M42 | 요청한 모델을 못 지켰으면 **말한다** — 조용한 치환 금지 (#897 H-05) | 일반 좌석의 `/v1/chat/completions` 은 코호트가 허용하지 않은 `model` 요청을 프로필 기본값으로 바꿔서 응답한다. 정책 집행 자체는 유지한다 — 클라이언트가 수업 모델을 벗어나면 안 되고, 일반 좌석에는 고르는 화면이 없으므로 400 으로 바꾸면 오타 하나가 아이 화면의 턴 실패가 된다. 고쳐야 할 것은 **그게 선에 흔적을 남기지 않는다**는 것이었다: alias→모델 id 번역에서도 요청 문자열과 응답 모델이 다르므로 `x-hps-model` 만으로는 "정상 번역" 과 "요청 무시" 가 구별되지 않았다(Codex H-05 부분 관측: "요청/응답 모델 불일치 시 기본 채팅 표시가 같음"). 계약: ① 치환이 일어나면 응답에 `x-hps-model-substituted: 1` 이 붙고, 헤더로 안전한 경우 `x-hps-model-requested` 에 요청 값이 실린다 — 비스트리밍·스트리밍 **양쪽**(한쪽만 실으면 "스트림이면 조용하다" 는 새 구멍이 된다); ② **서빙 모델은 바뀌지 않는다** — 이 행은 판정과 공지만 정의한다; ③ 거짓 경보를 내지 않는다 — 허용된 alias 의 정상 번역(요청 `hypeproof-fast` → 응답 `gpt-5.6-luna`)과 **같은 모델이 나가는 구체 id** 요청은 치환이 아니다; ④ 모델 문자열은 클라이언트가 주므로 헤더에 되돌려 싣기 전에 실제 모델 id 문자만 허용한다(64자). 걸러진 경우 **치환 사실은 알리고 이름만 생략한다** — 실측: 걸러내지 않으면 플랫폼 `Headers` 가 throw 해서 턴이 500 으로 죽고(주입 헤더는 나가지 않는다) 원인이 화면에 드러나지 않는다; ⑤ **비교 좌석은 계약이 다르고 그게 의도다** — 학생이 직접 고르는 `studio-model-practice` 는 비허용 모델을 400 `model_not_allowed` 로 거부한다(고르는 화면이 있으면 조용히 바꾸면 안 된다). 두 계약을 같게 만들지 않는 것이 결정이고 테스트가 그 비대칭을 잠근다; ⑥ **이 신호를 화면으로 바꾸는 것은 REQ-M41 이다** — 서버가 판정을 말하고 클라이언트가 보여준다. 두 행은 한 계약의 두 쪽이며, 클라이언트는 헤더가 있을 때 그것을 쓰고 없을 때만 문자열 비교로 추론한다(부재는 '치환 아님' 이 아니다 — 워커는 치환일 때만 싣는다); ⑦ `/v1/messages` 의 clamp(REQ-M11)는 이 행에서 바뀌지 않는다 — 그 경로는 `hypeproof-fast` 를 항상 더하는 별개 계약이고, 같은 공지를 붙일지는 SDK 경로 실기 관측 뒤에 정한다. | Service (`worker/test/model-substitution.test.mjs` — 순수 판정 + 라우트 헤더, 제품 변이 7종 7/7 포착) |
+| REQ-M43 | 참가자가 보낸 이미지는 **두 경로 모두** 워커에서 멈춘다 (#811) | proxy 경로는 copyclone 작업 이후 `filterMessages(body, profile.input?.image_paste === true, …)` 로 참가자 이미지를 떨궈 왔지만 **agent-sdk 경로에는 이미지 처리가 한 줄도 없었다** — `routes/messages.ts` 에 `image` 라는 문자열이 0건이었다. 이것을 덮고 있다고 믿었던 전제가 틀렸다: 2026-08-11 결정으로 "미성년은 무조건 proxy" 가 "프로필이 명시하지 않으면 proxy" 로 바뀌었고, 등록된 아동 코호트 **둘 다** `coach_runtime: "agent-sdk"` 를 명시한다. 즉 아이들이 필터 없는 쪽에 있었고, 둘 다 `input.image_paste` 를 두지 않는다(기본 false). 계약: ① **판별자는 역할이 아니라 구조다.** Anthropic 스키마에서 도구 결과는 `user` 역할 메시지 안의 `tool_result` 블록으로 돌아오므로 "user 역할이면 거른다" 는 브라우저 스크린샷 루프를 끊는다. 메시지 content 배열의 **최상위** `image` 블록만 참가자 것으로 보고 거르며, `tool_result.content` 안의 `image` 는 코치 자신의 산출물이라 `image_paste` 와 무관하게 **절대 떨구지 않는다**(proxy 필터의 `allowToolBlocks` 와 같은 분기); ② **개수·크기 상한은 정책이 아니라 비용·남용 경계**라 두 쪽 모두에 걸고 성인 코호트도 예외가 아니다 — 값은 proxy 와 같다(턴당 4장, 소스 6,500,000자). 실제 스크린샷은 그 한참 아래이고 넘는 것은 공급자도 받지 않는다; ③ **조용하지 않다.** 이 작업이 미뤄져 있던 이유가 "잘못 넣으면 스크린샷 루프가 **조용히** 끊긴다" 였으므로, 제거된 것은 전부 요청 로그와 응답 헤더 `x-hps-images-filtered` 로 나온다(`user_dropped` · `user_capped` · `tool_result_capped`). 회귀는 코치가 화면을 못 보게 되는 것이 아니라 `tool_result_capped` 라는 이름으로 먼저 보인다; ④ **모르는 모양은 거르지 않는다** — `scrubToolResultSecrets` 와 같은 전역·순수 규칙이라 공급자 스키마가 바뀌면 "필터 없음"으로 퇴화하지 반 시간에 500 으로 죽지 않는다. ⑤ **노출 조건은 이슈 본문의 설명과 다르고, 실측이 더 강하다.** 이슈는 "웹뷰가 붙여넣기 UI를 막으므로 정상 클라이언트 노출 없음" 이라고 적었다. 2026-09-21 실기 관측: **붙여넣기를 허용한(`image_paste:true`) 코호트에서조차** agent-sdk 경로는 이미지를 inline `image` 블록으로 싣지 않는다 — 확장이 워크스페이스에 파일로 저장하고 `<pasted-images>` 블록에 **경로만 텍스트로** 넘긴다(`assets/pasted-*.png`). 같은 붙여넣기가 proxy 경로에서는 329,916자 base64 `image` 블록으로 갔다. 따라서 `user_dropped` 분기는 **정상 클라이언트로는 도달 자체가 불가능**하고, 이 규칙이 지키는 것은 조작되거나 앞으로 바뀔 클라이언트다; ⑥ **`tool_result.content` 는 배열이 아니라 문자열일 수 있다** — 같은 관측에서 스크린샷 도구가 `is_error` 와 함께 평범한 문자열을 돌려줬다. 구현은 `Array.isArray` 가 아닌 content 를 손대지 않고 통과시킨다. **이 행이 주장하지 않는 것**: REQ-M38 의 판정은 그대로다 — agent-sdk 경로에서 도구는 여전히 클라이언트가 실행하고, 이 필터도 조작된 클라이언트에 대한 Service 경계가 아니다. 다만 이미지는 도구와 달리 워커가 업스트림 body 를 실제로 통과시키는 대상이라 여기서 거르면 공급자에게 **실제로 가지 않는다**. **성공한** 스크린샷 안의 image 블록 모양은 여전히 미관측이다(#811 1단계 절반) — 진짜 클라이언트가 `mcp__hypeproof__browser_screenshot` 을 실행해 `tool_result` 를 돌려보내는 왕복은 성립했으나 열린 탭이 없어 오류였다. 그래서 그 안은 상한만 걸고 아무것도 떨구지 않으며, 만약 스크린샷이 최상위 `image` 로 오는 런타임이 있다면 그 사실은 `user_dropped` 로 **드러난다** | Service (`worker/test/inbound-images.test.mjs` — 순수 판정·상한·전역성, `worker/test/messages-integration.test.mjs` — 상류 body 로 확인한 심은 정답과 스크린샷 대조군) |
 
 ## R. 음성 capability 계측 (#896 / #897 V0)
 
@@ -528,6 +559,8 @@ remove separately collected observation bundles in `test-results/`.
 |---|---|---|
 | REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |
 | REQ-STUDIO-LESSON-NAME | A frozen lesson may carry a fixed AI display name (`assistant.display_name`); the Service projects it onto `ux.coach` so the start page, chat header and message labels show it for seats delivered from that version. | REQ-F7 · [ADR-0005](adr/0005-lesson-assistant-identity.md) · `worker/test/authoring.test.mjs` (AE-07/08 checks), `chalk/test/authoring-ui.test.mjs`. Draft edits after freezing do not change delivered seats. Real-screen acceptance is the Codex feature A record. |
+| REQ-STUDIO-LESSON-STEP | The current step of the served lesson changes the NEXT turn (#751 G2, #1008 · EDU-02). The rail draws the step's help choices (`steps[].help`, lesson default pre-selected, labels only) and its work surface (`steps[].ui`: `criterion_form` / `decision_form`; any other valid kind is drawn as "not available in this Studio", never faked). Both runtimes send `x-hps-lesson-step` for the step on screen and `x-hps-help-mode` only for a mode that step offers, captured once at turn start (a running turn keeps its snapshot; a focus made under another lesson is not carried after a switch). The learner's saved criterion/decision travels, labelled as their own words, with the next turn of that step. Help is teaching strategy only: tool grants still come from the served profile. | U (`extensions/hypeproof-chat/test/lesson-focus.smoke.mjs`), Service (`worker/test/lesson-help-mode.test.mjs`, `worker/test/authoring-rehearsal.test.mjs`), browser (`e2e/classroom/authoring-g2.mjs`), actual Mac (`e2e/classroom/mac-curriculum.mjs`). A real model's teaching quality is NOT RUN. |
+| REQ-STUDIO-REHEARSAL | A learner code issued for an instructor's rehearsal (`rehearsal` claim, Service record) shows a rehearsal line in the rail; "리허설 결과 보내기" sends what the panel actually DREW per step plus the App identity. The Service judges it once against the candidate and its own records of requests made with that code; sending before any request is refused as "not executed", not judged. The report also carries the mission header as read back from the rendered DOM (week line, mission sentence, completion texts); a candidate with a mission passes only when it matches word for word (`mission_mismatch` / `mission_not_reported` otherwise), a candidate without one makes no mission claim (#751 G2 mission). | Same as above; contract in [chalk-authoring G2](requirements/chalk-authoring.md#g2-curriculum-runtime-20260922). |
 
 ## Native Studio trial (#744)
 
@@ -587,3 +620,147 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 실패했을 때 파일 저장을 관측하지 않았다면 저장 완료라고 안내하지 않는다 (#968).
 배포·이행은 [공통 릴리스 절차](dev/unified-release-and-migration.md)를 따르며
 양쪽 활동 검사 누락을 한쪽의 성공으로 보충하지 않는다.
+
+## Local task review (#1020)
+
+`REQ-STUDIO-LOCAL-REVIEW`: [Explicit local task review](requirements/local-task-review.md) connects selected Claude/Codex message evidence to private file storage, the six-capability card, human review revisions and an independently verified local submission receipt. Captured replay, automated installed-shell tests, public release and Jay acceptance remain distinct.
+
+### Local session observation (#1049)
+
+REQ-STUDIO-LOCAL-REVIEW now includes on-demand project-scoped recent-session
+selection, bounded streaming snapshots, model-condition observations, same-task
+snapshot revisions, source-linked manual interpretation, and persisted next-task
+improvement/follow-up. See `docs/requirements/local-task-review.md` for limits and
+acceptance. No automated semantic scoring, live capture or research validity claim.
+
+## Automatic host session sync (#1049)
+
+REQ-SS1: The standalone measurement package automatically queues project-scoped
+Codex/Claude visible-message snapshots to the member server after one connection.
+REQ-SS2: Offline retries, exact server receipts, authorized download/cursor recovery
+and a restartable local supervisor preserve evidence without requiring the Studio UI.
+REQ-SS3: Transfer remains unreviewed evidence, separate from manual app reviews,
+legacy-seven records, task outcomes and research validity.
+REQ-SS4: Both host tools can read server workbench results with the existing
+connection, preserving review/hold states without submitting reviews. Specific
+server deletion responses prevent recapture and unblock download races across restart.
+
+Contract: [SS-01–10](requirements/session-sync.md). Validation:
+`packages/measurement/test/sync.test.mjs`; production acceptance and installed
+supervisor observation must be recorded separately.
+
+
+## Remote classroom operations proposal — 2026-09-18
+
+The [existing classroom ADM contract](requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)
+extends token activation, run-scoped progress, bounded remote commands, preserving
+runtime reset, evidence collection and report delivery. It reuses ADM-01–14;
+[AT-15–34](testing/classroom-admin.md#remote-classroom-tests) are NOT RUN.
+App host code owns local observations and allowlisted actions; Chalk displays
+and forwards; Service owns authority and durable command/job receipts. Preserve
+REQ-A/B onboarding, REQ-Q spool ownership/retention and existing activity/runtime
+boundaries. Remote reset must not call clearHistory or erase learner files.
+Automatic collection requires the new explicit consent/grant contract; this
+proposal does not relax existing manual-upload or operator-only log access.
+New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
+Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+
+### Targeted distribution of notices and materials (U2) — implemented 2026-09-21, off by default
+
+Implemented behind the per-run switch `ops_distribute` (default OFF); no REQ row is claimed. What was run and what was NOT RUN
+is in the [AT-44 run record](testing/classroom-admin.md#remote-management-u2-run-20260921).
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u2-20260921).
+The Studio behavior it adds is bounded as follows. The App host owns a
+durable per-learner, per-class-run inbox under extension global storage; it never writes
+to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
+An item is stored only after its hash is verified, as an immutable per-revision file followed
+by one atomic index commit, so an interrupted update never costs the learner the material they
+already had; a file that was received but not committed is never promoted on restart without a
+fresh sync response. "Applied" means the host re-read the committed item
+through the same disk path the card list uses — a sync HTTP 200, a notification or a
+webview `postMessage` is not completion, and opening a card is not reported. The card is a
+closed-by-default `<details>` in the coach rail of the work screen and a quiet line on the
+"이어서 하기" entry card: no modal, no second Primary (SX-04), nothing in the message stream,
+canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
+learner click through the existing https-guarded `openExternal` path. A late response or
+webview callback from an ended connection generation changes nothing.
+Without a valid connection the list stays readable and says "수업 연결 확인 전"; it says "끝난 수업의 자료"
+only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
+running class) is not evidence that the class ended.
+
+### Targeted distribution of lesson prompts and lesson settings (U3) — implemented, locally run, not accepted, default OFF, 2026-09-21
+
+Implemented on `feat/751-u3-prompt-settings` and run locally (unit, Service, local workerd D1, browser, a real
+Studio window on a Mac with a scripted model provider): see the
+[run record](testing/classroom-admin.md#remote-management-u3-run-20260921). Not accepted, not deployed, OFF by default
+(`HPS_LESSON_BINDINGS` unset and the per-run `ops_lesson_settings` flag false); no REQ row is claimed until acceptance.
+Found only on the real window and fixed: a profile cached before enforcement began made the host send no binding key,
+never switch and never close a turn — the preflight now re-reads the profile once when the device's own inbox holds a
+lesson setting. "Applied" on the instructor screen is request-level evidence (one provider request under the binding
+ended protocol-complete), not "the learner's question succeeded".
+An independent review at `d32a191` then found, on the real window, that neither Studio window drew the inbox although the
+board said "reflected": windows of one app share `globalState` and the inbox directory, and the window whose connection a
+second window's pairing had replaced marked the shared pointer hidden. The pointer now names its connection, only that
+connection may hide it, a live connection is authoritative, and a window re-reads the shared inbox on focus (a read — no
+new "opened" tracking). The switch request now carries the learner's token for the Service to verify (the device's own
+statement of its base lesson decides nothing); a parked message that goes out when a turn ends carries no prompt
+provenance and no longer empties the draft typed meanwhile; a turn is looked up and closed where it was admitted.
+See the [review record](testing/classroom-admin.md#remote-management-u3-review-20260921). A further review at `e7d719a` changed only the Service:
+the lesson basis of a collected input is established by joining each permitted request to its own usage row (no counting) —
+no Studio behavior changed ([record](testing/classroom-admin.md#remote-management-u3-basis-identity-20260921)).
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921);
+its first draft was revised the same day after an independent review (turn pinning, fallback under
+outage/off, execution evidence, mixed-basis reports). The Studio behavior it adds is bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of
+`초안에 가져오기` changes the input draft, as one functional update inside the webview that appends to
+the latest draft and never replaces it, touches no attachment or queued send, sends nothing and calls
+no model. Undo restores the previous draft only while the text is byte-identical to the just-imported
+state. Withdrawal removes the card body and never the learner's draft, conversation or files.
+Importing and sending are not reported to the instructor; the only provenance is a bodiless reference
+kept with the local draft and, when the learner sends it, on that turn's spool `prompt` event.
+**Setting:** a setting is a reference to a frozen lesson version of the same course, never free-form
+values, and can only narrow within the compiled profile (ADR 0006/0007). The host switches at the
+turn-start preflight: it asks the Service to record the binding, re-fetches `/v1/profile` as a
+candidate and swaps the cached profile only when the served `lesson_binding.key` matches. It sends
+that key as its expectation with the existing per-turn `x-hps-turn-id` on every request of the turn,
+for both runtimes. The header is never the authority: the Service admits each turn id once, records
+the execution snapshot for it, and runs every later request of that turn from that snapshot however
+many times the setting changes afterwards; a new turn carrying an old key is refused before anything
+runs. If the switch succeeded but the new profile could not be verified, the host does not send a
+turn at all and the learner's text and attachments stay in the input. A turn that ends in a
+`lesson_binding` refusal is closed from the Service's record of that turn, not from guesswork:
+nothing dispatched → text and attachments return to the input (existing `inputRejected`); something
+dispatched → the turn is marked as partially executed and is never re-sent automatically; record
+unreadable → marked unknown, never re-sent automatically. When the binding cannot be read the
+Service holds new execution instead of falling back to the wider token lesson, and turning classroom
+operations off does not undo a setting that was already switched. The activity identity,
+conversation, draft, workspace files and usage attribution do not move. Step signals carry the new
+lesson version after the switch, and earlier self-reports are never shown as completion of the new
+version. "Applied" is the Service's record that a request pinned to that binding reached the
+upstream with its normalized wire and got a response — not a gate pass, a device receipt, a profile
+200, `count_tokens`, or the inbox card.
+
+### Cause-specific remote recovery (U4) — implemented, locally run, not accepted, default OFF, 2026-09-22
+
+Implemented on `feat/751-u4-remote-recovery` (stacked on U3) and run locally (unit, Service, local workerd D1, browser, a
+real Studio window on a Mac with a scripted model provider and locally made faults): see the
+[contract](requirements/classroom-admin.md#remote-management-u4-20260922) and the
+[run record](testing/classroom-admin.md#remote-management-u4-run-20260922). Not accepted, not deployed, behind the existing
+per-run `ops_commands` flag (default false); no migration; no REQ row is claimed until acceptance.
+A remote action that a device reports as `succeeded` is not shown as a fix. Per target the Service says one of: resolved,
+remains, executed (ran; nothing yet says whether the cause is gone), unverified, not executed — from that command's own
+receipt, from follow-up observations the app links to that command id over the same connection and login generation, and
+from the Service's own records (latest token issue, verified upload). Learner-side behaviour that changed:
+a token re-check names the public issue id of the token the app holds (never the token); a stop or a preserving restart
+is answered once by the learner's own next finished turn — the app never sends a question or calls a model to find out;
+a stop takes its preservation baseline before acting and compares the learner's words (parked message + typed text +
+attachments + import references), not which slot holds them; a turn the instructor cut off hands the parked message back
+to the draft like the learner's own Stop (REQ-C16); a token re-check no longer clears a runtime, tool or provider fault;
+preview recovery checks the page the learner had open (a 404 is a named fault) and touches only tabs on the learner's
+preview server as it was before the action (other localhost tools and sites are never read, moved or closed); it reports
+the page back only when that tab itself loaded a fresh document at the page's address (on one session bound to that
+tab, stopping if the tab goes) and every learner page answered as a document, never from an HTTP answer alone;
+an Agent SDK turn whose result is an error is a failed turn for the spool, the observation log, the turn close and the
+board alike (the learner's notice is shown once, nothing is retried), classified only from the HTTP status this turn's own
+stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
+the window keeps the learner's work folder (it used to move them to the profile's default folder). Pause still refuses only NEW model requests: a request already streaming is not
+cut, the next request of the same turn is a new request and is refused, nothing is re-sent on resume.

@@ -132,4 +132,29 @@ const { decideEnter, draftAfterStop, shouldFlushQueue } = await import(
   assert.equal(sent.length, 2, "Stop 후 자동 전송은 일어나지 않는다");
 }
 
+
+// ─── #751 U4: 강사가 끊은 턴도 학생의 Stop과 같다 — 예약 문장은 보내지 않고 초안으로 돌아온다 ───
+{
+  const { shouldRestoreQueue } = await import("../webview-ui/src/sendQueue.ts");
+  const { preservedDraftContent } = await import("../src/activityDraft.ts");
+  // 음성 대조군: 끊긴 턴의 끝에서는 어떤 경우에도 flush 하지 않는다 (새 AI 실행·학생 문장 자동 전송 금지).
+  assert.equal(shouldFlushQueue(true, false, "예약한 질문", true), false);
+  assert.equal(shouldRestoreQueue(true, false, "예약한 질문", true), true);
+  // 양성 대조군: 정상 종료는 예전 그대로 보낸다. 끊기지 않았으면 되돌리지 않는다.
+  assert.equal(shouldFlushQueue(true, false, "예약한 질문", false), true);
+  assert.equal(shouldFlushQueue(true, false, "예약한 질문"), true, "기존 호출부(인자 3개)는 그대로");
+  assert.equal(shouldRestoreQueue(true, false, "예약한 질문", false), false);
+  assert.equal(shouldRestoreQueue(true, true, "예약한 질문", true), false, "아직 스트리밍 중");
+  assert.equal(shouldRestoreQueue(true, false, "  ", true), false);
+  // 보존 대조는 '어느 칸에 있나'가 아니라 '학생의 말이 그대로인가'를 본다: 예약 → 초안 이동 전후가 같은 값이어야 한다.
+  const images = ["data:image/png;base64,AAAA"], imports = [{ object_id: "object-00000001", revision: 1, hash16: "0123456789abcdef" }];
+  for (const [text, queued] of [["쓰던 글", "예약한 질문"], ["", "예약한 질문"], ["쓰던 글", null], ["  앞뒤 공백  ", "예약  "]]) {
+    const before = { text, images, queued, imports }, after = { text: draftAfterStop(text, queued), images, queued: null, imports };
+    assert.deepEqual(preservedDraftContent(before), preservedDraftContent(after), JSON.stringify([text, queued]));
+  }
+  // 음성 대조군: 글이 바뀌거나, 첨부가 빠지거나, 예약 문장이 사라지면 같지 않다.
+  const base = { text: "쓰던 글", images, queued: "예약한 질문", imports };
+  for (const lost of [{ ...base, queued: null }, { ...base, images: [] }, { ...base, text: "쓰던" }, { ...base, imports: [] }]) assert.notDeepEqual(preservedDraftContent(base), preservedDraftContent(lost));
+}
+
 console.log("✓ #416: 응답 중 입력 — Enter 예약(1건 누적) · 턴 종료 엣지에서만 자동 전송 · Stop/취소는 draft 복원");

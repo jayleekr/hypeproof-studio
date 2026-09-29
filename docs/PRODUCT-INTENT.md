@@ -68,6 +68,11 @@ Studio는 사용자의 사고를 대신 완성하는 것이 아니라, 필요한
 
 ## 요구사항 파생 규칙
 
+[요구사항 실행 원장](plan/requirements-activation.md)은 아래 연결을 실제 다음 작업까지
+확장한다. `config/requirement-work.json`에 현재 요구사항 전체 ID, 디자인·테스트,
+기존 이슈와 실행 단위를 기록하고 `python3 scripts/next-work.py`로 현재 상태를 확인한다.
+요구사항 문서/테스트 계획의 존재와 충족은 별개이며, 미등록·변경된 원문도 남은 분해 작업이다.
+
 새 Product Requirement는 가능하면 다음 추적성을 가진다.
 
 ```text
@@ -129,3 +134,71 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 [실행 Epic](plan/capability-and-pricing-epics.md)으로 내려간다. P1~P5는 지원 범위의 이용권·원가·예산·역할별 화면을 구현하고 인수했다.
 [Intent·요구사항 충족 현황](testing/access-intent-fulfillment-2026-09-08.md)은 연결된 기준과
 실제로 확인한 행동을 구분한다. 이 구현은 판매 활성화·결제 연동·연구 타당화 완료를 뜻하지 않는다.
+
+<a id="one-instructor-classroom-intent"></a>
+
+## Curriculum-connected operation by one instructor
+
+Requirement source: **TJ (Taejin Kang), 2026-09-21**, from firsthand teaching and
+curriculum-partner experience. TJ is the proposer and field-context source here;
+this attribution does not change criterion ownership, implementation authorship,
+approval authority or IP ownership. Existing owners and Git history retain those roles.
+
+TJ observed that a reusable curriculum document can be copied and delivered by
+another provider after changing only examples or exercises, putting the customer
+relationship at risk. The product direction is therefore to make the curriculum
+work through Studio: reusable lesson components configure the learner's AI role,
+available capabilities, exercises and completion criteria. The durable value is
+the maintained execution environment, verified curriculum integration and accumulated
+operating knowledge. “Cannot be copied” is an aspiration for product differentiation,
+not a technical guarantee or a reason to prevent learners exporting their own work.
+
+There are three distinct intents within one classroom capability:
+
+- **Curriculum authoring:** compose and adapt approved lesson components as one
+  would assemble blocks. A changed curriculum changes the relevant Studio behavior
+  through a versioned, validated contract, not just a different handout. Exact
+  drag-and-drop UI remains a design choice; arbitrary code or authority expansion
+  is not implied. Reuse the existing Chalk authoring and lesson-binding contracts.
+- **Live monitoring and communication:** TJ's Padlet use exposed the importance
+  of seeing progress and communicating during class. Carry that interaction into
+  structured stages, help requests, submissions and instructor feedback. Group
+  recurring technical problems so one instructor can prioritize support. These are
+  operating signals, not learner ability scores or continuous screen surveillance.
+- **Remote intervention:** attach a bounded action to known failure cases,
+  including participation/token readiness, selected or class-wide distribution,
+  permitted collection and recovery. Show the actual result for each learner;
+  accepting a command is not solving the learner's problem.
+
+The outcome to test is **one instructor sustaining the lesson while handling
+individual exceptions**, preserving learner work and judgment. Use intervention
+time, waiting time, unresolved cases and verified recovery as operating evidence;
+do not infer that outcome from endpoint coverage or claim it has already been measured.
+The [roadmap](plan/learning-agent-experience-epics.md#one-instructor-classroom)
+connects these intents to existing requirements and the completion boundary.
+The 2026-09-22 [instructor UI pass](requirements/classroom-design.md#instructor-ui-pass-20260922) applies the
+live-monitoring and remote-intervention intents to the existing Chalk screens (list first, cause → action → result);
+it is a draft for user review, not evidence that the one-instructor outcome was measured.
+
+**Report-gap reset, 2026-09-22.** The implementation report of that day (vault
+`04_TJ_결과물/2026-09-22_HypeProof_Studio_구현현황_보고서.docx`, on PR #1243 head `966b5c5`) found the
+functions largely present but the proposed instructor screen not reproduced: dense student comparison and
+navigation were lost. The final user outcome is restated, not widened: **one instructor prepares a
+curriculum-bound class, sees each student's token activation, current stage, problem and help request, selects
+one or many students, collects chosen records, distributes notices, material, prompts and settings, runs allowed
+recovery and sees the actual per-target results; collected sessions feed a reviewed report and delivery flow.**
+The three intents above stay inside this one capability. Code, a usable screen, a local run and an untested
+external environment remain four different claims. The ordered gap plan (G1 operating screen → G2 curriculum to
+runtime → G3 multi-session report and delivery → G4 integrated real-environment journey) and each step's status
+live in the [roadmap](plan/learning-agent-experience-epics.md#report-gap-reset-20260922).
+
+## 공통 측정 코어와 Jay dogfood
+
+[INT-MC-01–03](intents/measurement-core.md)은 Studio의 관찰·근거·해석 기능을
+공통 코어로 분리해 Studio·Claude Code·Codex에서 실제 작업을 검토·제출하고
+다음 작업과 모델을 개선하려는 제품 의도다. Jay부터 사용한다.
+2026-09-13 Jay 결정으로 신규 작업의 기본은 6개 모델(Framing, Judgment,
+Orchestrate, Verify, Adapt, Ownership)이다. 기존 7개 기록을 보존하며 새 해석을
+별도 연결한다. 제품 채택을 연구 타당화 완료까지 미루지 않는다.
+[MC-01–48](requirements/measurement-core.md), [검증 계약](testing/measurement-core.md),
+[개발 순서](plan/measurement-core.md)로 연결한다. 문서는 구현·실사용 증거가 아니다.

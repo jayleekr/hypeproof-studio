@@ -1,0 +1,500 @@
+{
+  "boah-dental-director-copyclone-2026-s1": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": true,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": true,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": true,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": true,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    }
+  },
+  "boah-dental-teaser-2026-s1": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    }
+  },
+  "canary-sdk-contract": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": {
+        "format": "hps-observation/2",
+        "scope_kind": "string",
+        "assess": true
+      },
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 403,
+      "error": null
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": {
+        "format": "hps-observation/1",
+        "scope_kind": "string",
+        "assess": true
+      },
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 403,
+      "error": null
+    }
+  },
+  "homepage-practice-s1": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    }
+  },
+  "sk-biopharm-kids-2026-grade-3-4-s1": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    }
+  },
+  "sk-biopharm-kids-2026-grade-5-6-s1": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    }
+  },
+  "studio-gpt-practice": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    }
+  },
+  "studio-model-practice": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 200,
+      "observation": null,
+      "update_banner": false,
+      "sdk_tools": {
+        "read": false,
+        "write": false,
+        "browser": false,
+        "subagents": false,
+        "shell": false
+      },
+      "coach_runtime": "proxy",
+      "activity_kind": "classroom"
+    }
+  },
+  "studio-native-trial": {
+    "new-client,session-open": {
+      "status": 200,
+      "observation": {
+        "format": "hps-observation/1",
+        "scope_kind": "string",
+        "assess": true
+      },
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "new-client,no-session": {
+      "status": 403,
+      "error": null
+    },
+    "old-client,session-open": {
+      "status": 200,
+      "observation": {
+        "format": "hps-observation/1",
+        "scope_kind": "string",
+        "assess": true
+      },
+      "update_banner": false,
+      "sdk_tools": {
+        "read": true,
+        "write": true,
+        "browser": true,
+        "subagents": false,
+        "shell": true
+      },
+      "coach_runtime": "agent-sdk",
+      "activity_kind": "classroom"
+    },
+    "no-header,no-session": {
+      "status": 403,
+      "error": null
+    }
+  }
+}

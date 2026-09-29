@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { bearer, verify, issue, TokenError, type TokenPayload } from '../lib/tokens';
 import { getRoster, isTokenRevoked } from '../lib/kv';
 import { getProfile } from '../profiles';
+import { profileServesCohort } from '../lib/cohort-binding';
 import { crossProviderEnabled } from '../profiles/types';
 import { publishUsagePrice, registerUsageAttempt, recordCostEvidence, recordInvoiceAdjustment, usageJobCosts } from '../lib/usage-costs';
 import { authorizeIssuerForCohort } from '../lib/instructor-auth';
@@ -25,7 +26,8 @@ export async function accessPrincipal(c: AccessContext): Promise<TokenPayload> {
     requireAccessEnabled(c.env);
     await accountForToken(c.env,p);
   } else {
-    if (getProfile(p.p)?.session.cohort_id !== p.c || !(await getRoster(c.env.HPS_KV,p.c))?.users.includes(p.u)) throw new AccessError('participant_unavailable',403);
+    const profile = getProfile(p.p);
+    if (!profile || !(await profileServesCohort(c.env,profile,p)).ok || !(await getRoster(c.env.HPS_KV,p.c))?.users.includes(p.u)) throw new AccessError('participant_unavailable',403);
   }
   return p;
 }

@@ -191,4 +191,171 @@ console.log("✓ child-guard: POSITIVE — child module with phrase accepted; ad
 }
 console.log("✓ child-guard: DRIFT LOCK — rules.yaml read identically by validate.py and the worker; same verdict");
 
+// ─── #692 RULES INTEGRITY — a deleted key must not read as "nothing required" ─
+//
+//   PLANTED ANSWER — delete `child.required_prompt_phrase` from rules.yaml and
+//     the pre-#692 readers both go quiet: validate.py's `if req and ...` passes
+//     and the worker derives an empty requirement list. Nothing turns red.
+//     Now: validate.py exits 2 (broken rules, not a bad profile) and the worker
+//     refuses the child cohort's module — including one whose text is FINE,
+//     because "the harness cannot check this" is not "this passed".
+//   CONTROL — an adult cohort is unaffected by the same stripped file, and the
+//     intact file keeps every cohort working (asserted by the blocks above).
+{
+  const { readHarnessRules, curriculumRequirementsFor, checkCurriculumRequirements, missingRequiredKeys, parseRulesYaml } =
+    await import("../src/lib/harness-rules.ts");
+
+  assert.deepEqual(missingRequiredKeys(parseRulesYaml(rulesText)), [], "the shipped rules.yaml declares every required key");
+
+  const strippedRules = rulesText
+    .split("\n")
+    .filter((l) => !/^\s{2}required_prompt_phrase:/.test(l))
+    .join("\n");
+  const noPhrase = readHarnessRules(strippedRules);
+  assert.deepEqual(noPhrase.missing_keys, ["child.required_prompt_phrase"], "TS reader names the deleted key");
+
+  const reqStripped = curriculumRequirementsFor(child, noPhrase);
+  assert.ok(reqStripped.rules_error, "child cohort fails closed when its rule is gone");
+  assert.deepEqual(reqStripped.required_phrases, [], "and claims no phrase it cannot derive");
+  assert.match(
+    checkCurriculumRequirements(child.system_prompt, reqStripped) ?? "",
+    /rules are incomplete/,
+    "even a GOOD child prompt is refused while the rule is missing — the whole point",
+  );
+  assert.equal(
+    curriculumRequirementsFor(adult, noPhrase).rules_error,
+    undefined,
+    "an adult cohort is not taken down by a missing CHILD key",
+  );
+
+  // Deleting the declaration block itself is also a hard failure.
+  const noDecl = rulesText
+    .split("\n")
+    .filter((l) => !/^required_keys:/.test(l) && !/^ {2}- (assets|thresholds\.|publishing\.strategies|child\.)/.test(l))
+    .join("\n");
+  assert.deepEqual(readHarnessRules(noDecl).missing_keys, ["required_keys"], "the guard list cannot be deleted either");
+  assert.ok(curriculumRequirementsFor(child, readHarnessRules(noDecl)).rules_error);
+
+  // Same verdict on the python side: exit 2, distinct from a profile violation.
+  const dir = mkdtempSync(join(tmpdir(), "hps-integrity-"));
+  try {
+    const rf = join(dir, "rules.yaml");
+    const pf = join(dir, "profiles.json");
+    writeFileSync(pf, JSON.stringify([child, adult]));
+    writeFileSync(rf, strippedRules);
+    const a = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf], { encoding: "utf8" });
+    assert.equal(a.status, 2, `validate.py must exit 2 on a gutted rules file\n${a.stdout}${a.stderr}`);
+    assert.match(a.stderr, /missing required key\(s\): child\.required_prompt_phrase/);
+    writeFileSync(rf, noDecl);
+    const b = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf], { encoding: "utf8" });
+    assert.equal(b.status, 2, "validate.py must exit 2 when required_keys itself is gone");
+    // The intact file still exits on profile findings only (0 or 1), never 2.
+    writeFileSync(rf, rulesText);
+    const c = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf], { encoding: "utf8" });
+    assert.notEqual(c.status, 2, `the shipped rules file must not trip the integrity check\n${c.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+console.log("✓ child-guard: #692 — a deleted rules key fails closed on both sides (exit 2 · module refused)");
+
+// ─── #692 후속 훑기 — 같은 모양의 다른 severity: fail 규칙 ──────────────────
+//
+// 이슈의 마지막 요청은 "같은 논리가 다른 severity: fail 규칙에도 적용되는지
+// 훑어라" 였다. 훑었더니 하나 나왔다: `publishing_promise_contradiction` 은
+// `publishing.promise_phrases` 를 읽고, 그 목록이 사라지면 히트 0건이 되어
+// 조용히 통과한다 — child.required_prompt_phrase 와 정확히 같은 모양이다.
+//
+//   PLANTED ANSWER — 발행이 꺼져 있는데 프롬프트가 공개를 약속하는 합성 시료를
+//     만든다. 출고 상태에서는 규칙이 잡고(exit 1), 목록을 지우면 잡지 못한다.
+//     required_keys 가 그 삭제를 exit 2 로 막는다.
+//   CONTROL — 이 키는 CI 전용이다. 워커는 `child.` 접두 키만 보므로 이것이
+//     비어도 아동 코호트 서빙은 계속된다. 빌드를 세우는 것과 수업을 세우는 것은
+//     다른 사건이고, 그 구분이 깨지면 CI 규칙 하나가 교실을 멈춘다.
+{
+  const { readHarnessRules, curriculumRequirementsFor } = await import("../src/lib/harness-rules.ts");
+
+  const stripPhrases = (text) => text.replace(/\n  promise_phrases:\n(?:    - .*\n)+/, "\n");
+  const noPhrases = stripPhrases(rulesText);
+  assert.equal(noPhrases.includes("promise_phrases:"), false, "fixture actually removed the list");
+
+  // 합성 시료: publishing.enabled=false 인데 프롬프트가 "인터넷에 공개" 를 약속한다.
+  const promiser = {
+    ...adult,
+    id: "synthetic-promise-probe",
+    publishing: { ...(adult.publishing ?? {}), enabled: false },
+    system_prompt: adult.system_prompt + "\n\n만든 결과물을 인터넷에 공개해 드릴게요.",
+  };
+
+  const dir = mkdtempSync(join(tmpdir(), "hps-promise-"));
+  try {
+    const pf = join(dir, "profiles.json");
+    const rf = join(dir, "rules.yaml");
+    writeFileSync(pf, JSON.stringify([promiser]));
+
+    writeFileSync(rf, rulesText);
+    const shipped = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf, "--json"], { encoding: "utf8" });
+    assert.equal(shipped.status, 1, "출고 상태에서는 약속 모순을 잡아 exit 1 이어야 한다");
+    assert.ok(
+      JSON.parse(shipped.stdout).findings.some((f) => f.check === "publishing_promise_contradiction"),
+      "publishing_promise_contradiction 이 실제로 걸린다",
+    );
+
+    writeFileSync(rf, noPhrases);
+    const gutted = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf], { encoding: "utf8" });
+    assert.equal(gutted.status, 2, `목록이 사라지면 exit 2 (조용한 통과가 아니라)\n${gutted.stdout}${gutted.stderr}`);
+    assert.match(gutted.stderr, /missing required key\(s\): publishing\.promise_phrases/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // CONTROL — CI 전용 키의 부재가 서빙을 멈추지 않는다.
+  const rules = readHarnessRules(noPhrases);
+  assert.deepEqual(rules.missing_keys, ["publishing.promise_phrases"], "워커도 무엇이 빠졌는지는 안다");
+  assert.equal(
+    curriculumRequirementsFor(child, rules).rules_error,
+    undefined,
+    "그러나 아동 코호트 서빙은 계속된다 — 이 키는 CI 규칙이지 서빙 관문이 아니다",
+  );
+  assert.deepEqual(curriculumRequirementsFor(child, rules).required_phrases, [PHRASE]);
+}
+console.log("✓ child-guard: #692 훑기 — promise_phrases 도 같은 구멍이었다 (CI 는 막고, 서빙은 안 멈춘다)");
+
+// ─── #693 the guard cannot be disarmed by forgetting an argument ─────────────
+//
+//   PLANTED ANSWER — call validateModuleDoc WITHOUT `requirements`, the way
+//     lib/lesson-delivery.ts and lib/native-assessment.ts already call it. Before
+//     #693 the child phrase check was skipped and a stripped child curriculum
+//     validated `ok`. The requirement is now derived from `profileId`.
+{
+  const { validateModuleDoc } = await import("../src/lib/modules.ts");
+  const mk = (pid, text) =>
+    makeModuleDoc({ kind: "curriculum", profileId: pid, version: V, content: { system_prompt: text } });
+
+  const strippedDoc = await mk(PROFILE, stripped);
+  const forgot = await validateModuleDoc(strippedDoc, { kind: "curriculum", profileId: PROFILE });
+  assert.equal(forgot.ok, false, "a caller that forgets `requirements` still gets the child guard");
+  assert.match(forgot.reason, /required phrase/);
+
+  const goodDoc = await mk(PROFILE, child.system_prompt);
+  assert.equal((await validateModuleDoc(goodDoc, { kind: "curriculum", profileId: PROFILE })).ok, true, "a valid child module still passes");
+
+  const adultDoc = await mk(ADULT_ID, stripped);
+  assert.equal(
+    (await validateModuleDoc(adultDoc, { kind: "curriculum", profileId: ADULT_ID })).ok,
+    true,
+    "derivation does not turn the child rule into a blanket rule",
+  );
+
+  // `null` is the explicit opt-out — deliberate, and visible in the call site.
+  assert.equal((await validateModuleDoc(strippedDoc, { kind: "curriculum", profileId: PROFILE, requirements: null })).ok, true);
+
+  // An id we cannot classify fails closed rather than passing unchecked.
+  const unknownDoc = await mk("no-such-cohort-xyz", stripped);
+  const unknown = await validateModuleDoc(unknownDoc, { kind: "curriculum", profileId: "no-such-cohort-xyz" });
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.reason, /unknown profile/);
+}
+console.log("✓ child-guard: #693 — requirements derived from profile_id; omission no longer disarms the gate");
+
 console.log("module-child-guard: all green");

@@ -1,5 +1,7 @@
 # Runtime compatibility
 
+> Retired for new measurement on 2026-09-15. Install/use only for explicitly selected historical replay. Current work uses https://hypeproof-ai.xyz/members/studio/measurement. Pass `--legacy-replay` with an exact historical session path; `--latest` is rejected. Never convert seven-axis historical results into six-axis results.
+
 `hain7-report` is one canonical Agent Skills folder. Keep the scorer, rubric, examples, and references identical across runtimes; only discovery and invocation syntax differ.
 
 ## Supported layouts
@@ -23,7 +25,7 @@ Claude Code derives the slash-command name from the skill directory, discovers b
 Claude Code example:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/hain7_signal.py" \
+python3 "${CLAUDE_SKILL_DIR}/scripts/hain7_signal.py" --legacy-replay \
   --input /path/to/session \
   --context /path/to/report-context.json \
   --analysis-output /path/to/hain7-analysis.json

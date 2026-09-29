@@ -8,12 +8,17 @@ import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-au
 import { getProfile } from "../profiles";
 import { isModuleVersion, makeModuleDoc, sha256Hex } from "../lib/modules";
 import { validateSessionDesign } from "../lib/session-design";
+import { checkLessonPedagogy, blockingPedagogyFindings } from "../lib/lesson-pedagogy";
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
+import { type Draft, readDraft, owns as ownsDraft, writeDraft } from '../lib/authoring-draft-write';
+import { recordTokenIssue } from './classroom-ops';
+import { lessonImpact } from '../lib/lesson-binding';
+import { policyDigest, REHEARSAL_HOURS, AUTHORABLE_STEP_UI } from '../lib/lesson-rehearsal';
+import { confirmationOf, confirmationRequired, currentDigest, latestRehearsal, readinessOf, rehearsalHistory, versionUsable } from '../lib/lesson-rehearsal-store';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
-interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
@@ -41,7 +46,7 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   if (!validId(c.req.param("course")! ?? "")) return c.json({ error: "invalid course id" }, 400);
   return next();
 };
-for (const path of [root, root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
+for (const path of [root, root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants', root + '/versions', root + '/impact', root + '/versions/:version/readiness', root + '/versions/:version/rehearsals', root + '/versions/:version/confirmation']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
@@ -85,17 +90,17 @@ authoring.post(root + '/versions/:version/participants', async c => {
   const roster = await getRoster(c.env.HPS_KV, cohort);
   if (!roster?.users.includes(b.user)) return c.json({ error: 'register this student in the session console first' }, 403);
   const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
-  const { token } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
-  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run' });
+  // #1012 · #751 G2 — where confirmation is required, only a version the instructor confirmed on a passed rehearsal reaches learners.
+  const which = { cohort, course, version: lesson.version, profileId: d.profile_id, lessonSha: lesson.sha256, content: lesson.content };
+  if (!(await versionUsable(c.env, which))) return c.json({ error: 'confirm this version after a passed learner-condition rehearsal first', reason: 'version_not_confirmed' }, 409);
+  const { token, jti } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
+  // Lesson-bound invitations are token issuance too: mirror the normal mint
+  // ledger and reissue fence without letting an ops outage block the lesson.
+  const opsIssue = await recordTokenIssue(c.env, { jti, cohort, student: b.user, profile: d.profile_id, issuedBy: a.payload.u, hours: b.hours });
+  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: (await readinessOf(c.env, which)).state, ...(opsIssue ? { ops: opsIssue } : {}) });
 });
 
-async function readDraft(db: D1Database, cohort: string, course: string) {
-  return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
-    FROM authoring_drafts d WHERE d.cohort_id=? AND d.course_id=?`).bind(cohort, course).first<Draft>();
-}
-function owns(d: Draft, a: IssuerAuthz) {
-  return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
-}
+const owns = (d: Draft, a: IssuerAuthz) => ownsDraft(d, a.payload.u, a.scope.profiles);
 
 authoring.get(root, async (c) => {
   const d = await readDraft(c.env.HPS_DB, c.req.param("cohort")!, c.req.param("course")!);
@@ -136,34 +141,21 @@ authoring.put(root, async (c) => {
   }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
-  if (prior && prior.request_id === b.request_id) {
-    if (prior.request_hash !== hash) return c.json({ error: "request id reused with different content" }, 409);
-    return c.json(draftView(prior));
-  }
   const now = new Date().toISOString();
-  let d: Draft | null;
-  if (b.expected_revision === 0) {
-    const insert = c.env.HPS_DB.prepare(`INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
-        VALUES (?,?,?,?,1,?,?,?,?) ON CONFLICT(cohort_id,course_id) DO NOTHING RETURNING *`)
-        .bind(cohort,course,a.payload.u,b.profile_id,content,b.request_id,hash,now);
-    if (independent) {
-      // Draft and marker commit together (D1 batch is transactional); the marker SELECT only
-      // matches the row this request created, so a lost create race never marks another course.
-      await c.env.HPS_DB.batch([insert, c.env.HPS_DB.prepare(`INSERT INTO authoring_independent_courses (cohort_id,course_id)
-          SELECT cohort_id,course_id FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND owner_id=? AND request_id=? AND request_hash=? AND revision=1
-          ON CONFLICT(cohort_id,course_id) DO NOTHING`).bind(cohort,course,a.payload.u,b.request_id,hash)]);
-      const created = await readDraft(c.env.HPS_DB, cohort, course);
-      d = created && created.independent && created.revision === 1 && created.request_id === b.request_id && created.request_hash === hash ? created : null;
-    } else d = await insert.first<Draft>();
-  } else {
-    d = await c.env.HPS_DB.prepare(`UPDATE authoring_drafts SET profile_id=?,revision=revision+1,content_json=?,request_id=?,request_hash=?,updated_at=?
-        WHERE cohort_id=? AND course_id=? AND owner_id=? AND revision=? RETURNING *`)
-        .bind(b.profile_id,content,b.request_id,hash,now,cohort,course,a.payload.u,b.expected_revision).first<Draft>();
-  }
-  if (d) return c.json(draftView({ ...d, independent: independent ? 1 : 0 }));
-  // Concurrent retry may have won the conditional write after our first read.
-  const latest = await readDraft(c.env.HPS_DB, cohort, course);
-  if (latest && owns(latest,a) && latest.request_id === b.request_id && latest.request_hash === hash) return c.json(draftView(latest));
+  const markerStmt = independent && b.expected_revision === 0
+    ? c.env.HPS_DB.prepare(`INSERT INTO authoring_independent_courses (cohort_id,course_id)
+        SELECT cohort_id,course_id FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND owner_id=? AND request_id=? AND request_hash=? AND revision=1
+        ON CONFLICT(cohort_id,course_id) DO NOTHING`).bind(cohort, course, a.payload.u, b.request_id, hash)
+    : undefined;
+  const wr = await writeDraft(c.env.HPS_DB, prior, {
+    cohort, course, owner_id: a.payload.u,
+    expected_revision: b.expected_revision, request_id: b.request_id,
+    profile_id: b.profile_id, content_json: content, hash, now, independent,
+    profile_scope: a.scope.profiles ?? [],
+    independent_marker_stmt: markerStmt,
+  });
+  if (wr.kind === 'ok' || wr.kind === 'idempotent') return c.json(draftView(wr.draft));
+  if (wr.kind === 'request_id_reused') return c.json({ error: "request id reused with different content" }, 409);
   return c.json({ error: "revision conflict; reload before saving" }, 409);
 });
 
@@ -179,7 +171,7 @@ authoring.put(root + "/versions/:version", async (c) => {
   if (existing) {
     if (!a.scope.profiles.includes(JSON.parse(existing.module_json).profile_id)) return c.json({ error: "profile not permitted" }, 403);
     if (existing.source_revision !== b.expected_revision) return c.json({ error: "version already frozen" }, 409);
-    return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: "not_run", activated: false });
+    return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: await stateOf(c.env, cohort, course, version, existing.module_json), activated: false });
   }
   if (d.revision !== b.expected_revision) return c.json({ error: "revision conflict" }, 409);
   if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
@@ -189,6 +181,13 @@ authoring.put(root + "/versions/:version", async (c) => {
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);
+  // 교육 원칙 관문 v0. 형태 검증(위)을 통과한 뒤 설계를 본다. fail이 하나라도 있으면
+  // 확정을 막고 판정 목록 전체를 돌려준다 — 강사가 무엇을 채우면 열리는지 알아야 하므로
+  // 막은 항목만이 아니라 warn·skip까지 함께 보낸다. warn만 있으면 확정은 진행되고
+  // 같은 목록이 성공 응답에 실린다. 400/403/409와 겹치지 않도록 422를 쓴다.
+  const pedagogy = checkLessonPedagogy(content);
+  if (blockingPedagogyFindings(pedagogy).length)
+    return c.json({ error: '수업 설계가 교육 원칙 검사를 통과하지 못했습니다', reason: 'pedagogy_blocked', findings: pedagogy }, 422);
   if (content.model) {
     const profile = getProfile(d.profile_id);
     if (!profile || validateModelSubset(content.model, profile)) return c.json({ error: 'model is not permitted by the cohort' }, 403);
@@ -208,7 +207,9 @@ authoring.put(root + "/versions/:version", async (c) => {
     .bind(version,JSON.stringify(module),cohort,course,a.payload.u,b.expected_revision).run();
   const saved = await c.env.HPS_DB.prepare("SELECT source_revision,module_json FROM authoring_versions WHERE cohort_id=? AND course_id=? AND version=?").bind(cohort,course,version).first<Version>();
   if (!saved || saved.source_revision !== b.expected_revision) return c.json({ error: "revision or version conflict" }, 409);
-  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: "not_run", activated: false });
+  // 확정은 됐지만 남은 판정이 있으면 함께 보낸다. 비어 있지 않은 목록은 전부 warn/skip이다
+  // (fail이 있었다면 위에서 422로 끝났다). 확정을 성공으로 보고하면서 미확인을 숨기지 않는다.
+  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: "not_run", activated: false, pedagogy });
 });
 
 authoring.get(root + "/versions/:version", async (c) => {
@@ -220,5 +221,148 @@ authoring.get(root + "/versions/:version", async (c) => {
   // A subsequent profile change must not expose a version outside current scope.
   const module = JSON.parse(v.module_json);
   if (!c.get("author").scope.profiles.includes(module.profile_id)) return c.json({ error: "profile not permitted" }, 403);
-  return c.json({ module, source_revision: v.source_revision, rehearsal: "not_run", activated: false });
+  return c.json({ module, source_revision: v.source_revision, rehearsal: await stateOf(c.env, d.cohort_id, d.course_id, c.req.param("version")!, v.module_json), activated: false });
+});
+
+// ── #1012 · #751 G2 — reuse, review, learner-condition rehearsal and confirmation of one frozen candidate ──────────
+// Contract: docs/requirements/chalk-authoring.md#g2-curriculum-runtime-20260922. A frozen version is the candidate; it is
+// never edited. Its readiness is keyed by (version, sha256): a draft saved while a rehearsal runs is not that candidate.
+
+async function versionRow(db: D1Database, cohort: string, course: string, version: string) {
+  return db.prepare('SELECT source_revision,module_json FROM authoring_versions WHERE cohort_id=? AND course_id=? AND version=?').bind(cohort, course, version).first<Version>();
+}
+/** The rehearsal state of a stored version, from its own bytes (an unreadable/invalid version has none). */
+async function stateOf(env: Env, cohort: string, course: string, version: string, moduleJson: string) {
+  const m = JSON.parse(moduleJson);
+  const lesson = await readLesson(env, cohort, course, version, m.profile_id);
+  if (!lesson) return 'not_run';
+  return (await readinessOf(env, { cohort, course, version, profileId: m.profile_id, lessonSha: lesson.sha256, content: lesson.content })).state;
+}
+/** Service-produced bindings are stripped: a reused version's content is an ordinary draft body again. */
+const reusable = (content: any) => { const x = structuredClone(content); if (x.model) delete x.model.binding; if (x.features) delete x.features.binding; return x; };
+const MAX_VERSIONS = 20;
+
+// The course's frozen versions, newest first, each with what a teacher needs to pick one: title, readiness, confirmation.
+authoring.get(root + '/versions', async (c) => {
+  const cohort = c.req.param('cohort')!, course = c.req.param('course')!, a = c.get('author');
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  const rows = (await c.env.HPS_DB.prepare('SELECT version,source_revision,module_json FROM authoring_versions WHERE cohort_id=? AND course_id=? ORDER BY source_revision DESC, version DESC LIMIT ?').bind(cohort, course, MAX_VERSIONS + 1).all<{ version: string; source_revision: number; module_json: string }>()).results ?? [];
+  const versions = [];
+  for (const r of rows.slice(0, MAX_VERSIONS)) {
+    const m = JSON.parse(r.module_json);
+    if (!a.scope.profiles.includes(m.profile_id)) continue;
+    const lesson = await readLesson(c.env, cohort, course, r.version, m.profile_id);
+    const ready = lesson ? await readinessOf(c.env, { cohort, course, version: r.version, profileId: m.profile_id, lessonSha: lesson.sha256, content: lesson.content }) : null;
+    versions.push({ version: r.version, source_revision: r.source_revision, title: m.content?.title ?? '', mission: m.content?.learning ? { week: m.content.learning.week, mission: m.content.learning.mission } : null, lesson_sha256: lesson?.sha256 ?? null, readable: !!lesson,
+      rehearsal: ready?.state ?? 'not_run', confirmed: !!ready?.confirmed, confirmation_current: !!ready?.confirmation_current, steps: (m.content?.steps ?? []).map((s: any) => ({ id: s.id, title: s.title })) });
+  }
+  return c.json({ draft_revision: d.revision, versions, truncated: rows.length > MAX_VERSIONS, confirmation_required: confirmationRequired(c.env), authorable_step_ui: AUTHORABLE_STEP_UI });
+});
+
+// One frozen version's content, ready to be reused as a draft body (bindings stripped). Only the course owner reads it.
+authoring.get(root + '/versions/:version/readiness', async (c) => {
+  const cohort = c.req.param('cohort')!, course = c.req.param('course')!, version = c.req.param('version')!, a = c.get('author');
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  const row = await versionRow(c.env.HPS_DB, cohort, course, version);
+  if (!row) return c.json({ error: 'version not found' }, 404);
+  const m = JSON.parse(row.module_json);
+  if (!a.scope.profiles.includes(m.profile_id)) return c.json({ error: 'profile not permitted' }, 403);
+  const lesson = await readLesson(c.env, cohort, course, version, m.profile_id);
+  if (!lesson) return c.json({ error: 'this version cannot be opened under the current profile', reason: 'lesson_unavailable', version, source_revision: row.source_revision }, 409);
+  const ready = await readinessOf(c.env, { cohort, course, version, profileId: m.profile_id, lessonSha: lesson.sha256, content: lesson.content });
+  const history = (await rehearsalHistory(c.env.HPS_DB, cohort, course, version)).map((h) => ({ id: h.rehearsal_id, learner_id: h.learner_id, created_at: h.created_at, expires_at: h.expires_at, verdict: h.verdict, judged_at: h.judged_at, current: h.lesson_sha256 === lesson.sha256 }));
+  return c.json({ version, lesson_sha256: lesson.sha256, source_revision: row.source_revision, draft_revision: d.revision, draft_changed_since: d.revision !== row.source_revision,
+    profile_id: m.profile_id, ...ready, history, confirmation_required: confirmationRequired(c.env), content: reusable(lesson.content) });
+});
+
+// Concrete differences between two frozen versions, or a frozen version and the current draft (`to=draft`). Computed here,
+// never typed by the teacher. Read-only.
+authoring.get(root + '/impact', async (c) => {
+  const cohort = c.req.param('cohort')!, course = c.req.param('course')!, a = c.get('author');
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  const side = async (v: string | undefined) => {
+    if (v === 'draft') return { label: 'draft', revision: d.revision, content: JSON.parse(d.content_json) };
+    if (!v || !isModuleVersion(v)) return null;
+    const row = await versionRow(c.env.HPS_DB, cohort, course, v);
+    if (!row) return null;
+    const m = JSON.parse(row.module_json);
+    return a.scope.profiles.includes(m.profile_id) ? { label: v, revision: row.source_revision, content: m.content } : null;
+  };
+  const from = await side(c.req.query('from')), to = await side(c.req.query('to'));
+  if (!from || !to) return c.json({ error: 'from and to must name a frozen version of this course (or to=draft)' }, 400);
+  return c.json({ from: { version: from.label, revision: from.revision }, to: { version: to.label, revision: to.revision }, impact: lessonImpact(from.content, to.content) });
+});
+
+// A learner-condition rehearsal code for exactly this candidate. The learner ID must already be on the roster of an open
+// matching session — the SAME admission as a real invitation, so the rehearsal runs under the learner's own gate, never an
+// instructor credential. Issuing it is not readiness: the version stays `running` until the Service judges a report.
+authoring.post(root + '/versions/:version/rehearsals', async (c) => {
+  const a = c.get('author'), cohort = c.req.param('cohort')!, course = c.req.param('course')!, version = c.req.param('version')!;
+  const b = await c.req.json().catch(() => null);
+  if (!b || typeof b.learner !== 'string' || !validId(b.learner) || b.learner.length > 64 || typeof b.request_id !== 'string' || !validId(b.request_id))
+    return c.json({ error: 'rehearsal learner ID and request_id required' }, 400);
+  // The code lives at most REHEARSAL_HOURS and never beyond the instructor's own authorization.
+  const hours = Math.min(REHEARSAL_HOURS, a.scope.max_hours ?? 24, Math.floor(a.payload.exp - Date.now() / 1000) / 3600);
+  if (!(hours >= 0.25)) return c.json({ error: 'the instructor authorization ends too soon for a rehearsal', reason: 'authorization_too_short' }, 403);
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
+  const lesson = await readLesson(c.env, cohort, course, version, d.profile_id);
+  const profile = getProfile(d.profile_id);
+  if (!lesson || !profile) return c.json({ error: 'valid frozen version required', reason: 'lesson_unavailable' }, 409);
+  const session = await getActiveSession(c.env.HPS_KV, cohort);
+  if (!session || session.profile_id !== d.profile_id || Date.parse(session.starts_at) > Date.now() || Date.parse(session.ends_at) <= Date.now())
+    return c.json({ error: 'open a matching practice session first', reason: 'session_not_open' }, 403);
+  const roster = await getRoster(c.env.HPS_KV, cohort);
+  if (!roster?.users.includes(b.learner)) return c.json({ error: 'register the rehearsal learner ID in the session console first', reason: 'learner_not_in_roster' }, 403);
+  const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
+  const prior = await c.env.HPS_DB.prepare('SELECT * FROM authoring_rehearsals WHERE cohort_id=? AND course_id=? AND request_id=?').bind(cohort, course, b.request_id).first<any>();
+  if (prior) {
+    // A retried request (lost response) gets a fresh signature for the SAME rehearsal and jti; a reused id elsewhere is refused.
+    if (prior.version !== version || prior.learner_id !== b.learner || prior.created_by !== a.payload.u) return c.json({ error: 'request id reused with different content' }, 409);
+    const { token } = await issue({ u: prior.learner_id, c: cohort, p: prior.profile_id, lesson: ref, rehearsal: prior.rehearsal_id }, Math.max(0, prior.expires_at - Date.now()) / 3600_000, c.env.HPS_SIGNING_SECRET, { jti: prior.token_jti });
+    return c.json({ token, rehearsal_id: prior.rehearsal_id, lesson: ref, learner: prior.learner_id, expires_at: prior.expires_at, state: 'running' });
+  }
+  const rid = 'rh-' + crypto.randomUUID(), jti = crypto.randomUUID(), now = Date.now(), expires = now + Math.floor(hours * 3600) * 1000;
+  const digest = await policyDigest(profile, lesson.content);
+  const made = await c.env.HPS_DB.prepare(`INSERT INTO authoring_rehearsals(rehearsal_id,cohort_id,course_id,version,lesson_sha256,source_revision,profile_id,learner_id,token_jti,policy_digest,created_by,created_at,expires_at,request_id)
+ SELECT ?,?,?,?,?,v.source_revision,?,?,?,?,?,?,?,? FROM authoring_versions v WHERE v.cohort_id=? AND v.course_id=? AND v.version=? ON CONFLICT DO NOTHING`)
+    .bind(rid, cohort, course, version, lesson.sha256, d.profile_id, b.learner, jti, digest, a.payload.u, now, expires, b.request_id, cohort, course, version).run() as { meta?: { changes?: number } };
+  if ((made.meta?.changes ?? 0) !== 1) return c.json({ error: 'rehearsal could not be recorded; nothing was issued' }, 409);
+  const { token } = await issue({ u: b.learner, c: cohort, p: d.profile_id, lesson: ref, rehearsal: rid }, Math.floor(hours * 3600) / 3600, c.env.HPS_SIGNING_SECRET, { jti });
+  await recordTokenIssue(c.env, { jti, cohort, student: b.learner, profile: d.profile_id, issuedBy: a.payload.u, hours: Math.max(1, Math.ceil(hours)) });
+  return c.json({ token, rehearsal_id: rid, lesson: ref, learner: b.learner, expires_at: expires, state: 'running' });
+});
+
+// The teacher's deliberate confirmation of THIS candidate on its latest, passed, still-current rehearsal. Written once.
+authoring.post(root + '/versions/:version/confirmation', async (c) => {
+  const a = c.get('author'), cohort = c.req.param('cohort')!, course = c.req.param('course')!, version = c.req.param('version')!;
+  const b = await c.req.json().catch(() => null);
+  if (!b || typeof b.rehearsal_id !== 'string' || !/^rh-[a-f0-9-]{36}$/.test(b.rehearsal_id) || typeof b.request_id !== 'string' || !validId(b.request_id))
+    return c.json({ error: 'rehearsal_id and request_id required' }, 400);
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  const row = await versionRow(c.env.HPS_DB, cohort, course, version);
+  if (!row) return c.json({ error: 'version not found' }, 404);
+  const m = JSON.parse(row.module_json);
+  if (!a.scope.profiles.includes(m.profile_id)) return c.json({ error: 'profile not permitted' }, 403);
+  const lesson = await readLesson(c.env, cohort, course, version, m.profile_id);
+  if (!lesson) return c.json({ error: 'this version cannot be opened under the current profile', reason: 'lesson_unavailable' }, 409);
+  const existing = await confirmationOf(c.env.HPS_DB, cohort, course, version);
+  if (existing) return existing.rehearsal_id === b.rehearsal_id ? c.json({ version, confirmed: { at: existing.confirmed_at, by: existing.confirmed_by, rehearsal_id: existing.rehearsal_id } })
+    : c.json({ error: 'this version is already confirmed on another rehearsal', reason: 'already_confirmed' }, 409);
+  const latest = await latestRehearsal(c.env.HPS_DB, cohort, course, version);
+  const digest = await currentDigest(m.profile_id, lesson.content);
+  const why = !latest || latest.rehearsal_id !== b.rehearsal_id ? 'rehearsal_not_latest' : latest.lesson_sha256 !== lesson.sha256 ? 'rehearsal_other_candidate'
+    : latest.verdict !== 'passed' ? 'rehearsal_not_passed' : digest === null || latest.policy_digest !== digest ? 'rehearsal_stale' : '';
+  if (why) return c.json({ error: 'only the latest passed, current rehearsal of this exact version can be confirmed', reason: why }, 409);
+  await c.env.HPS_DB.prepare(`INSERT INTO authoring_confirmations(cohort_id,course_id,version,lesson_sha256,rehearsal_id,policy_digest,confirmed_by,confirmed_at,request_id)
+ SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM authoring_rehearsals r WHERE r.rehearsal_id=? AND r.verdict='passed' AND r.lesson_sha256=? AND r.policy_digest=?) ON CONFLICT DO NOTHING`)
+    .bind(cohort, course, version, lesson.sha256, b.rehearsal_id, digest, a.payload.u, Date.now(), b.request_id, b.rehearsal_id, lesson.sha256, digest).run();
+  const saved = await confirmationOf(c.env.HPS_DB, cohort, course, version);
+  if (!saved || saved.rehearsal_id !== b.rehearsal_id) return c.json({ error: 'confirmation conflict; reload' }, 409);
+  return c.json({ version, confirmed: { at: saved.confirmed_at, by: saved.confirmed_by, rehearsal_id: saved.rehearsal_id } });
 });

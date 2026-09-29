@@ -972,4 +972,52 @@ console.log("✓ count_tokens: bad json body — Anthropic-native 400");
 }
 console.log("\u2713 #670: minor cohort max_tokens cap reaches upstream");
 
+// --- #811: the image boundary reaches upstream on THIS path -----------------
+//
+// PROFILE is a child cohort with coach_runtime "agent-sdk" and no
+// `input.image_paste` — the exact state that was unguarded. Asserted against
+// what actually left the worker, not against the filter's own return value.
+{
+  assert.notEqual(profile.input?.image_paste, true, "the test cohort did not opt into image_paste");
+
+  const env = messagesEnv();
+  const pasted = { type: "image", source: { type: "base64", media_type: "image/png", data: "PASTEDBYCHILD" } };
+  const shot = { type: "image", source: { type: "base64", media_type: "image/png", data: "COACHSCREENSHOT" } };
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "ok" })),
+    async (calls) => {
+      const r = await app.fetch(
+        messagesRequest({
+          body: {
+            messages: [
+              { role: "user", content: [{ type: "text", text: "이것 좀 봐" }, pasted] },
+              { role: "assistant", content: [{ type: "tool_use", id: "tu_1", name: "screenshot", input: {} }] },
+              { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: [shot] }] },
+            ],
+          },
+        }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      const sent = JSON.stringify(JSON.parse(calls[0].init.body).messages);
+      assert.ok(!sent.includes("PASTEDBYCHILD"), "the child's pasted image did NOT reach the provider");
+      assert.ok(sent.includes("COACHSCREENSHOT"), "the coach's screenshot DID — the browser loop is intact");
+      assert.equal(r.headers.get("x-hps-images-filtered"), "user_dropped=1", "the removal is announced, not silent");
+    },
+  );
+
+  // Control: a turn with no images is byte-identical and announces nothing.
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "ok" })),
+    async (calls) => {
+      const r = await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get("x-hps-images-filtered"), null);
+      assert.deepEqual(JSON.parse(calls[0].init.body).messages, [{ role: "user", content: "안녕 코치" }]);
+    },
+  );
+}
+console.log("\u2713 #811: participant images stop at the worker; tool_result screenshots pass");
+
 console.log("All /v1/messages integration tests passed.");

@@ -26,9 +26,19 @@
 
 import { Hono } from "hono";
 import { authoring } from "./authoring";
+import { chalkCourses } from "./chalk-courses";
+import { chalkRecommend } from "./chalk-recommend";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
+import { classroomOpsTeacher, fenceIssuerForDistribution, liftIssuerFence, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
+import { classroomDistributionTeacher } from "./classroom-distribution";
+import { OPS_CAPABILITIES } from "../lib/classroom-ops";
+import { classroomCollectOperator, classroomCollectTeacher } from "./classroom-collect";
+import { classroomReportsTeacher } from "./classroom-reports";
+import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
+import { chalkKnowledge } from './chalk-knowledge';
+import { chalkInstructor } from './chalk-instructor';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
@@ -135,9 +145,21 @@ admin.use("*", async (c, next) => {
 });
 
 admin.route("/", authoring);
+admin.route("/", chalkCourses);
+admin.route("/", chalkRecommend);
 admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
+admin.route("/", classroomOpsTeacher);
+admin.route("/", classroomCollectTeacher);
+admin.route("/", classroomDistributionTeacher);
+admin.route("/", classroomReportsTeacher);
+admin.route("/", classroomDeliveryTeacher);
+admin.route("/", classroomDeliveryOperator);
+// Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
+admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
+admin.route('/', chalkKnowledge);
+admin.route('/', chalkInstructor);
 
 // ---- cohort list ------------------------------------------------------------
 
@@ -281,7 +303,17 @@ admin.post("/tokens/issue", async (c) => {
   // Mint the student token.
   if(body.native_trial){
     const selected=getProfile(profile);
-    if(!selected?.observation?.enabled||selected.session.cohort_id!==cohort)return c.json({error:'profile does not support individual trials'},400);
+    // ADR 0010 step 2 — `trial.individual`, not `observation.enabled`. Who may
+    // be handed a personal trial seat is an admin-authority question; it was
+    // riding on a measurement flag, so turning observation on for a kids cohort
+    // would have made that cohort mintable. Fail closed: the field is optional
+    // and absent means no. Deliberately NOT `trial?.individual ?? observation
+    // ?.enabled` — a fallback rebuilds the coupling and hides the widening.
+    //
+    // The cohort equality is untouched and is a separate, stricter check than
+    // the chat gate's `profileServesCohort`: this route must not mint a trial
+    // seat against a class cohort that merely serves the profile.
+    if(!selected?.trial?.individual||selected.session.cohort_id!==cohort)return c.json({error:'profile does not support individual trials'},400);
     if(!(await getRoster(c.env.HPS_KV,cohort))?.users.includes(u))return c.json({error:'participant must be registered first'},403);
   }
   const { token, jti } = await issue(
@@ -289,6 +321,10 @@ admin.post("/tokens/issue", async (c) => {
     hours,
     c.env.HPS_SIGNING_SECRET,
   );
+  // #751 — issuance metadata (never the token) so the board can tell "issued"
+  // from "verified by the app". No-op unless the operations switch is on; a
+  // ledger failure must not fail the mint.
+  const opsIssue = await recordTokenIssue(c.env, { jti, cohort, student: u, profile, issuedBy: grantOwner, hours });
   if(body.native_trial){try{await createNativeGrant(c.env,await verify(token,c.env.HPS_SIGNING_SECRET),grantOwner);}catch(error){if(error instanceof Error&&error.message==='trial_reissue_conflict')return c.json({error:'trial_reissue_conflict'},409);throw error;}}
   return c.json({
     ok: true,
@@ -299,6 +335,8 @@ admin.post("/tokens/issue", async (c) => {
     profile,
     hours,
     ...(body.native_trial?{trial_limits:NATIVE_TRIAL_LIMITS}:{}),
+    // Present only when the operations switch is on. false = old-epoch commands were NOT fenced off; re-issue or re-pair.
+    ...(opsIssue ? { ops: opsIssue } : {}),
     exp: Math.floor(Date.now() / 1000) + hours * 3600,
   });
 });
@@ -329,6 +367,15 @@ admin.post("/tokens/revoke", async (c) => {
     },
     ttl,
   );
+  // #751 — KV revocation can lag other locations by a minute. Operations
+  // grants minted under this issuer are revoked in the D1 primary, and the
+  // response only says ok once that commit succeeded. Retrying is idempotent.
+  try {
+    await revokeOpsGrantsForIssuer(c.env, body.jti);
+  } catch (err) {
+    console.error("ops grant revocation failed:", err);
+    return c.json({ ok: false, jti: body.jti, kv_revoked: true, error: "operations grants not revoked — retry this revocation" }, 500);
+  }
   return c.json({ ok: true, jti: body.jti, record: rev, ttl_seconds: ttl });
 });
 
@@ -336,6 +383,10 @@ admin.delete("/tokens/revoke/:jti", async (c) => {
   const jti = c.req.param("jti");
   if (!UUID_RE.test(jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
   await unrevokeToken(c.env.HPS_KV, jti);
+  // #751 U2 — the D1 fence is lifted LAST, so a failure leaves distribution closed rather than open. Distributions that the
+  // revocation swept stay closed: restoring a token does not resurrect what was stopped under it.
+  try { await liftIssuerFence(c.env, jti); }
+  catch (err) { console.error("distribution fence not lifted:", err); return c.json({ ok: false, jti, kv_unrevoked: true, error: "token restored, but it still cannot distribute — retry this un-revoke" }, 500); }
   return c.json({ ok: true });
 });
 
@@ -466,11 +517,18 @@ admin.post("/issuers", async (c) => {
         return c.json({ error: `scope.max_session_hours must be an integer 1..${MAX_SESSION_HOURS}` }, 400);
       }
     }
+    // #751 — operations capabilities are opt-in and allowlisted; an unknown
+    // name is a 400, never silently dropped into a broader grant.
+    const ops = (s as { ops?: unknown }).ops;
+    if (ops !== undefined && (!Array.isArray(ops) || ops.length > OPS_CAPABILITIES.length || ops.some((o) => !(OPS_CAPABILITIES as readonly unknown[]).includes(o)) || new Set(ops).size !== ops.length)) {
+      return c.json({ error: `scope.ops must be a unique subset of [${OPS_CAPABILITIES.join(", ")}]` }, 400);
+    }
     scopes.push({
       cohort: s.cohort,
       profiles: s.profiles,
       max_hours: maxHours,
       ...(canStart ? { can_start_session: true, max_session_hours: maxSession } : {}),
+      ...(Array.isArray(ops) && ops.length ? { ops: ops as string[] } : {}),
     });
   }
 
@@ -496,6 +554,7 @@ admin.post("/issuers", async (c) => {
           if (m.can_start_session !== true) return false;
           if ((s.max_session_hours ?? 4) > (m.max_session_hours ?? 4)) return false;
         }
+        if (!(s.ops ?? []).every((o) => m.ops?.includes(o) ?? false)) return false;
         return true;
       });
       if (!covered) {
@@ -555,12 +614,22 @@ admin.post("/issuers", async (c) => {
   // mint failure leaves the instructor with their OLD token rather than
   // neither. TTL = 90-day hard cap >= any issuer lifetime → no resurrection.
   if (body.revoke_jti !== undefined) {
-    await revokeToken(
-      c.env.HPS_KV,
-      body.revoke_jti,
-      { reason: "issuer re-scope", user: instructor },
-      MAX_DAYS * 24 * 60 * 60,
-    );
+    // #751 U2 — KV alone is not a boundary for distribution (it can reach other locations late). The replaced token is
+    // fenced in D1 FIRST; if that fails nothing is revoked and the new token is not returned, so the instructor keeps
+    // exactly what they had. Open distributions of the replaced token are closed only when the new scope no longer holds
+    // `distribute` in that cohort — re-issuing a token mid-class must not cancel what is waiting for offline learners.
+    const retainedCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("distribute")).map((s: { cohort: string }) => s.cohort);
+    const retainedSettingCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("lesson_settings")).map((s: { cohort: string }) => s.cohort);
+    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: true, retainedCohorts, retainedSettingCohorts }); }
+    catch (err) { console.error("issuer re-scope: distribution fence not written:", err); return c.json({ error: "re-scope not applied: the replaced token could not be fenced — nothing changed, retry", reason: "distribute_fence_failed" }, 500); }
+    try {
+      await revokeToken(
+        c.env.HPS_KV,
+        body.revoke_jti,
+        { reason: "issuer re-scope", user: instructor },
+        MAX_DAYS * 24 * 60 * 60,
+      );
+    } catch (err) { console.error("issuer re-scope: KV revocation failed:", err); return c.json({ error: "the replaced token can no longer distribute but is not yet revoked — retry with the same revoke_jti", reason: "kv_revoke_failed" }, 500); }
   }
 
   // ⑦ audit — metadata only (NEVER the token). Root-of-trust issuance must be
@@ -920,7 +989,7 @@ admin.post("/cohorts/:id/session/close", async (c) => {
     );
   }
 
-  let revoked: string | null = null;
+  let revoked: string | null = null, distributeFenced = true;
   if (body.jti) {
     if (!UUID_RE.test(body.jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
     const now = Math.floor(Date.now() / 1000);
@@ -930,8 +999,12 @@ admin.post("/cohorts/:id/session/close", async (c) => {
     const ttl = typeof body.exp === "number" && body.exp > now ? body.exp - now : 60 * 60 * 24;
     await revokeToken(c.env.HPS_KV, body.jti, { reason: "session-close", cohort: cohortId }, ttl);
     revoked = body.jti;
+    // #751 U2 — closing the class already stops new distribution (`run_ended`). The fence is written as well so the same
+    // token cannot distribute into ANOTHER open run; a failure does not undo the close and is reported, not hidden.
+    try { await fenceIssuerForDistribution(c.env, body.jti, { reason: "session_close", by: "session-close", sweep: true }); }
+    catch (err) { console.error("session close: distribution fence not written:", err); distributeFenced = false; }
   }
-  return c.json({ ok: true, ended: existing, revoked });
+  return c.json({ ok: true, ended: existing, revoked, ...(distributeFenced ? {} : { distribute_fenced: false }) });
 });
 
 // ---- live stats snapshot (S-09 / #50) ---------------------------------------

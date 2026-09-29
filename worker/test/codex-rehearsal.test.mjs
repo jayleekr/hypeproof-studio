@@ -8,8 +8,10 @@ import { codexRehearsalResponse, validateCodexRequest } from './harness/codex-re
 const body = { model:'gpt-5.6-luna', messages:[{role:'user',content:'합성 요청'}], stream:true };
 function protocol({account='chatgpt', turn='success', holdThread=false, externalTools=false}={}) {
  const requests=[];let send,held;
- const client=new CodexLocalClient({listMcpNames:()=>['synthetic-server'],spawnProcess(_exe,args,options){
+ const client=new CodexLocalClient({listMcpNames:()=>['synthetic-server',{name:'synthetic-http',transport:'streamable_http'}],spawnProcess(_exe,args,options){
   assert(args.includes('forced_login_method="chatgpt"'));
+  assert(args.includes('mcp_servers.synthetic-http.enabled=false'));
+  assert(!args.some(a=>a.startsWith('mcp_servers.synthetic-http={command=')));
   assert(args.includes('features.apps=false'));assert(args.includes('features.plugins=false'));
   assert(args.includes('mcp_servers.synthetic-server={command="false",enabled=false}'));assert(args.includes('mcp_servers={}'));assert(args.includes('features.code_mode_host=false'));
   for(const key of ['OPENAI_API_KEY','CODEX_API_KEY','ANTHROPIC_API_KEY'])assert.equal(options.env[key],undefined);
@@ -25,7 +27,7 @@ function protocol({account='chatgpt', turn='success', holdThread=false, external
     else if(m.method==='mcpServerStatus/list')reply({data:externalTools?[{tools:{unexpected:{}}}]:[]});
     else if(m.method==='model/list')reply({data:[{model:'gpt-5.6-luna',displayName:'Luna'}]});
     else if(m.method==='thread/start'){
-     assert.equal(m.params.ephemeral,true);assert.equal(m.params.sandbox,'read-only');
+     assert.equal(m.params.ephemeral,true);assert.equal(m.params.sandbox,m.params.dynamicTools?.length?'workspace-write':'read-only');
      if(holdThread)held=()=>reply({thread:{id:'thread-1'}});else reply({thread:{id:'thread-1'}});
     }else if(m.method==='turn/start'){
      reply({turn:{id:'turn-1'}});
@@ -93,4 +95,32 @@ test('adapter consumer cancellation reaches provider',async()=>{
 
 test('unexpected connected external tools block generation before a thread starts',async()=>{
  const p=protocol({externalTools:true});try{await assert.rejects(p.client.connect(),/tools_not_disabled/);assert(!p.requests.some(x=>x.method==='thread/start'));}finally{p.client.close();}
+});
+
+test('dynamic Studio tools return host result without invoking built-in tools',async()=>{
+ const p=protocol({turn:'hold'});
+ try{
+  await p.client.connect();const calls=[];
+  const result=p.client.complete({...body,tools:[{name:'Read',description:'Read workspace file',inputSchema:{type:'object',properties:{}}}],onToolCall:async(name,args)=>{calls.push({name,args});return 'verified host data';}});
+  await new Promise(r=>setImmediate(r));
+  p.send({id:'host-tool-1',method:'item/tool/call',params:{threadId:'thread-1',tool:'Read',arguments:{file_path:'sample.txt'}}});
+  await new Promise(r=>setImmediate(r));
+  assert.deepEqual(calls,[{name:'Read',args:{file_path:'sample.txt'}}]);
+  const response=p.requests.find(r=>r.id==='host-tool-1');
+  assert.equal(response.result.success,true);
+  assert.equal(response.result.contentItems[0].text,'verified host data');
+  p.send({method:'turn/completed',params:{threadId:'thread-1',turn:{id:'turn-1',status:'completed'}}});
+  await result;
+ }finally{p.client.close();}
+});
+test('tool request for another thread never reaches workspace handler',async()=>{
+ const p=protocol({turn:'hold'});
+ try{
+  await p.client.connect();let calls=0;
+  const result=p.client.complete({...body,tools:[{name:'Read',description:'read',inputSchema:{type:'object'}}],onToolCall:async()=>{calls++;return 'no';}});
+  const rejected=assert.rejects(result,/tool_not_supported/);
+  await new Promise(r=>setImmediate(r));
+  p.send({id:'foreign-tool',method:'item/tool/call',params:{threadId:'other-thread',tool:'Read',arguments:{}}});
+  await rejected;assert.equal(calls,0);
+ }finally{p.client.close();}
 });

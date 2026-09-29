@@ -77,6 +77,21 @@ export function shouldFlushQueue(
   prevStreaming: boolean,
   streaming: boolean,
   queued: string | null,
+  cutOff = false,
 ): boolean {
-  return prevStreaming && !streaming && !!queued?.trim();
+  return prevStreaming && !streaming && !cutOff && !!queued?.trim();
+}
+
+/**
+ * #751 U4 — the turn did not finish, it was CUT OFF from outside the panel (the instructor stopped it). The learner's own
+ * Stop already hands the parked message back to the draft before cancelling; a stop they did not press must do the same.
+ * Sending it would start a new AI run the moment the instructor stopped one, in words the learner had not decided to send yet.
+ */
+export function shouldRestoreQueue(
+  prevStreaming: boolean,
+  streaming: boolean,
+  queued: string | null,
+  cutOff: boolean,
+): boolean {
+  return prevStreaming && !streaming && cutOff && !!queued?.trim();
 }

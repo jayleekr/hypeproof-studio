@@ -42,7 +42,7 @@ const originalBrowserControl = structuredClone(profile.browser_control);
 
 const content = {
   schema: 'hps-session-design/1', title: '가상 꽃집', audience: '합성 사용자',
-  duration_minutes: 60, objective: '영업시간 검토', prerequisites: '', starter: '연습 폴더',
+  duration_minutes: 60, objective: '영업시간 검토', prerequisites: '사전 지식 불필요', starter: '연습 폴더',
   steps: [{ id: 'one', title: '확인', instructions: '영업시간 확인', hint: '', acceptance: '수정 이유 설명' }],
 };
 const base = '/admin/cohorts/' + local.cohort + '/authoring/';

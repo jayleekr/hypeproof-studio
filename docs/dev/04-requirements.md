@@ -5,7 +5,7 @@ doc_type: requirements
 status: canonical
 owner: core
 version: 0.1.5
-last_reviewed: 2026-05-22
+last_reviewed: 2026-09-13
 audience: maintainers
 source_paths:
   - docs/studio-requirements.md
@@ -168,3 +168,40 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 기존 NAT/AE/AB/업데이트 계약에 연결된 수용 목표이며, [US-T01~21](../testing/unified-studio-experience.md)은
 모두 NOT RUN인 테스트 계획이다. [구현 이슈와 추적](../plan/unified-studio-experience.md)을 통해
 문서 발행·구현·실기 검증·공개 배포·사용자 적용을 구분한다. #912의 수동 체크리스트는 자동 gate 구현이 아니다.
+
+## Measurement core and Jay dogfood
+
+| ID | Area | Acceptance criteria | Primary paths |
+|---|---|---|---|
+| REQ-STUDIO-MEASUREMENT-CORE | portable observation, evidence and review | Studio and both external hosts call the same core; new cards default to six model items; legacy evidence stays readable; Jay reviews and submits actual work with a local receipt and a follow-up improvement. Proposed, not yet implemented. | docs/requirements/measurement-core.md; docs/design/measurement-core.md; docs/testing/measurement-core.md |
+
+[INT-MC-01–03](../intents/measurement-core.md) →
+[MC-01–48](../requirements/measurement-core.md) →
+[MC-T01–24](../testing/measurement-core.md) →
+[implementation slices](../plan/measurement-core.md).
+Full app rebuild and remote team collection are not prerequisites for the first
+local dogfood. Actual host support and user acceptance require retained evidence.
+
+## Learning experience first
+
+| ID | Area | Acceptance criteria | Primary paths |
+|---|---|---|---|
+| REQ-STUDIO-LEARNING-EXPERIENCE | learning-first UX (SX-01..60) | mission header and today's-work home, coach rail without answers, evidence drawer with completion and re-verification gates, boundary-only reflection, no score or badge on work screens, six-week content read from session design files | `docs/requirements/studio-learning-experience.md`, `extensions/hypeproof-chat/webview-ui/src/`, `worker/src/lib/measurement-core/`, `chalk/` |
+
+[INT-SX-00–10](../intents/studio-learning-experience.md) →
+[SX-01–60](../requirements/studio-learning-experience.md) →
+[SX-T01–T60](../testing/studio-learning-experience.md) →
+[plan and DAG](../plan/studio-learning-experience.md).
+The source philosophy is preserved in [ui-philosophy-2026-09-18](../design/ui-philosophy-2026-09-18.md)
+and is not edited by derived documents. Every SX-T row starts NOT RUN; document
+publication is not implementation and is not human acceptance.
+
+## Remote classroom operations design
+
+2026-09-18 proposal: [ADM-01–14 detailed remote operations contract](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18),
+[existing DES screen criteria](../requirements/classroom-design.md),
+[AT-15–34 acceptance plan](../testing/classroom-admin.md#remote-classroom-tests),
+[E5 delivery sequence](../plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+This extends the existing #751/#732 work and covers activation, whole-class state,
+command receipts, preserving reset and collection/report/delivery jobs. New
+behavior is planned; existing baseline tests do not mark these scenarios passed.
