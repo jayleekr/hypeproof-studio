@@ -1,0 +1,12 @@
+{
+  "name": "cr-recon-cdp-probe",
+  "displayName": "CR recon CDP probe (test-only)",
+  "description": "Test-only development extension for e2e/curriculum-runtime/cdp-probe.mjs. Never bundled into Studio.",
+  "version": "0.0.1",
+  "publisher": "hypeproof-recon",
+  "private": true,
+  "engines": { "vscode": ">=0.1.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "enabledApiProposals": ["browser"]
+}
