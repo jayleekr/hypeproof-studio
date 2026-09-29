@@ -13,7 +13,16 @@
 // those four error records per document, zero for a clean page, and must not carry the
 // first document's records into the second one after a reload.
 //
-// Run: HPS_APP_PATH="/path/to/HypeProof Studio.app" node e2e/curriculum-runtime/cdp-probe.mjs [--out result.json]
+// Layout is controlled, so the tab layout does not depend on which hypeproof-chat build the app
+// carries (the results can: recon F8). The extension waits until the editors the app opens at
+// startup have settled, then opens the browser tab beside them (HPS_CR_PROBE_LAYOUT=beside, the
+// default, as hypeproof-chat opens its preview) or as the active tab of the active group at full
+// editor width (HPS_CR_PROBE_LAYOUT=full). A stock app and one with a freshly built extension injected
+// (e2e/README.md) are both valid targets. The element pick is only meaningful on a tab the
+// student could see, so "the browser tab is the visible tab of its group" is checked first;
+// picking on a covered tab is unreliable (recon R2), which the last step records.
+//
+// Run: HPS_APP_PATH="/path/to/HypeProof Studio.app" [HPS_CR_PROBE_LAYOUT=beside|full] node e2e/curriculum-runtime/cdp-probe.mjs [--out result.json]
 // Exit: 0 all expectations hold · 1 an expectation failed · 2 could not run · 3 every runnable
 // expectation holds but the screen was locked, so the checks that need composited frames
 // (wheel scroll, element crop) were NOT RUN. Run it again unlocked before calling it a pass.
@@ -35,8 +44,11 @@ const product = existsSync(productJson) ? JSON.parse(readFileSync(productJson, "
 console.log(`INFO  app ${product.version ?? "?"} (${product.commit ?? "?"}) · ${binary}`);
 const outArg = process.argv.indexOf("--out");
 const outFile = outArg > 0 ? process.argv[outArg + 1] : null;
+const layout = process.env.HPS_CR_PROBE_LAYOUT?.trim() || "beside";
+if (!["beside", "full"].includes(layout)) { console.error(`HPS_CR_PROBE_LAYOUT must be beside or full, not ${layout}`); process.exit(2); }
 
-const PLANTED = `<!doctype html><html><head><meta charset="utf-8"><title>CR recon probe</title>
+const PLANTED_TITLE = "CR recon probe";
+const PLANTED = `<!doctype html><html><head><meta charset="utf-8"><title>${PLANTED_TITLE}</title>
 <style>body{font-family:sans-serif;min-height:3000px}#target{padding:12px;background:rgb(10, 20, 30);color:rgb(250, 250, 250);font-size:18px}</style></head>
 <body><h1>키오스크 연습</h1>
 <button id="target" onmouseover="document.body.dataset.hovered='yes'" onclick="document.body.dataset.clicked=String(Number(document.body.dataset.clicked||0)+1)">주문하기</button>
@@ -48,9 +60,13 @@ setTimeout(function(){ throw new Error('probe-planted-throw'); }, 50);
 fetch('/missing-404').catch(function(){});
 fetch('http://127.0.0.1:__REFUSED_PORT__/unreachable').catch(function(){});
 </script></body></html>`;
-// Negative control for the instrument itself: HPS_CR_PROBE_NEGATIVE=1 plants one error the
-// expectations below do not list, so the exact-count checks must FAIL (exit 1).
+// Negative controls for the instrument itself (each must exit 1):
+//   HPS_CR_PROBE_NEGATIVE=1        plants one error the expectations do not list, so the
+//                                  exact-count checks must FAIL;
+//   HPS_CR_PROBE_NEGATIVE=covered  covers the browser tab with an editor before the pick, so
+//                                  the pick precondition check must FAIL.
 const NEGATIVE = process.env.HPS_CR_PROBE_NEGATIVE === "1";
+const COVER_BEFORE_PICK = process.env.HPS_CR_PROBE_NEGATIVE === "covered";
 const CLEAN = `<!doctype html><html><head><meta charset="utf-8"><title>clean</title></head><body><p>clean</p><script>console.log('clean-log')</script></body></html>`;
 
 // A port that was just free: the planted fetch fails with a refused connection, not an
@@ -72,7 +88,7 @@ const work = mkdtempSync(join(tmpdir(), "hps-cr-probe-"));
 const ext = join(work, "cdp-probe-extension");
 cpSync(join(here, "cdp-probe-extension"), ext, { recursive: true });
 const resultPath = join(work, "result.json");
-writeFileSync(join(ext, "probe-config.json"), JSON.stringify({ plantedUrl: `${base}/planted`, cleanUrl: `${base}/clean`, out: resultPath }));
+writeFileSync(join(ext, "probe-config.json"), JSON.stringify({ plantedUrl: `${base}/planted`, cleanUrl: `${base}/clean`, out: resultPath, layout, coverBeforePick: COVER_BEFORE_PICK, plantedTitle: PLANTED_TITLE }));
 const userDir = join(work, "user-data", "User");
 mkdirSync(userDir, { recursive: true });
 writeFileSync(join(userDir, "settings.json"), JSON.stringify({
@@ -146,6 +162,7 @@ const checks = [
   ["DOM-level scroll moves the page", s.scroll?.ok && s.scroll.dom_scroll_after > 0],
   ["select changes the value and fires change", s.select?.selected === "b"],
   ["reload makes a new document", s.reload_and_stale_ref?.new_document === true],
+  ["pick precondition: the browser tab is the visible tab of its group", result.pick_precondition?.tab_visible === true],
   ["element pick returns the node the AX ref names", s.element_pick?.same_node_as_ax_ref === true],
   ["element pick: DOM snippet and style", /주문하기/.test(s.element_pick?.outer_html ?? "") && s.element_pick?.style?.["background-color"] === "rgb(10, 20, 30)"],
   ["element pick: element crop", s.element_pick?.crop_bytes > 0, COMPOSITED],
@@ -158,6 +175,8 @@ for (const [name, pass, composited] of checks) {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}`);
 }
 console.log(`INFO  screen locked: ${locked}`);
+console.log(`INFO  layout ${result.layout?.mode} (settled ${result.layout?.settled_ms} ms) · groups at open:`, JSON.stringify(result.layout?.groups_at_open), "· at pick:", JSON.stringify(result.pick_precondition?.groups), "· BrowserTab.title:", JSON.stringify(result.pick_precondition?.browser_tab_title_api));
+console.log("INFO  pick on a covered tab (characterisation, not an expectation):", JSON.stringify(s.pick_on_covered_tab));
 console.log("INFO  upstream LM browser tools registered:", JSON.stringify(s.upstream_lm_tools?.browser_tools));
 console.log("INFO  overlay indicator candidate:", JSON.stringify(s.overlay_indicator));
 console.log("INFO  viewport:", JSON.stringify(s.viewport));

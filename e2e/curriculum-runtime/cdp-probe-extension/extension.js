@@ -6,7 +6,8 @@
 // exceptions and failed requests of a page, tell documents apart across a reload,
 // perform hover / scroll / select / reload, let a person pick an element, and read
 // that element's DOM, computed style and crop? It also lists which upstream
-// browserView agent tools the shipped app registers.
+// browserView agent tools the shipped app registers, and records what a pick does
+// when another editor covers the browser tab.
 //
 // It is never bundled into Studio. The runner copies this folder into a temporary
 // directory with a probe-config.json next to it and loads it with
@@ -161,7 +162,45 @@ async function run(cfg) {
   });
 
   // B. Open the planted page through the same API hypeproof-chat uses, attach, enable domains.
-  const tab = await vscode.window.openBrowserTab(cfg.plantedUrl, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
+  // The layout is controlled, not inherited: whatever editors the installed hypeproof-chat opens
+  // at startup (both the stock 0.1.51 and the origin/main build open a "HypeProof Studio" editor)
+  // must have opened BEFORE the browser tab, or one of them lands on top of it and the tab is
+  // covered. A tab covered right after opening loses the first inspect-mode click (recon R2), so
+  // wait until the editor set has been stable for 2 s (at most 15 s) and only then open the tab.
+  const groupsNow = () => vscode.window.tabGroups.all.map((g) => ({ col: g.viewColumn, tabs: g.tabs.map((x) => `${x.label}${x.isActive ? "*" : ""}`) }));
+  const settleStart = Date.now();
+  let seen = JSON.stringify(groupsNow());
+  let stableSince = Date.now();
+  while (Date.now() - settleStart < 15000 && Date.now() - stableSince < 2000) {
+    await sleep(250);
+    const now = JSON.stringify(groupsNow());
+    if (now !== seen) { seen = now; stableSince = Date.now(); }
+  }
+  const layout = cfg.layout === "full" ? "full" : "beside";
+  const tab = await vscode.window.openBrowserTab(cfg.plantedUrl, {
+    // beside: next to the active editor, as hypeproof-chat opens its preview. full: in the active
+    // group, so the browser tab is that group's active tab at the window's full editor width.
+    viewColumn: layout === "full" ? vscode.ViewColumn.Active : vscode.ViewColumn.Beside,
+    preserveFocus: true,
+  });
+  await sleep(500);
+  result.layout = { mode: layout, settled_ms: Date.now() - settleStart, groups_at_open: groupsNow() };
+  // The editor tab is found by the planted page's <title>, which the probe controls: the tab label
+  // is the page title, while BrowserTab.title reads "<title> (<url>)" (recorded at the pick).
+  const isBrowserTab = (x) => x.label === cfg.plantedTitle;
+  /** Is the browser tab the active (visible) tab of its editor group? Page visibility cannot tell. */
+  const browserTabVisible = () => vscode.window.tabGroups.all.some((g) => g.activeTab && isBrowserTab(g.activeTab));
+  /** Opens a workspace text file in the browser tab's group, on top of the browser tab. */
+  const coverBrowserTab = async () => {
+    const group = vscode.window.tabGroups.all.find((g) => g.tabs.some(isBrowserTab));
+    const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+    if (!group || !folder) return false;
+    const cover = path.join(folder.uri.fsPath, "cover.txt");
+    fs.writeFileSync(cover, "covers the browser tab\n");
+    await vscode.window.showTextDocument(vscode.Uri.file(cover), { viewColumn: group.viewColumn, preserveFocus: true, preview: false });
+    await sleep(500);
+    return true;
+  };
   const cdp = new ProbeCdp(await tab.startCDPSession());
   await step("attach", async () => { await cdp.attach(); return { flat_session: !!cdp.sessionId }; });
   await step("enable_domains", async () => {
@@ -276,9 +315,14 @@ async function run(cfg) {
     return { new_document: after > before, stale_backend_node: staleBoxModel };
   });
 
-  // E. Element pick: inspect mode + a synthetic click stands in for the student's click.
+  // E. Element pick: inspect mode + a synthetic click stands in for the student's click. A
+  // student can only click a tab they see, so the precondition is recorded with the result.
   await step("element_pick", async () => {
     await sleep(300);
+    // Negative control for the precondition check (HPS_CR_PROBE_NEGATIVE=covered).
+    if (cfg.coverBeforePick) await coverBrowserTab();
+    // Recorded outside the step result so it survives a failed pick.
+    result.pick_precondition = { tab_visible: browserTabVisible(), groups: groupsNow(), browser_tab_title_api: tab.title };
     const id = await nodeByAx(cdp, "button", "주문하기");
     const box = await cdp.send("DOM.getBoxModel", { backendNodeId: id });
     const c = center(box.model.content);
@@ -333,6 +377,49 @@ async function run(cfg) {
     await cdp.send("Overlay.hideHighlight", {});
     return { ax_unchanged: axBefore === axDuring, dom_unchanged: domBefore === domDuring,
       screenshot_changed: shotBefore && shotDuring ? shotBefore !== shotDuring : null };
+  });
+
+  // G. Characterisation, not an expectation (last, because it covers the tab): the same pick on
+  // a tab the student cannot see. Two cases; what they did on 2026-09-29 is in recon R2 and §8:
+  //   covered_after_shown  the tab was visible, then another editor covered it;
+  //   never_shown          a second tab opened with `background: true` and never shown.
+  // document.visibilityState is recorded because it does not tell a covered tab apart.
+  const pickTwice = async (c2, box) => {
+    const attempt = async () => {
+      const t0 = Date.now();
+      await c2.send("Overlay.setInspectMode", { mode: "searchForNode", highlightConfig: { showInfo: true } });
+      const picked = c2.waitFor((e) => e.method === "Overlay.inspectNodeRequested" && e.sessionId === c2.sessionId && e.at >= t0, 3000).then(() => true, () => false);
+      await c2.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x, y: box.y });
+      await c2.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
+      await c2.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
+      const ok = await picked;
+      await c2.send("Overlay.setInspectMode", { mode: "none", highlightConfig: {} });
+      return ok;
+    };
+    return { page_visibility: await evalValue(c2, "document.visibilityState"), first_click_picked: await attempt(), second_click_picked: await attempt() };
+  };
+  await step("pick_on_covered_tab", async () => {
+    if (browserTabVisible() && !(await coverBrowserTab())) return { skipped: "no group or workspace folder" };
+    const tabVisible = browserTabVisible();
+    const id = await nodeByAx(cdp, "button", "주문하기");
+    const box = center((await cdp.send("DOM.getBoxModel", { backendNodeId: id })).model.content);
+    const shot = await cdp.send("Page.captureScreenshot", { format: "png" }, 3000).then(() => true, () => false);
+    const covered = { tab_visible: tabVisible, screenshot: shot, ...(await pickTwice(cdp, box)) };
+    let neverShown;
+    try {
+      const group = vscode.window.tabGroups.all.find((g) => g.tabs.some(isBrowserTab));
+      const bg = await vscode.window.openBrowserTab(cfg.plantedUrl, { viewColumn: group ? group.viewColumn : vscode.ViewColumn.Active, background: true, preserveFocus: true });
+      const bcdp = new ProbeCdp(await bg.startCDPSession());
+      await bcdp.attach();
+      for (const d of ["Page.enable", "Runtime.enable", "DOM.enable", "Overlay.enable"]) await bcdp.send(d, {});
+      await waitComplete(bcdp);
+      await sleep(500);
+      const bid = await nodeByAx(bcdp, "button", "주문하기");
+      const bbox = center((await bcdp.send("DOM.getBoxModel", { backendNodeId: bid })).model.content);
+      neverShown = await pickTwice(bcdp, bbox);
+      await bg.close();
+    } catch (err) { neverShown = { error: String(err && err.message || err) }; }
+    return { covered_after_shown: covered, never_shown: neverShown };
   });
 
   result.finished_at = new Date().toISOString();

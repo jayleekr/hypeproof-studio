@@ -1,12 +1,12 @@
 # Curriculum Runtime reconnaissance — architecture map, gap matrix, decisions
 
 Status: active, the `cr-recon` output (CR-01, issue [#1390](https://github.com/jayleekr/hypeproof-studio/issues/1390), epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388)). 2026-09-29. Owner: jayleekr.
-Read at: Studio `origin/main` `cc3785260e92315dcc4bc31410b7cc79713f604e`. Upstream pins: `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce` (the `vscodium-base` submodule pointer), `vscode@1.116.0` (commit `560a9dba96f961efea7b1612916f89e5d5d4d679`, from that commit's `upstream/stable.json`). Probed app: HypeProof Studio 0.1.51 (`d4db90498fce6c337823a4ce73cbe79c5e688b05`) with the `origin/main` extension injected.
+Read at: Studio `origin/main` `cc3785260e92315dcc4bc31410b7cc79713f604e`. Upstream pins: `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce` (the `vscodium-base` submodule pointer), `vscode@1.116.0` (commit `560a9dba96f961efea7b1612916f89e5d5d4d679`, from that commit's `upstream/stable.json`). Probed app: HypeProof Studio 0.1.51 (`d4db90498fce6c337823a4ce73cbe79c5e688b05`), as installed and with the `origin/main` extension injected (§8; the two differ, F8).
 Parent: [plan](curriculum-runtime.md) · [requirements CR-01–84](../requirements/curriculum-runtime.md) · [verification CR-T01–T80](../testing/curriculum-runtime.md) · [PRD v1.0](../design/curriculum-runtime-prd-v1.0-2026-09-28.md) §13 Phase 0, §15.
 
-This page is the reconnaissance PRD §13 Phase 0 and §15 Rule 1 ask for. Every map and matrix row names a path and a symbol; `worker/test/cr-recon.test.mjs` (CR-T01) checks that each exists, that the ten areas are present, that every CR row has exactly one verdict, and that the item named for a row cites it in the ledger. A path written `vscode@1.116.0:…` or `vscodium@59e5792…:…` is outside this repository; the test checks it only when `HPS_VSCODE_SRC` / `HPS_VSCODIUM_SRC` point at a checkout, and otherwise lists it as not checked. A `lab:` path is in hypeprooflab and is checked only with `HPS_LAB`.
+This page is the reconnaissance PRD §13 Phase 0 and §15 Rule 1 ask for. Every map and matrix row names a path and a symbol; `worker/test/cr-recon.test.mjs` (CR-T01) checks that each exists with the symbol outside comments, that the ten areas are present and titled after their PRD items, that every CR row has exactly one verdict, and that the item named for a row cites it in the ledger. A path written `vscode@1.116.0:…` or `vscodium@59e5792…:…` is outside this repository; the test checks it only when `HPS_VSCODE_SRC` (a VS Code checkout whose `HEAD` is 1.116.0) / `HPS_VSCODIUM_SRC` point at a checkout, and otherwise lists it as not checked. A `lab:` path is in hypeprooflab and is checked only with `HPS_LAB`.
 
-Where this page and a later slice disagree, the later slice records the deviation in the [plan](curriculum-runtime.md) and says why; this page is the recon as read on its commit and is not rewritten per slice (editing it reopens `cr-recon`'s completion).
+Where this page and a later slice disagree, the later slice records the deviation in the [plan](curriculum-runtime.md) and says why; this page is the recon as read on its commit and is not rewritten per slice (editing it reopens `cr-recon`'s completion). That includes a slice renaming or removing a symbol named here: it writes the rename in the plan and leaves this page alone. CR-T01 reads the page, the ledger, the testing contract and every mapped file at the commit `cr-recon`'s completion names while the page is byte-identical to the one that completion pins, so the rename neither fails CI nor reopens `cr-recon`; it prints this tree's divergence from the map as information. A shallow checkout without that commit does not re-run the verdict.
 
 ## 1. Architecture map
 
@@ -14,7 +14,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 
 | Entry | Path | Symbol | Role and data flow |
 |---|---|---|---|
-| M1.1 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:upstream/stable.json` | `1.116.0` | The pinned VS Code base. The only Studio-owned VS Code patch at this pin is `patches/user/60-webview-allow-microphone.patch`; nothing patches `browserView`. |
+| M1.1 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:upstream/stable.json` | `560a9dba96f961efea7b1612916f89e5d5d4d679` | The pinned VS Code base (`tag` 1.116.0 at that commit). The only Studio-owned VS Code patch at this pin is `patches/user/60-webview-allow-microphone.patch`; nothing patches `browserView`. |
 | M1.2 | `extensions/hypeproof-chat/src/vscode.proposed.browser.d.ts` | `startCDPSession` | The `browser` proposed API: `window.openBrowserTab`, `browserTabs`, `activeBrowserTab`, `BrowserTab.startCDPSession()` → a raw CDP message channel. The integrated browser is an Electron WebContentsView in an editor tab. |
 | M1.3 | `scripts/apply-product-overrides.sh` | `extensionEnabledApiProposals` | Enables `browser` for `hypeproof.hypeproof-chat` only (product.json). A development extension needs `--enable-proposed-api <id>`. |
 | M1.4 | `extensions/hypeproof-chat/src/nativeBrowser.ts` | `openBrowser` | Opens a tab (`openBrowserTab`, `ViewColumn.Beside`). `capturePageContext` attaches a CDP session per call and returns URL, title, JPEG, `innerText`, AX node count. |
@@ -32,7 +32,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 | M2.3 | `vscode@1.116.0:src/vs/platform/browserView/electron-main/browserView.ts` | `getConsoleLogs` | Upstream console capture: a main-process string buffer `[level] message`, cleared on navigation, no source location, no exceptions or network failures, not exposed to extensions. |
 | M2.4 | `vscode@1.116.0:src/vs/workbench/contrib/browserView/electron-browser/tools/readBrowserTool.ts` | `IPlaywrightService` | The upstream read tool summarises pages tracked by the Playwright service (pages the built-in agent opened). |
 | M2.5 | `vscode@1.116.0:src/vs/platform/browserView/common/cdp/proxy.ts` | `sendCommand` | The CDP proxy behind `startCDPSession`: routes page-session commands without a method allowlist and forwards every non-`Target.*` event, tagged with the session id. |
-| M2.6 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:patches/51-ext-copilot-remove-it.patch` | `copilot` | The built-in chat agent that would consume M2.1 tools is removed in this fork; Studio's coach is the `hypeproof-chat` webview (SDK or proxy runtime). |
+| M2.6 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:patches/51-ext-copilot-remove-it.patch` | `compileCopilotExtensionBuildTask` | The built-in chat agent that would consume M2.1 tools is removed in this fork; Studio's coach is the `hypeproof-chat` webview (SDK or proxy runtime). |
 | M2.7 | `extensions/hypeproof-chat/src/browserMcp.ts` | `buildHypeproofMcpServer` | Studio's own agent browser tools for the SDK coach: `mcp__hypeproof__browser_{open,screenshot,read,click,type}`, `live_preview_start`. |
 | M2.8 | `worker/src/lib/browser-tools.ts` | `BROWSER_TOOLS` | Studio's own tools for the proxy coach (`browser_navigate`, `browser_read`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_back`, `browser_forward`, `browser_dialog`), injected by the worker when `browser_control.enabled`. |
 
@@ -94,7 +94,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 | M7.3 | `lab:web/src/app/api/gallery/raw/[id]/route.ts` | `SANDBOX_CSP` | Served only inside a sandboxed iframe with `connect-src 'none'` (opaque origin, no storage, no network). |
 | M7.4 | `worker/src/routes/classroom-delivery.ts` | `classroomReportLinks` | Expiring, revocable report links (`classroom_report_links`) with their own CSP page renderer: the link-lifecycle pattern to reuse. |
 | M7.5 | `worker/src/lib/classroom-report-html.ts` | `REPORT_PAGE_CSP` | A Service-rendered HTML page with a locked CSP. |
-| M7.6 | `worker/src/skills/publish-homepage.md` | `GitHub Pages` | The coach's current "publish" skill (GitHub Pages or a Cloudflare quick tunnel), which asks students to hold external accounts. |
+| M7.6 | `worker/src/skills/index.ts` | `publish-homepage` | The coach's current "publish" skill (`worker/src/skills/publish-homepage.md`: GitHub Pages or a Cloudflare quick tunnel), which asks students to hold external accounts. |
 
 ### A8 · Tests, Playwright, screenshot, console and debug integration
 
@@ -106,7 +106,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 | M8.4 | `e2e/fixtures/app.ts` | `launchApp` | Playwright Electron launch with quiet mode, seeded token/history, `hostResolverRules`; `ctx.app.evaluate` reaches the main process. |
 | M8.5 | `e2e/fixtures/global-setup.ts` | `HPS_APP_PATH` | Drives any app copy; preflight needs a local Worker and `/tmp/hps-token.txt` (`scripts/dev-stack.sh`). |
 | M8.6 | `e2e/classroom/mac-devhost.mjs` | `reinject` | Real-Mac host: copy the app, inject the current build, run against a local Service. |
-| M8.7 | `e2e/curriculum-runtime/cdp-probe.mjs` | `HPS_CR_PROBE_NEGATIVE` | This recon's probe (§8): a test-only development extension drives the `browser` API and records CDP events, with planted answers and a negative-control mode. |
+| M8.7 | `e2e/curriculum-runtime/cdp-probe.mjs` | `HPS_CR_PROBE_NEGATIVE` | This recon's probe (§8): a test-only development extension drives the `browser` API and records CDP events, with planted answers, a negative-control mode and a controlled tab layout (`HPS_CR_PROBE_LAYOUT`). |
 
 ### A9 · Skill, plugin and custom-mode abstractions
 
@@ -131,7 +131,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 | M10.5 | `worker/schema.sql` | `usage_log` | The usage ledgers CR-34 extends: `usage_log`, `model_usage_requests`, `usage_attempt_costs`, the budget tables. |
 | M10.6 | `worker/src/cron/heartbeat.ts` | `runHeartbeat` | Service health heartbeat; the App side is `startHeartbeat` (heartbeat.ts). |
 | M10.7 | `worker/src/routes/trace.ts` | `trace` | Client trace ingest; `logs` (routes/logs.ts) takes session log uploads. |
-| M10.8 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:patches/00-telemetry-disable.patch` | `telemetry` | VS Code telemetry is off in the fork; Studio's own accounting is the Service ledgers above. |
+| M10.8 | `vscodium@59e579274e3a32fbb93bd10b38bfe071da043cce:patches/00-telemetry-disable.patch` | `TelemetryConfiguration.OFF` | VS Code telemetry is off in the fork; Studio's own accounting is the Service ledgers above. |
 
 ## 2. Decisions
 
@@ -139,7 +139,7 @@ Where this page and a later slice disagree, the later slice records the deviatio
 
 **Decision.** Extend the extension's CDP path (`CdpSession` + `BrowserControl` over `BrowserTab.startCDPSession`). Do not drive the upstream `browserView` agent tools and do not patch `vscodium-base`. The adapter boundary is `BrowserControl.execute(call) → BrowserToolResult`: plain data in and out, reached by the proxy loop (`chatPanelProvider`) and by the SDK MCP server (`BrowserMcpHost.inspect`), later exposable as the `browser.agent` capability without change (CR-03).
 
-Why, with evidence (§8): the probe opened a page through the same API and received `Runtime.consoleAPICalled`, `Runtime.exceptionThrown`, `Network.responseReceived` (404) and `Network.loadingFailed` events on the flat session, attributed them to the right document across two reloads, performed hover, scroll, select and reload, and ran an element pick. The upstream tools are registered only behind `workbench.browser.enableChatTools` (default off; the probe saw only `open_browser_page`), feed the removed built-in chat agent, keep console logs as untyped strings in the main process, and would add a second, unscoped browser agent next to the coach's `canUseTool` gate. Keep `workbench.browser.enableChatTools` off.
+Why, with evidence (§8): the probe opened a page through the same API and received `Runtime.consoleAPICalled`, `Runtime.exceptionThrown`, `Network.responseReceived` (404) and `Network.loadingFailed` events on the flat session, attributed them to the right document across two reloads, performed hover, scroll, select and reload, and ran an element pick (F8 qualifies wheel scroll and the pick for the `origin/main` build). The upstream tools are registered only behind `workbench.browser.enableChatTools` (default off; the probe saw only `open_browser_page`), feed the removed built-in chat agent, keep console logs as untyped strings in the main process, and would add a second, unscoped browser agent next to the coach's `canUseTool` gate. Keep `workbench.browser.enableChatTools` off.
 
 What `cr-browser` builds on this path: `CdpSession` gains an event subscription (it drops events today); console, exception and failed-request records are buffered per document; attribution rules are in the `cr-browser` notes (§7).
 
@@ -147,7 +147,22 @@ What `cr-browser` builds on this path: `CdpSession` gains an event subscription 
 
 **Decision.** Element picking uses the CDP inspector (`Overlay.setInspectMode` `searchForNode` → `Overlay.inspectNodeRequested`) on the pinned preview tab. The payload is built from `backendNodeId`: the AX `[ref=eN]` the snapshot gives the same node, `DOM.getOuterHTML` (bounded), a computed-style subset (`CSS.getComputedStyleForNode`), an element crop (`Page.captureScreenshot` with the border-box clip), and a source mapping (the page URL path resolved with `resolveWithinRoot`, then the element located by id or text in that file; otherwise `"unmapped"`). It rides the existing page-context conduit (`pendingPageImage` in `chatPanelProvider` for the image, the user text block for the rest), shown to the student as a removable attachment before sending. No new transport.
 
-Evidence: the probe's pick returned the same node as the AX ref, the outer HTML and the planted background colour, and inspect mode did not trigger the page's own click handler, in every run; with the screen unlocked it also returned a PNG crop, in 41–54 ms of local processing including the crop (n=1 per run, not a CR-60 timing). The crop needs a composited frame (F7).
+Evidence (§8), on a browser tab that was the visible (active) tab of its editor group:
+
+- **Stock 0.1.51 extension, unlocked:** 13 of 13 runs. The pick returned the same node as the AX ref, the outer HTML and the planted background colour. Inspect mode did not trigger the page's own click handler. A PNG crop came back, with 26–40 ms of local processing including the crop. That was at 714 px beside another editor and at 1434 px full width (n=1 per run, not a CR-60 timing).
+- **Earlier probe revisions, recorded as runs of an app copy with the `origin/main` extension injected:** the same, at 714 px unlocked with a crop in 41–54 ms (the version before the overlay step), and at 414 px locked without a crop (the first committed revision). The crop needs a composited frame (F7). The 714 px unlocked runs cannot be reproduced with that build today (F8).
+- **`origin/main` extension injected, unlocked** (the build `cr-browser` extends): the pick held in 8 of 10 runs and the crop in 6 of 10. When it came, the crop took 2.0–3.0 s (F8).
+
+R2 therefore stands on the stock build. `cr-browser` must establish it on its own build before relying on it.
+
+Condition: the tab must be the visible tab of its group. On a covered tab, `document.visibilityState` still reads `visible`, and picking is unreliable in two ways:
+
+- **Covered right after opening.** The stock extension opens a "HypeProof Studio" editor at startup, after the first probe revision's tab, and so covered it. That tab lost the first inspect-mode click and answered later ones (6 of 6 diagnostic runs, locked and unlocked). This is what failed that revision on the stock app.
+- **Opened with `background: true` and never shown.** No click was answered (0 of 2 in each of 21 runs).
+
+A tab that was shown and then covered did answer the pick (19 of 21 runs; the 2 misses were runs where the visible-tab pick failed too, F8). It produced no screenshot in 18 of 21 runs.
+
+A student can only click a tab they see. A pick that Studio starts itself (a command, or a coach request while the tab may be covered) must first reveal the pinned tab. It must judge coverage from the editor's tab state, not from page visibility. `cr-browser` owes that check in both the beside and the full-width layout (§7).
 
 ### R3 · The CR switch (CR-02)
 
@@ -155,7 +170,17 @@ Evidence: the probe's pick returned the same node as the AX ref, the outer HTML 
 
 ### R4 · Artifact version and file-set digest (CR-10, CR-13, CR-17, CR-42, CR-77)
 
-**Decision.** An artifact version is the sha256 of the canonical JSON of the sorted list `[{path, sha256, bytes}]` of every file under the live-server root (excluding `.git`, `node_modules` and other dot-directories), computed with `canonicalJson` / `digestOf` from `local-record.ts`. Each file's sha256 is the one `artifact` observation events already carry, so AE-37's per-file binding keeps working; the version id is new because no multi-file digest exists (M3.6). The provisional plan wording "the artifact file-set digest that AE-37 uses" is corrected here: AE-37 binds single files.
+**Decision.** An artifact version is the sha256 of the canonical JSON of the sorted list `[{path, sha256, bytes}]` of the version's **published file set**, computed with `canonicalJson` / `digestOf` from `local-record.ts`. The digest covers exactly that set, so the version that is verified is the version that is served.
+
+The published file set is not the workspace. The live-server root is `workspaceFolders[0]` (`extension.ts`, `startLivePreview` in `chatPanelProvider.ts`), the student's whole workspace. It can hold `.env` and `.npmrc`, keys pasted into a script, and unrelated personal files, and a version is public once published (§6). So the set is:
+
+- the entry HTML and every file it reaches through static references (`src`, `href`, CSS `url()`, `import`), each resolved with `resolveWithinRoot`;
+- plus files the student adds to an explicit manifest in the publish panel, for references that cannot be resolved statically. The panel lists the whole set before anything is uploaded.
+- It never includes a dot-file or dot-directory, `node_modules`, or anything outside the root, whatever the manifest says.
+
+Before upload, every file passes the MC-30 secret-pattern scan (`SECRET_PATTERNS` in `local-record.ts`), and the set passes a per-file and per-set size cap (values are policy). A hit or an oversize file refuses the publish and names the file; nothing is uploaded. The Worker repeats the same rules on receipt (§6).
+
+Each file's sha256 is the one `artifact` observation events already carry, so AE-37's per-file binding keeps working. The version id is new because no multi-file digest exists (M3.6). This corrects the wording "the artifact file-set digest that AE-37 (#557) uses", which was in the `cr-browser` work item's `design_delta` (ledger and `requirements-activation.md`), not in the plan: AE-37 binds single files. This change fixes that packet.
 
 ### R5 · Venture Memory storage (CR-35, CR-39)
 
@@ -165,13 +190,35 @@ Evidence: the probe's pick returned the same node as the AX ref, the outer HTML 
 
 **Decision.** Participant evidence is `hps-observation/2` events validated by the one validator (`validateObservation`) inside the measurement-core `LocalRecord`, instantiated on the Service host with a `StoragePort` over the existing R2 binding `HPS_TRACES` (prefix `curriculum/<cohort>/<project>/`); no new KV namespace, no evidence table, no validator copy, no scorer. One Experiment ↔ one `LocalRecord` task (same id; `project` = project id). Participant sessions are `linkSession(task, {host: "published", session_id})`; automatic events are appended batches whose `scope` is the experiment; manual records use the existing `external_feedback_received` kind (source state and `provenance {who, when, where}` are already required); evidence drafts are `hps-interpretation/1` saved with `saveInterpretation` (references must resolve, MC-15) and revised with `validateReinterpretation` (MC-22); accept/edit/reject is `reviewFinding`; deletion is `deleteTask` with its receipt (MC-31). The App reads this record through Worker routes; it is not copied into the App's `workspaceState`. `cr-evidence` confirms the port's atomic `ifAbsent` write on R2 before relying on it and records any deviation in the plan.
 
+The record was built for one writer on the App. On the Service many participants write to one experiment at once, and two of its paths do not survive that:
+
+- **Lost links.** `linkSession` writes the per-session key `sessions/<host>/<id>` atomically (`ifAbsent`). It then calls `saveTask`, an unguarded read-modify-write of `tasks/<id>` (`#write(…, false)`). Concurrent links lose sessions from `task.sessions` even when `ifAbsent` is atomic. A scratch reproduction, with an async port whose `ifAbsent` is atomic, linked 20 sessions concurrently and kept 1. CR-72's return counts read those sessions.
+- **Whole-store scans.** A port without `usageBytes` makes `usage()` read every key on every write, so each participant event costs reads in proportion to the whole store (47 reads for one link on a 22-key store in the same reproduction).
+
+The Service host therefore needs two things:
+
+1. **One writer per experiment.** Either a Durable Object per experiment that owns its `LocalRecord`, or a compare-and-swap write on `tasks/<id>` (an R2 conditional put on the etag, or a D1 version column) with a bounded retry. Alternatively, derive an experiment's linked sessions from the atomic `sessions/published/*` keys (`taskForSession`) instead of the `task.sessions` array.
+2. **A cheap usage count.** A port that implements `usageBytes` from a maintained counter instead of a scan.
+
+`cr-evidence` picks the option, records it in the plan, and adds the concurrent-link negative control to its tests (CR-T67).
+
 ### R7 · Skill loader (CR-43–47)
 
 **Decision.** Extend the Worker skill registry (`worker/src/skills/index.ts`), which profiles already declare, instead of reading `.hypeproof/skills/` from the student workspace. A curriculum skill is a bundled pair `<name>.md` + `<name>.contract.json` (the eight PRD §6 contract fields, `skill@version`), validated at load; a missing field refuses the skill (today's `resolveSkills` only warns, which CR-43 forbids for curriculum skills). The curriculum (`v5`) is a bundled data file next to it (SX-56). The SDK coach keeps `settingSources: []`; nothing in the workspace is a skill source, so a workspace file cannot widen tools. Skill output validation and write-back run on the Worker.
 
 ### R8 · AI Gateway (CR-29–34, CR-80, CR-83, CR-84)
 
-**Decision.** Adapt the existing stack: a `/v1/app/*` route family beside `chat.ts`, app-scoped tokens minted with `issue` (tokens.ts) and bound to project + published origin, admission through `reserveBudgetAttempt` and `reserveModelRequest` (keys widened to app token and participant session), ledgers `usage_log` / `model_usage_requests` / budget tables with the eight attribution columns (unknown stays `unknown`), a capability → model policy table that extends `modelBinding`, and adapters over `callAnthropic` / `callOpenAI` / `callGemini` plus a mock. Retry follows `callAnthropicResilient` (same model); `callGeminiResilient`'s fallback to `gemini-2.5-flash` is not used on capability calls (CR-32, MU-02).
+**Decision.** Adapt the existing stack: a `/v1/app/*` route family beside `chat.ts`, app-scoped tokens (below) bound to project + published origin, admission through `reserveBudgetAttempt` and `reserveModelRequest` (keys widened to app token and participant session), ledgers `usage_log` / `model_usage_requests` / budget tables with the eight attribution columns (unknown stays `unknown`), a capability → model policy table that extends `modelBinding`, and adapters over the single-call `callAnthropic` / `callOpenAI` / `callGemini` plus a mock.
+
+**App tokens are not student tokens.** They are embedded in public pages, so any participant can read one. Every existing student route authorizes by excluding issuers: `role === "issuer"` is refused, and any other role or no role counts as a student. That covers `gateChatRequest` (chat-gate.ts: `/v1/chat/completions`, `/v1/messages`, the observation routes), `/v1/profile` and the lesson-turn routes (chat.ts), `routes/access.ts`, `routes/logs.ts` and `routes/classroom.ts`. Through `/v1/profile` it also covers the Lab's `verifyStudentToken` (gallery publish and logs). `verify` (tokens.ts) signs over the role but does not check its value. So a token from today's `issue` with any other role would be a full student credential. The decision:
+
+- An app token carries a distinct role (`app`) and its project and origin binding.
+- In the same change, every existing student route switches from the issuer deny-list to an allow-list: `role === undefined || role === "student"`.
+- A separate signing secret or token prefix for app tokens is defense in depth that `cr-gateway` may add. It is not a substitute for the allow-list.
+
+**Retry.** `callAnthropicResilient` is not reused as-is. It makes up to three upstream calls (`MAX_ATTEMPTS = 3`) under one admission and one metering, which is why `chat.ts` calls plain `callAnthropic` whenever budget admission (`executionAccess`) or model practice (`multi`) is active. A capability retry is a loop around the single-call adapter in which each attempt is admitted (`reserveBudgetAttempt`) and metered (`registerUsageAttempt`) on its own. It is bounded by policy and happens only before any output reached the caller. `callGeminiResilient`'s fallback to `gemini-2.5-flash` is not used on capability calls (CR-32).
+
+MU-02 says one upstream call per user request. Whether a policy-bounded, per-attempt-admitted retry of an app request fits that is Jay's decision (§9). Until he decides, the policy bound defaults to 0 retries, which is MU-02 as written. CR-T32 exercises the mechanism with an explicit bound of 1.
 
 ### R9 · Weekly Review Pack (CR-48–53, CR-62)
 
@@ -183,7 +230,7 @@ Evidence: the probe's pick returned the same node as the AX ref, the outer HTML 
 
 ### R11 · Automation indicator (CR-68)
 
-**Decision.** Two layers: the existing tool-log line in the chat panel (`browserToolLogLine`, `running` → `done`) and a page-level outline drawn by the CDP inspector overlay (`Overlay.highlightRect` around the viewport) for the duration of each agent or runner step, cleared with `Overlay.hideHighlight`. The probe showed the overlay leaves the page's DOM and AX tree unchanged (the verdicts read those). Whether it appears in CDP screenshots, and so must be cleared before an evidence screenshot, was not measured: those runs had the screen locked (F7). `cr-browser` owes both that check and the Playwright check that a student sees the indicator (CR-T63).
+**Decision.** Two layers: the existing tool-log line in the chat panel (`browserToolLogLine`, `running` → `done`) and a page-level outline drawn by the CDP inspector overlay (`Overlay.highlightRect` around the viewport) for the duration of each agent or runner step, cleared with `Overlay.hideHighlight`. The probe showed the overlay leaves the page's DOM and AX tree unchanged (the verdicts read those). It does reach CDP screenshots. With the screen unlocked, a `Page.captureScreenshot` taken while the outline was drawn differed from one taken just before it in 16 of 16 runs where both came back (§8). So the runner clears the outline before an evidence screenshot and redraws it after. `cr-browser` owes that check and the Playwright check that a student sees the indicator (CR-T63).
 
 ## 3. PRD §15 Phase 1 MVP: reuse or new
 
@@ -225,7 +272,7 @@ One row per CR requirement. Verdict: **reuse** (existing code satisfies it once 
 | CR-16 | extend | `worker/src/lib/measurement-core/learning-events.ts` | `change_requested` | `cr-verify` | Fix request = `change_requested` with refs. |
 | CR-81 | new | `extensions/hypeproof-chat/src/learningStateHelpers.ts` | `learningState` | `cr-verify` | "verified" derived from an all-pass report on the exact version. |
 | CR-61 | new | `e2e/classroom/mac-devhost.mjs` | `reinject` | `cr-verify` | Real-Mac timing. |
-| CR-17 | new | `extensions/hypeproof-chat/src/galleryPublish.ts` | `publishWorld` | `cr-publish` | §6; the one publish module, Service-hosted test versions. |
+| CR-17 | new | `extensions/hypeproof-chat/src/galleryPublish.ts` | `publishWorld` | `cr-publish` | §6; the one publish module, Service-hosted test versions; only R4's published file set, scanned and capped before upload. |
 | CR-18 | new | `worker/src/index.ts` | `app.route` | `cr-publish` | Public share route on the test origin; QR generated client-side. |
 | CR-19 | new | `worker/src/routes/classroom-delivery.ts` | `classroomReportLinks` | `cr-publish` | Link lifecycle pattern; 410, `no-store`. |
 | CR-20 | new | `e2e/fixtures/app.ts` | `launchApp` | `cr-publish` | Timing on real Mac + phone. |
@@ -245,9 +292,9 @@ One row per CR requirement. Verdict: **reuse** (existing code satisfies it once 
 | CR-67 | new | `worker/src/lib/measurement-core/local-record.ts` | `redactDeep` | `cr-evidence` | Interaction facts, not content. |
 | CR-69 | extend | `worker/src/lib/measurement-core/local-record.ts` | `deleteTask` | `cr-evidence` | Receipt exists (MC-31). |
 | CR-70 | extend | `worker/src/lib/budgets.ts` | `BudgetMutationGuard` | `cr-evidence` | Admin authority pattern (AB-04). |
-| CR-72 | new | `worker/src/lib/measurement-core/local-record.ts` | `linkSession` | `cr-evidence` | Return counts from linked sessions. |
+| CR-72 | new | `worker/src/lib/measurement-core/local-record.ts` | `linkSession` | `cr-evidence` | Return counts from linked sessions; concurrent links need one writer per experiment (R6). |
 | CR-74 | new | `worker/src/lib/measurement-core/legacy-observation.ts` | `ObservationEvent` | `cr-evidence` | One variant per record. |
-| CR-35 | new | `worker/schema.sql` | `CREATE TABLE IF NOT EXISTS` | `cr-memory` | R5. |
+| CR-35 | new | `worker/schema.sql` | `authoring_versions` | `cr-memory` | R5; new tables through a migration, following the immutable versioned-row pattern. |
 | CR-36 | new | `worker/src/lib/session-design.ts` | `SessionDesign` | `cr-memory` | Reopen from records only. |
 | CR-37 | extend | `worker/src/lib/tokens.ts` | `IssuerScope` | `cr-memory` | Director scope = issuer scope (SX-38). |
 | CR-38 | new | `worker/src/lib/measurement-core/learning-events.ts` | `decision_revised` | `cr-memory` | Decision links evidence and slides. |
@@ -265,10 +312,10 @@ One row per CR requirement. Verdict: **reuse** (existing code satisfies it once 
 | CR-45 | extend | `worker/src/lib/session-design.ts` | `SessionDesign` | `cr-skills` | Curriculum as data (SX-56). |
 | CR-46 | new | `worker/src/skills/index.ts` | `SKILLS` | `cr-skills` | Four skills. |
 | CR-47 | new | `worker/src/skills/index.ts` | `SKILLS` | `cr-skills` | Three skills. |
-| CR-29 | extend | `worker/src/routes/chat.ts` | `chat` | `cr-gateway` | R8. |
+| CR-29 | extend | `worker/src/routes/chat.ts` | `chat` | `cr-gateway` | R8; app tokens get their own role, and every student route moves to a role allow-list. |
 | CR-30 | extend | `worker/src/lib/lesson-model-policy.ts` | `modelBinding` | `cr-gateway` | Capability → model. |
 | CR-31 | extend | `worker/src/env.ts` | `resolveProvider` | `cr-gateway` | Normalised adapters + mock. |
-| CR-32 | extend | `worker/src/lib/anthropic.ts` | `callAnthropicResilient` | `cr-gateway` | Same-model retry only; not `callGeminiResilient`. |
+| CR-32 | new | `worker/src/lib/anthropic.ts` | `callAnthropic` | `cr-gateway` | R8: a retry loop around the single-call adapter, each attempt admitted and metered; neither `callAnthropicResilient` (three calls per admission) nor `callGeminiResilient` (model fallback). Retry bound defaults to 0 until Jay rules on MU-02 (§9). |
 | CR-33 | extend | `worker/src/lib/budget-admission.ts` | `reserveBudgetAttempt` | `cr-gateway` | 429 with reason. |
 | CR-34 | extend | `worker/src/lib/analytics.ts` | `persistUsage` | `cr-gateway` | Eight dimensions. |
 | CR-80 | extend | `worker/src/lib/model-usage.ts` | `reserveModelRequest` | `cr-gateway` | App-token and session keys. |
@@ -322,7 +369,8 @@ Types are proposals for `cr-publish` and `cr-evidence`; names may change, fields
 
 ```ts
 type ProductVersion = { schema: "hps-venture/1"; kind: "product_version"; id: string /* R4 digest */; project_id: string;
-  files: { path: string; sha256: string; bytes: number }[]; entry_html: string; verification_report?: string; created_at: number };
+  files: { path: string; sha256: string; bytes: number }[] /* R4 published set only */; entry_html: string;
+  manifest_added?: string[] /* files the student added beyond static reach */; verification_report?: string; created_at: number };
 type Hypothesis = { schema: "hps-venture/1"; kind: "hypothesis"; id: string; project_id: string; statement: string;
   status: "open" | "supported" | "refuted" | "revised"; revision: number; created_at: number };
 type Experiment = { schema: "hps-venture/1"; kind: "experiment"; id: string; project_id: string; week: number;
@@ -338,20 +386,20 @@ type TestLink = { id: string /* random, the URL token */; experiment_id: string;
 
 | Route | Auth | Does |
 |---|---|---|
-| `PUT /v1/curriculum/versions/:digest` | student token | Upload the file set (multipart manifest + files); refuses when the recomputed digest differs; idempotent for identical bytes (CR-17). Files go to R2 under `test-versions/<digest>/`. |
+| `PUT /v1/curriculum/versions/:digest` | student token | Upload R4's published file set (multipart manifest + files). Before storing anything, the Worker re-applies R4's rules: no dot-file or dot-directory, no path outside the set, per-file and per-set size caps, and the MC-30 secret-pattern scan. A hit refuses the whole upload and names the file; so does a recomputed digest that differs. Idempotent for identical bytes (CR-17). Files go to R2 under `test-versions/<digest>/`. |
 | `POST /v1/curriculum/experiments` | student token | Creates Hypothesis (when none) + Experiment pinned to a version whose verification state the response reports (CR-81, CR-39, CR-22). |
 | `POST /v1/curriculum/experiments/:id/links` | student token | Issues a `TestLink` (expiry required, channel, variant) and returns the share URL; the QR is drawn client-side (CR-18, CR-19, CR-73). |
 | `POST /v1/curriculum/links/:id/revoke` | student token | Revokes; later requests get 410 with no body (CR-19). |
-| `GET <test-origin>/l/:link/*` | none | Serves the pinned files with `Cache-Control: no-store`, CSP (`connect-src 'self' <api origin>`), `Permissions-Policy: camera=(), microphone=()` unless declared (CR-66), and the injected participant snippet; 410 when revoked or expired. |
-| `POST <test-origin>/l/:link/events` | link + session | Appends participant events to the experiment's measurement-core task (R6): `session_start`, `page_view`, `click`, `task_start`, `task_complete`, `milestone`, with `session_id`, `pseudonym`, `source_state: "real"`, inherited project / experiment / version / channel / variant; refuses identity fields and events for revoked versions (CR-23, CR-21, CR-65). |
+| `GET <test-origin>/l/:link/*` | none | Serves the pinned files with `Cache-Control: no-store`, CSP (`connect-src 'self' <api origin>`), `Permissions-Policy: camera=(), microphone=()` unless declared (CR-66), and the injected participant snippet; 410 when revoked or expired. The entry page carries a server-issued session token (HMAC over link id, a server-chosen `session_id` and an expiry of hours, not days) that the snippet sends with every event. |
+| `POST <test-origin>/l/:link/events` | link + the session token from page load | Appends participant events to the experiment's measurement-core task (R6): `session_start`, `page_view`, `click`, `task_start`, `task_complete`, `milestone`, with `session_id`, `pseudonym`, `source_state: "real"`, inherited project / experiment / version / channel / variant. It refuses identity fields, events for revoked versions, and events whose session token is missing, forged, expired or bound to another link (CR-23, CR-21, CR-65). Rate limits per link and per session token (policy values, CR-70) answer 429 `rate_limited` and write nothing. A link holder can still produce events through real page loads: `real` means "recorded from a served session", not "a genuine participant". The evidence view shows per-session counts and flags bursts from one link, so a reviewer can see such a flood. |
 | `POST /v1/curriculum/experiments/:id/notes` | student token | Manual records as `external_feedback_received` with provenance and `source_state` (CR-24). |
 | `GET /v1/curriculum/experiments/:id/evidence` | student token or director issuer | Events, notes, drafts and review states for the experiment; each claim opens its source ids (CR-27). |
 | `POST /v1/curriculum/experiments/:id/drafts` | student token | Stores an Observed / Interpreted / Assumed / Next draft as `hps-interpretation/1`; unresolved references refused (CR-25, CR-26). |
 | `DELETE /v1/curriculum/experiments/:id` · `DELETE …/sessions/:sid` | student token | `deleteTask` / session erase with a receipt (CR-69). |
 
-**Participant snippet.** Injected like `injectLiveReload`, under 2 KB, no framework: creates `pseudonym` in `localStorage` under a per-experiment key (random, never derived from device data; fresh per session unless `repeated_use` is declared), a random `session_id` per load, posts `session_start` and `page_view`, listens for clicks and records the element's role and a stable path (never typed text), and exposes `window.hypeproof.test.task(name, "start" | "complete")` and `window.hypeproof.test.milestone(name)` for the student's app.
+**Participant snippet.** Injected like `injectLiveReload`, under 2 KB, no framework: creates `pseudonym` in `localStorage` under a per-experiment key (random, never derived from device data; fresh per session unless `repeated_use` is declared), takes the `session_id` and session token the served page carries (one per load), posts `session_start` and `page_view`, listens for clicks and records the element's role and a stable path (never typed text), and exposes `window.hypeproof.test.task(name, "start" | "complete")` and `window.hypeproof.test.milestone(name)` for the student's app.
 
-**Studio side.** `galleryPublish.ts` stays the one publish module: `publishWorld` for the Lab gallery (WEB-07/08, #1018) and a new `publishTestVersion` beside it that shares token handling and error wording. The publish panel shows the version's verification state (CR-81), the share URL, the QR and the expiry. Evidence panels read through the routes above.
+**Studio side.** `galleryPublish.ts` stays the one publish module: `publishWorld` for the Lab gallery (WEB-07/08, #1018) and a new `publishTestVersion` beside it that shares token handling and error wording. The publish panel shows the version's verification state (CR-81), the published file set with any manifest additions (R4), the share URL, the QR and the expiry. Evidence panels read through the routes above.
 
 ## 7. Per-slice implementation notes
 
@@ -362,8 +410,11 @@ type TestLink = { id: string /* random, the URL token */; experiment_id: string;
 - Document generation = main-frame `loaderId` (`Page.frameNavigated` / frame tree). Console and exceptions attribute through `executionContextId` → `Runtime.executionContextCreated` (`auxData.isDefault`, `frameId`); network through `loaderId` / `requestId`.
 - Failed requests = `Network.loadingFailed` with `canceled` false plus `Network.responseReceived` with status ≥ 400 (a 404 is not a loading failure). Drop `canceled` loads (`net::ERR_ABORTED` on reload) and requests seen only before `Network.enable`.
 - Clear refs on every new document, not only on navigate/back/forward: the live server's SSE reload creates a new document too. CDP itself refuses a stale backend node after reload ("Could not compute box model"); map that to AE-18's rejection instead of a generic error.
-- `select`: `DOM.resolveNode` + `Runtime.callFunctionOn` setting `value` and dispatching `input` + `change` (native popups are not reachable by input events). `scroll`: `Input.dispatchMouseEvent` `mouseWheel` is the user-like path but needs composited frames (F7); `scrollIntoView` / `scrollBy` through `Runtime.callFunctionOn` works regardless. `hover`: `mouseMoved` to the box centre. `reload`: `Page.reload` then wait for a new `loaderId`.
+- `select`: `DOM.resolveNode` + `Runtime.callFunctionOn` setting `value` and dispatching `input` + `change` (native popups are not reachable by input events). `scroll`: `Input.dispatchMouseEvent` `mouseWheel` is the user-like path but needs composited frames (F7), and it never scrolled with the `origin/main` build (F8); `scrollIntoView` / `scrollBy` through `Runtime.callFunctionOn` worked in every run. `hover`: `mouseMoved` to the box centre. `reload`: `Page.reload` then wait for a new `loaderId`.
 - Viewport: read `innerWidth/innerHeight` or `Page.getLayoutMetrics`; `Emulation.setDeviceMetricsOverride` is ignored by the shipped shell. Fixed widths come from `__hp_viewport`.
+- Element pick (R2): reveal the pinned tab before entering inspect mode for any pick Studio starts itself. On a covered tab the first inspect-mode click is lost, and `document.visibilityState` still reads `visible`. Check it in both layouts, beside the chat editor and full width (the probe's `HPS_CR_PROBE_LAYOUT=beside|full`). The negative control is a pick started while another editor covers the tab: it either reveals the tab first or refuses with a reason; it never waits silently.
+- First, F8. Run `e2e/curriculum-runtime/cdp-probe.mjs` on an app with this branch's build injected, in both layouts, unlocked. Find why the `origin/main` build starves the browser tab (wheel 0 of 10, crop 2–3 s against 26–40 ms on stock) before building R2, CR-T09 or CR-T56 on it. The pick, crop and wheel verdicts need every run of at least ten to pass on the shipped build. The stock build's 13 of 13 does not carry over.
+- Owed from the recon (§8): the committed probe revision was run with the screen unlocked only. Its locked-screen behaviour is the first revision's (exit 3, composited checks NOT RUN).
 - Scope (CR-11): allow only the `LiveServer.currentUrl()` origin for agent actions (published origins arrive with `cr-publish`); refuse with a reason before any CDP call.
 - Fixture: add the kiosk-practice app as an e2e fixture (Korean copy, five steps, one planted console error mode) and reuse it in `cr-verify` and `cr-e2e`.
 - `probe`: `e2e/curriculum-runtime/cdp-probe.mjs` is a starting point for the Playwright specs, not a spec; copy what is needed instead of editing it.
@@ -377,6 +428,7 @@ type TestLink = { id: string /* random, the URL token */; experiment_id: string;
 ### `cr-publish`
 
 - Implement §6 routes, records and the test origin; the dedicated production domain is open (§9), so ship with the host configurable and tested on `*.test.invalid`.
+- The published file set is R4's, not the live-server root: static reach from the entry HTML plus the confirmed manifest, never a dot-file, the MC-30 scan and size caps before upload, and again in the Worker. Negative controls (CR-T17): a workspace `.env`, a dot-file, and a file neither reachable nor in the manifest are never uploaded or served; a file with a key-shaped string refuses the publish before any upload.
 - The Lab gallery route is not extended for test versions (§6 "Test origin"); `publishTestVersion` lives beside `publishWorld`.
 - New route files must be mapped in `config/traceability.json` or listed in `KNOWN_UNMAPPED` (`worker/test/route-registry.test.mjs`); prefer a node.
 - Migrations add Venture Memory tables (R5); do not apply them in production.
@@ -384,6 +436,8 @@ type TestLink = { id: string /* random, the URL token */; experiment_id: string;
 ### `cr-evidence`
 
 - Implement the Service `StoragePort` over `HPS_TRACES` (R6); verify atomic `ifAbsent` semantics on R2 first and record the result.
+- Serialize writers per experiment, or derive linked sessions from the per-session keys (R6), and give the port a `usageBytes` that does not scan the store. Negative control (CR-T67): twenty participant sessions of one experiment linked concurrently must all appear in its session record and return counts. Today's unserialized `linkSession` keeps one of twenty and must fail that control on the pre-change tree.
+- The events route takes the session token issued with the served page, and rate-limits per link and per session (§6). Negative control: an event with no, a forged or another link's session token is refused and writes nothing.
 - Participant event kinds extend the observation vocabulary through `legacy-observation.ts` / `learning-events.ts` (one validator); run SX-T53's store inventory as the negative control.
 
 ### `cr-memory`
@@ -396,7 +450,8 @@ type TestLink = { id: string /* random, the URL token */; experiment_id: string;
 
 ### `cr-gateway`
 
-- R8; do not route capability calls through `callGeminiResilient`. App tokens must never be accepted by `/v1/chat/completions` or `/v1/messages`.
+- R8; do not route capability calls through `callGeminiResilient` or `callAnthropicResilient`. A capability retry admits (`reserveBudgetAttempt`) and meters (`registerUsageAttempt`) every attempt, stops once output reached the caller, and defaults to a bound of 0 until Jay rules on MU-02 (§9).
+- App tokens carry role `app`. Every existing student route moves from `role === "issuer"` refusal to the allow-list `role === undefined || role === "student"` in the same change. Negative control: an app token sent to `/v1/profile`, `/v1/access`, `/v1/logs`, `/v1/classroom/*`, `/v1/lesson-turns/*`, `/v1/observations/*`, `/v1/chat/completions`, `/v1/messages` and, through `/v1/profile`, the Lab gallery publish is refused, and a token with an unknown role is refused everywhere.
 
 ### `cr-review`
 
@@ -416,20 +471,26 @@ Commands (2026-09-29, macOS arm64, Node 24.4.1):
 
 | Command | Result |
 |---|---|
-| `cd worker && node --experimental-strip-types test/cr-recon.test.mjs` | CR-T01: 10 areas, 73 map entries, 84 matrix rows, 11 decisions resolve; 13 planted defects each reported exactly once. The 10 external entries are unchecked without checkouts. |
-| the same with `HPS_VSCODE_SRC=<vscodium-base/vscode at 1.116.0> HPS_VSCODIUM_SRC=<vscodium-base git> HPS_LAB=<hypeprooflab worktree>` | Same result with 0 external entries unchecked. |
+| `cd worker && node --experimental-strip-types test/cr-recon.test.mjs` | CR-T01, verdict read at this tree (no `cr-recon` completion yet): 10 areas titled after their PRD Phase 0 items, 73 map entries, 84 matrix rows, 11 decisions resolve; 17 planted defects each reported exactly once, plus 6 resolver and comment-stripping controls. The 10 external entries are unchecked without checkouts. |
+| the same with `HPS_VSCODE_SRC=<vscodium-base/vscode, HEAD 560a9dba> HPS_VSCODIUM_SRC=<vscodium-base git> HPS_LAB=<hypeprooflab worktree>` | Same result with 0 external entries unchecked. |
+| CR-T01 in a scratch clone of this branch after a simulated record (a `cr-recon` completion naming the branch head and pinning this page), then `browserToolLogLine` renamed in the working tree, or CR-47 dropped from `cr-skills` in the ledger | Verdict read at the recorded commit: passes both times, and prints the rename (or the two ledger consequences) as this tree's divergence from the map. The same rename fails with no completion, and fails again once the page is edited after the record: in both cases the page is checked on the tree, because it is being written. In a `--depth 1` clone of the recorded state the verdict is NOT RE-RUN, the 23 controls still run, and the rename prints as divergence. |
 | `extensions/hypeproof-chat`: each of `test/browser-control-helpers`, `browser-mcp`, `browser-safety-helpers`, `browser-tool-log`, `cdp-session`, `live-preview-url`, `live-server`, `preview-artifacts`, `preview-html` `.smoke.mjs` | 9 of 9 exit 0. |
-| `HPS_APP_PATH=<app copy> node e2e/curriculum-runtime/cdp-probe.mjs`, screen unlocked, 06:24Z (twice) | exit 0, 13 of 13 expectations, with the probe as it stood before the overlay step and the locked-screen split were added. Planted page: exactly 1 `console.error`, 1 exception, 1 HTTP 404, 1 refused connection per document, for each of two consecutive documents; clean page 0; hover, wheel scroll (0 → 600), select (`b`), reload (new document) work; the pick returns the AX-ref node with snippet, style and a PNG crop and does not click the product. |
-| `HPS_CR_PROBE_NEGATIVE=1 … cdp-probe.mjs`, unlocked, 06:24Z | exit 1: the two exact-count checks fail on one unlisted planted error (the instrument is not lenient). |
-| The committed probe, screen locked, 06:43Z (twice) | exit 3: 14 of 14 runnable expectations hold (adds DOM-level scroll and the overlay DOM/AX check); wheel scroll and element crop NOT RUN. The committed version has not been run unlocked; run it unlocked before relying on those two. |
-| `HPS_CR_PROBE_NEGATIVE=1`, committed probe, locked, 06:44Z | exit 1: the same two exact-count checks fail. |
+| First probe revision (`f4c3f153` and before), `HPS_APP_PATH=<app copy recorded as carrying the origin/main extension; since deleted>`, screen unlocked, 06:24Z (twice) | Not reproducible with that build today (F8). exit 0, 13 of 13 expectations, with the probe as it stood before the overlay step and the locked-screen split were added. Planted page: exactly 1 `console.error`, 1 exception, 1 HTTP 404, 1 refused connection per document, for each of two consecutive documents; clean page 0; hover, wheel scroll (0 → 600), select (`b`), reload (new document) work; the pick returns the AX-ref node with snippet, style and a PNG crop and does not click the product. |
+| First revision, `HPS_CR_PROBE_NEGATIVE=1`, unlocked, 06:24Z | exit 1: the two exact-count checks fail on one unlisted planted error (the instrument is not lenient). |
+| First revision, same app copy, screen locked, 06:43Z (twice); negative 06:44Z | exit 3: 14 of 14 runnable expectations (adds DOM-level scroll and the overlay DOM/AX check), wheel scroll and crop NOT RUN; negative exit 1. |
+| First revision on the stock installed app (`/Applications`, 0.1.51), locked, run by the reviewer (twice) | exit 1: the pick timed out. The browser tab was a background tab behind the stock "HypeProof Studio" startup editor (R2). |
+| Scratch diagnostic copy of the probe, stock app, 07:02–07:24Z | Tab covered by the startup editor right after opening: first pick click lost, later clicks answered, 6 of 6 runs (4 locked, 2 unlocked), whichever pointer path came first. The tab as the visible tab of its group at 1434 px (locked, twice) and at 714 px (locked, twice): first click answered. Width is not the factor. |
+| This revision (layout controlled), stock app, `HPS_CR_PROBE_LAYOUT=beside` and `=full`, screen unlocked, 07:22–07:23Z and 07:25–07:26Z (twice each), plus 07:31Z, 07:32Z (stock extension in the app copy) and 07:48Z (beside) | exit 0, all 17 expectations (adds the visible-tab precondition): 714 px beside and 1434 px full, wheel scroll 0 → 600, pick with crop in 26–40 ms. With each `=1` negative run below, 13 of 13 visible-tab picks. |
+| This revision, `HPS_CR_PROBE_NEGATIVE=1`, stock, 07:23Z and 07:26Z · `HPS_CR_PROBE_NEGATIVE=covered`, stock, 07:23Z, 07:27Z and 07:48Z | exit 1: the two exact-count checks fail · exit 1: the visible-tab precondition fails (and the crop, from a covered tab). |
+| This revision, app copy with the `origin/main` extension injected, both layouts, unlocked, 07:28–07:35Z (10 runs, plus both negatives) | exit 1 in every run: wheel scroll never moved the page (0 of 10); pick 8 of 10; crop 6 of 10 and 2.0–3.0 s when it came. Swapping the stock extension into the same copy: exit 0 (F8). |
+| F8 timing check, same injected build, 07:45–07:47Z: the old flow (tab opened at once, no settle wait) twice, the committed flow twice | Wheel scroll 0 of 4 in both flows (414 px in the old flow, 714 px in the committed one), so the settle wait is not the cause. |
 | `HPS_APP_PATH=<app copy> npx playwright test tests/09-preview.spec.ts` (with `scripts/dev-stack.sh`) | 1 passed, 2 failed (F1). |
 
-How symbols were located: by reading each named file at the recorded commit (`grep -n` for exports and call sites, then the surrounding code), the upstream files in the local VS Code 1.116.0 source prepared under the main checkout's `vscodium-base/vscode`, the pinned submodule with `git -C vscodium-base show 59e57927:<path>`, and the Lab routes in a hypeprooflab worktree. `worker/test/cr-recon.test.mjs` re-locates every entry mechanically on each run (one word-bounded match per file), so a later rename fails CI instead of leaving this page wrong.
+How symbols were located: by reading each named file at the recorded commit (`grep -n` for exports and call sites, then the surrounding code), the upstream files in the local VS Code 1.116.0 source prepared under the main checkout's `vscodium-base/vscode` (read at its git `HEAD`, because the prepared tree is patched), the pinned submodule with `git -C vscodium-base show 59e57927:<path>`, and the Lab routes in a hypeprooflab worktree. `worker/test/cr-recon.test.mjs` re-locates every in-repository entry mechanically, one word-bounded match outside comments per file, at the commit the map is true on (header). It proves that the named symbol occurs in that file, not that it is the declaration the role column describes. That part is the reviewer's reading. External entries are checked only when their checkouts are supplied, so CI does not check them.
 
-Probe observations recorded as facts for later slices: `Runtime.enable` replays earlier console messages of the attach-time document; a reload drops in-flight requests as `canceled` `net::ERR_ABORTED`; port 9 is a Chromium-restricted port (`net::ERR_UNSAFE_PORT`), so the probe plants a refused connection on a freed port instead; `Emulation.setDeviceMetricsOverride` leaves `innerWidth` at the window width; the only upstream LM browser tool registered is `open_browser_page`; the overlay outline leaves DOM and AX counts unchanged.
+Probe observations recorded as facts for later slices: `Runtime.enable` replays earlier console messages of the attach-time document; a reload drops in-flight requests as `canceled` `net::ERR_ABORTED`; port 9 is a Chromium-restricted port (`net::ERR_UNSAFE_PORT`), so the probe plants a refused connection on a freed port instead; `Emulation.setDeviceMetricsOverride` leaves `innerWidth` at the window width; the only upstream LM browser tool registered is `open_browser_page`; the overlay outline leaves DOM and AX counts unchanged; `document.visibilityState` reads `visible` on a covered tab; `BrowserTab.title` reads `<page title> (<url>)`, while the editor tab's label is the page title alone. So a browser tab is found in `window.tabGroups` by its page title, not by `BrowserTab.title`.
 
-Open PRs of the reused requirements' owners (#557, #1018, #1172, #1020, #1009) were **not read**: GitHub API use belongs to the single shipping agent in this delivery. Remote branches were listed instead (`git for-each-ref refs/remotes/origin`); none names a browser console, publish-test or gateway change, but branch names prove nothing about open PRs (squash merges leave branches behind). The shipping agent checks the open PRs before merging this item.
+Open PRs of the reused requirements' owners (#557, #1018, #1172, #1020, #1009) were **not read**: GitHub API use belongs to the single shipping agent in this delivery. Remote branches were listed instead (`git for-each-ref refs/remotes/origin`); none names a browser console, publish-test or gateway change, but branch names prove nothing about open PRs (squash merges leave branches behind). So the negative control "a gap called new while an open PR already implements it is recorded as a finding" is unverified. The shipping agent checks the open PRs before merging this item. It writes the result into `docs/evidence/cr-recon.md` at record time: each PR's state, and each matrix row it contradicts, recorded as a finding against this page.
 
 Not inspected: Chalk (`chalk/`), `packages/measurement` beyond its CI job, Windows, the real-phone path, production configuration, and the Lab gallery DB schema.
 
@@ -443,10 +504,18 @@ Findings (pre-existing, not changed here):
 - **F4.** `BrowserControl` clears refs on navigate/back/forward only; live-server reloads create new documents without clearing them (CDP then refuses the stale node).
 - **F5.** The Worker stores no observation batch; the measurement-core record exists only on the App until R6.
 - **F6.** New Worker route files fail `worker/test/route-registry.test.mjs` unless mapped or listed.
-- **F7.** While the macOS screen is locked the integrated browser produces no composited frames: `Page.captureScreenshot` times out and `mouseWheel` input does not scroll, while CDP console/network events, AX reads, hover, select, reload, DOM-level scrolling and inspect-mode picking keep working (probe, locked vs unlocked runs above). `scripts/e2e-quiet.sh` starts suites only when the screen is locked, so screenshot- and wheel-dependent CR checks (CR-T09 crop, CR-T56, any screenshot evidence) cannot pass there; run them unlocked in quiet mode, and implement `scroll` so it does not depend on compositing where the verdict does not need it.
+- **F7.** While the macOS screen is locked the integrated browser produces no composited frames: `Page.captureScreenshot` times out and `mouseWheel` input does not scroll, while CDP console/network events, AX reads, hover, select, reload, DOM-level scrolling and inspect-mode picking on a visible tab (R2) keep working (probe, locked vs unlocked runs above). `scripts/e2e-quiet.sh` starts suites only when the screen is locked, so screenshot- and wheel-dependent CR checks (CR-T09 crop, CR-T56, any screenshot evidence) cannot pass there; run them unlocked in quiet mode, and implement `scroll` so it does not depend on compositing where the verdict does not need it.
+- **F8.** With the `origin/main` hypeproof-chat build in the app, the integrated browser tab behaves as if it is starved of composited frames even when the screen is unlocked:
+  - CDP `mouseWheel` never scrolled (0 of 10 runs);
+  - the inspect-mode pick got no event in 2 of 10;
+  - the crop timed out in 2 more, and when it came it took 2.0–3.0 s.
+
+  The stock 0.1.51 build in the same app copy passed 13 of 13 runs with 26–40 ms crops. Opening the tab at once instead of after the startup editors settle changed nothing (wheel 0 of 2). The earlier revision's unlocked runs at 06:22–06:24Z scrolled and cropped normally at 714 px. They are recorded as runs of an injected copy, but that copy is gone and the layout it produced does not match what the same build produces now, so they neither confirm nor refute F8. The `origin/main` extension registers no browser-tab hook (`onDidOpenBrowserTab`, `startCDPSession` outside `CdpSession`), so the cause is indirect; its startup editor competing for the compositor is the first candidate. DOM-level scroll, console and network capture, AX reads, hover, select and reload were unaffected. This is pre-existing and is `cr-browser`'s first task (§7), because R2's element crop, CR-60's timing and CR-T09 / CR-T56 depend on it.
 
 Open decisions for Jay (they block a default or a production step, not the design):
 
 - The dedicated test-version domain and its wildcard route (§6). Until decided, the host is configuration and tests use `*.test.invalid`.
 - Applying the Venture Memory migrations (R5) and deploying the Worker routes to production.
 - The defaults already listed in the [plan](curriculum-runtime.md#decisions-still-open): link expiry, raw-input retention, returning-session linkage for minors, minor consent path.
+- **Participant evidence on the Service (R6) deviates from MC-31's initial policy.** MC-31's policy is local storage only, no remote transfer, no automatic expiry, with location and retention set by Jay. R6 stores minors' participant events in R2 `hps-traces`, which has no lifecycle rule in `wrangler.toml`. Jay decides two things. First, whether Service-side storage of participant event records is accepted for this curriculum. Second, their retention and expiry default for minor cohorts; this is separate from the declared raw-input retention above, which covers raw input only. Until then `cr-evidence` builds the store behind the switch. No cohort gets the switch for real participants, and nothing claims an automatic expiry.
+- **Capability retry and MU-02 (R8).** MU-02 allows one upstream call per user request. Jay decides whether a policy-bounded retry of an app capability call fits MU-02, with each attempt admitted and metered and only before any output reached the caller. Until then the policy bound is 0 retries; CR-T32 tests the mechanism with an explicit bound of 1.
