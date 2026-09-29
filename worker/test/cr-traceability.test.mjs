@@ -234,7 +234,7 @@ const docText = (path) => {
 
 // 0. Empty samples make every check below pass vacuously.
 assert.ok(req.size >= 84, `read only ${req.size} requirement rows — the parser is broken`);
-assert.ok(tests.size >= 79, `read only ${tests.size} test rows — the parser is broken`);
+assert.ok(tests.size >= 80, `read only ${tests.size} test rows — the parser is broken`);
 assert.ok(coverage.size >= 84, `read only ${coverage.size} coverage rows — the parser is broken`);
 assert.ok(intents.size >= 10, `read only ${intents.size} intents — the parser is broken`);
 assert.deepEqual(reqProblems, [], `malformed requirement rows:\n  ${reqProblems.join("\n  ")}`);

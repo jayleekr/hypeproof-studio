@@ -17,7 +17,7 @@ Curriculum Runtime PRD v1.0 (2026-09-28), preserved at
 [design/curriculum-runtime-prd-v1.0-2026-09-28.md](design/curriculum-runtime-prd-v1.0-2026-09-28.md).
 [Intent INT-CR-00–09](intents/curriculum-runtime.md),
 [CR-01–84 requirements](requirements/curriculum-runtime.md),
-[CR-T01–T79 validation](testing/curriculum-runtime.md),
+[CR-T01–T80 validation](testing/curriculum-runtime.md),
 [plan, DAG and gap matrix](plan/curriculum-runtime.md),
 [epic #1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
 Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.

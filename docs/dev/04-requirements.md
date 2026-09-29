@@ -204,7 +204,7 @@ publication is not implementation and is not human acceptance.
 
 [INT-CR-00–09](../intents/curriculum-runtime.md) →
 [CR-01–84](../requirements/curriculum-runtime.md) →
-[CR-T01–T79](../testing/curriculum-runtime.md) →
+[CR-T01–T80](../testing/curriculum-runtime.md) →
 [plan, DAG and gap matrix](../plan/curriculum-runtime.md).
 The source PRD is preserved in [curriculum-runtime-prd-v1.0-2026-09-28](../design/curriculum-runtime-prd-v1.0-2026-09-28.md)
 and is not edited by derived documents.

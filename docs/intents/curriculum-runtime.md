@@ -78,4 +78,4 @@ P0 = PRD P0-1..P0-9 plus the §14 end-to-end loop. P1 items in PRD §8 (model co
 
 ## Derived contracts
 
-[Requirements CR-01–84](../requirements/curriculum-runtime.md) → [plan, DAG and gap matrix](../plan/curriculum-runtime.md) → [verification CR-T01–T79](../testing/curriculum-runtime.md). Registry entries: `config/requirement-work.json` (work items `cr-*`), `config/traceability.json` (`ST-INT-CR`, `ST-REQ-CR`, `ST-DES-CR`, `ST-TEST-CR`; the preserved PRD is a source of `ST-INT-CR`).
+[Requirements CR-01–84](../requirements/curriculum-runtime.md) → [plan, DAG and gap matrix](../plan/curriculum-runtime.md) → [verification CR-T01–T80](../testing/curriculum-runtime.md). Registry entries: `config/requirement-work.json` (work items `cr-*`), `config/traceability.json` (`ST-INT-CR`, `ST-REQ-CR`, `ST-DES-CR`, `ST-TEST-CR`; the preserved PRD is a source of `ST-INT-CR`).
