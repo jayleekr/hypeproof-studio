@@ -26,7 +26,9 @@
 // the ones cr-recon's completion pins.
 //   - live: no cr-recon completion yet, or not the recorded state. The page is being written
 //     or re-verified, so the verdict reads this tree. Until the record lands on main this is
-//     every run, and a rename of a mapped symbol fails worker `npm test` (the page says so).
+//     every run: a rename of a mapped symbol fails worker `npm test`, and so does an edit to
+//     what FROZEN_PATH projects (CR rows, CR-T targets, cr-* cited IDs, PRD Phase 0), until the
+//     fixture is regenerated (the page says so).
 //   - commit: the recorded state, and the completion's commit is in this clone. The verdict
 //     reads that commit through git, so a later rename or ledger edit cannot fail it.
 //   - unresolved: the recorded state, and the commit is absent. CI is always here after the
@@ -38,7 +40,7 @@
 // require exactly the planted problem back. A check that cannot fail is not a check. They never
 // read this tree beyond the page: the ledger, testing contract, requirements and PRD come from
 // FROZEN_PATH (the projection of the verdict's inputs, which the verdict asserts while it runs;
-// regenerate it with HPS_CR_RECON_FREEZE=1 while the page is being written), and paths and
+// regenerate it with HPS_CR_RECON_FREEZE=1 in live mode, as the failure message says), and paths and
 // symbols resolve against the page's own entries. The resolver itself is tested on a temp
 // directory. So no later tree state can make a control pass or fail, in any mode.
 
@@ -65,7 +67,8 @@ const DECISIONS = 11;
 const MIN_DECISION_WORDS = 12;
 const VERDICTS = new Set(["reuse", "extend", "new"]);
 // A decision paragraph that defers the decision. Plain "later" is not in it: "later exposable"
-// describes a consequence, not a deferral.
+// describes a consequence, not a deferral. These phrasings are what it catches; a deferral worded
+// otherwise passes, and the reviewer's reading is what stands behind it.
 const PLACEHOLDER = new RegExp(
   [
     String.raw`\b(TBD|TBC|TODO|FIXME|undecided|unresolved)\b`,
@@ -74,6 +77,11 @@ const PLACEHOLDER = new RegExp(
     String.raw`\bnot (yet )?(decided|determined|settled)\b`,
     String.raw`\bopen question\b`,
     String.raw`\bpending\b`,
+    String.raw`\bdefer(s|red|ring|ral)?\b`,
+    String.raw`\brevisit(s|ed|ing)?\b`,
+    String.raw`\bleft open\b`,
+    // "`cr-browser` decides …", "the slice picks …": the choice handed to an item.
+    String.raw`(\bcr-[a-z]+\x60?|\b(slice|item))\s+(decides|chooses|picks)\b`,
   ].join("|"),
   "i",
 );
@@ -531,8 +539,14 @@ if (chosen.mode !== "unresolved") {
       writeFileSync(join(ROOT, FROZEN_PATH), want);
       console.log(`wrote ${FROZEN_PATH} from ${src.where}`);
     } else {
-      assert.fail(`${FROZEN_PATH} is not the projection of the verdict's inputs (${src.where}); ` +
-        "regenerate it with HPS_CR_RECON_FREEZE=1 while the page is being written, and commit it with the page");
+      const what = have === null
+        ? "is missing"
+        : `is not the projection of the verdict's inputs: since it was generated, a CR row of ${REQ_PATH}, a CR-T's ` +
+          `Targets cell in ${TESTING_PATH}, a cr-* item's cited CR IDs in ${LEDGER_PATH} or the PRD Phase 0 list changed`;
+      assert.fail(`${FROZEN_PATH} ${what} (${src.where}; ${chosen.why}). The verdict passes on this tree, so regenerate ` +
+        "the fixture: run this test from worker/ with HPS_CR_RECON_FREEZE=1 and commit the fixture with the change. Before " +
+        "cr-recon's record lands, that is all an unrelated PR needs (or it waits for the record; recon header). After the " +
+        "record, reaching this line means the page or the fixture was edited, which reopens cr-recon: re-verify and re-record it too");
     }
   }
 }
@@ -584,6 +598,10 @@ let controls = 0;
     "R3 states no decision", "a deferral long enough to pass the word count");
   expectOne(run(decision(5, "Storage stays undecided until the director has seen how the first cohort uses the product.")),
     "R5 states no decision", "a decision left undecided in other words");
+  expectOne(run(decision(1, "Deferred to cr-browser, which picks between the CDP path and the upstream tools after measuring both.")),
+    "R1 states no decision", "a decision deferred to a later item");
+  expectOne(run(decision(1, "`cr-browser` decides between the CDP path and the upstream tools once it has measured both in its own tree.")),
+    "R1 states no decision", "the choice handed to a later item");
   expectOne(run(page.replace(/^\| `cr-skills` \|[^\n]*\n/m, "")), "cr-skills has no row", "item absent from the strategy");
   expectOne(run(plant("| `cr-skills` | CR-T02, CR-T40–T44 |", "| `cr-skills` | CR-T02, CR-T40–T43 |")),
     "CR-47 is not targeted", "strategy row missing a requirement's test");
