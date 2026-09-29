@@ -1,6 +1,6 @@
 # HypeProof Studio
 
-VSCodium fork rebranded as **HypeProof Studio**. Target: SK바이오팜 첫 회차 (June 2026).
+VSCodium fork rebranded as **HypeProof Studio**. The repo also holds the Worker (`worker/`) and the Chalk instructor surface (`chalk/`); see `products.yaml`.
 Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it here.
 
 ## Product philosophy (READ BEFORE DESIGNING UX)
@@ -30,21 +30,18 @@ summary below and a completed plan do not exhaust Studio/Chalk requirements.
 Report ready, claimed, review, dependency, human/environment and reconciliation work
 separately. Missing discovery input means unknown, not "no development remains".
 
-**Phase 4–5 (chat panel + integrated build) — UX iteration in progress.** Per-cohort profile system live, Worker (`worker/`) + Studio extension (`extensions/hypeproof-chat/`) wired through `/v1/profile`. 1회차 (sk-biopharm-kids-s1) profile fully populated; 13 e2e tests passing locally against `wrangler dev`.
-
-Next milestones:
-- Cloudflare production deploy (`worker/DEPLOY.md`)
-- GitHub Pages publish wizard (Device Flow OAuth) — separate sprint
-- Live preview extension (`hypeproof-preview`) — separate sprint
-- 2회차–4회차 profile content
-
-Progress tracking: METAPLAN §10. Latest detail: git history.
+Shipped state (not a work list): the app is released for macOS arm64 and Windows x64
+through `v*` tags, the Worker runs in production at `api.hypeproof-ai.xyz`, and Chalk
+runs at `chalk.hypeproof-ai.xyz`. The Phase 4–5 milestones in METAPLAN are historical.
+Latest detail: git history.
 
 ## Repo layout
 
 - `vscodium-base/` — **submodule** → `jayleekr/vscodium@hps/main`. **Do not edit upstream files directly**; add a patch under `vscodium-base/patches/`. Pointer is pinned — bump deliberately only, never auto-follow. Policy: [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) "Submodule bump policy".
-- `extensions/hypeproof-chat/` — own VS Code extension (React webview). Will be bundled as a built-in extension at Phase 5.
-- `proxy-poc/` — HypeProof Proxy (OpenAI-compatible). Extension talks to this.
+- `extensions/hypeproof-chat/` — own VS Code extension (React webview), bundled as a built-in extension (`scripts/inject-builtin-extensions.sh`). It talks to the Worker.
+- `worker/` — Cloudflare Worker (`api.hypeproof-ai.xyz`): model proxy, cohort profiles, token auth, classroom operations.
+- `chalk/` — Chalk instructor surface (`chalk.hypeproof-ai.xyz`).
+- `proxy-poc/` — early Python proxy, superseded by `worker/`; kept for reference.
 - `METAPLAN.md` — phased build plan. Always cross-reference by section (§N) rather than copying.
 
 ## Language
