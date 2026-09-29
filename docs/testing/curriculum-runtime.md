@@ -1,7 +1,7 @@
 # Curriculum Runtime verification contract
 
-Status: **CR-T01–T66 all NOT RUN.** 2026-09-29. Owner: jayleekr.
-Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–71](../requirements/curriculum-runtime.md) · plan: [curriculum-runtime](../plan/curriculum-runtime.md). Layer and command canon: [05-testing-requirements](../dev/05-testing-requirements.md). Judgment discipline: [.claude/rules/verification.md](../../.claude/rules/verification.md) — open the target before writing a verdict rule, run the controls before the real run, and rule out the instrument before blaming the product.
+Status: **CR-T01–T76 all NOT RUN.** 2026-09-29. Owner: jayleekr.
+Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–81](../requirements/curriculum-runtime.md) · plan: [curriculum-runtime](../plan/curriculum-runtime.md). Layer and command canon: [05-testing-requirements](../dev/05-testing-requirements.md). Judgment discipline: [.claude/rules/verification.md](../../.claude/rules/verification.md) — open the target before writing a verdict rule, run the controls before the real run, and rule out the instrument before blaming the product.
 
 This document **defines** checks. A check written here is not a check that ran. Every row starts NOT RUN; run records go to a separate evidence file (`docs/testing/curriculum-runtime-<date>-evidence.md`) with commit, environment, evidence class (live-host / captured-replay / synthetic, MC-38), expected and observed, PASS / FAIL / NOT RUN / BLOCKED. Passing unit tests of an existing feature is not a PASS for a CR row. File names below are proposals; the implementing PR fixes them after reading the code it tests.
 
@@ -33,9 +33,9 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 
 | ID | Layer | What it checks | Positive control | Negative control | Targets |
 |---|---|---|---|---|---|
-| CR-T04 | extension smoke | Observation on a fixture page returns URL, route, semantic snapshot with refs, screenshot and viewport, tagged with document generation. | Fixture with known title, route and three buttons yields those refs and the set viewport. | After navigation, a ref from the old generation is rejected. | CR-04 |
+| CR-T04 | extension smoke | Observation on a fixture page returns URL, route, semantic snapshot with refs, screenshot and viewport, tagged with document generation. | Fixture with known title, route and three buttons yields those refs and the set viewport. | A planted observation with the viewport or document generation removed is an explicit error, not a partial result. (Stale-ref rejection is AE-18's check.) | CR-04 |
 | CR-T05 | extension smoke | Console, uncaught exception and failed request of the fixture are captured per document generation. | A fixture that logs one `console.error`, throws once and fetches a 404 yields exactly three records. | A clean fixture yields zero records; records from the previous document are not attributed to the new one. | CR-05 |
-| CR-T06 | extension smoke | `select`, `scroll`, `hover`, `reload` join the existing actions; every action returns the resulting observation. | Each action changes a fixture DOM state the next observation shows. | A stale ref after reload is rejected; an unknown action name returns an explicit error. | CR-06 |
+| CR-T06 | extension smoke | `select`, `scroll`, `hover`, `reload` join the existing actions; every action returns the resulting observation. | Each action changes a fixture DOM state the next observation shows. | An unknown action name returns an explicit error; an action result with the resulting observation stripped fails the contract; `select`, `scroll` and `hover` on a ref from before a reload are not executed. | CR-06 |
 | CR-T07 | Playwright e2e | An agent-driven five-step flow on the kiosk-practice fixture app reaches the final state using CR-06 actions only. | Unmodified fixture: five steps succeed, final order screen shown. | Planted disabled button at step 4: the flow reports failure at step 4, not success. | CR-07 |
 | CR-T08 | Playwright e2e | A console error raised during step 3 of the flow is reported with the step index. | Planted error at step 3 is reported once, at step 3. | The unmodified fixture reports no failure (no false positive). | CR-05, CR-08 |
 | CR-T09 | Playwright e2e | Selecting a rendered element produces a context payload with ref, bounded DOM snippet, computed style subset, element screenshot and source mapping or "unmapped"; the student can remove it before sending. | Selecting the order button yields its ref and a mapping to the file that defines it. | A payload whose ref differs from the selected element fails; an inline-generated element yields "unmapped", never a guessed file. | CR-09 |
@@ -48,9 +48,10 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 |---|---|---|---|---|---|
 | CR-T12 | Playwright e2e | "Test my product" accepts 1–5 criteria; student-written criteria are stored with the student actor; AI-proposed criteria wait for confirmation. | Three typed criteria start a run and appear as `criterion_set` with student text. | Zero or six criteria are refused; an unconfirmed AI-proposed criterion does not start a run and is never stored as the student's. | CR-12 |
 | CR-T13 | unit | The verification report validator and its persistence through existing learning events. | A report with the PRD §6 fields plus `steps` validates and round-trips through `criterion_set` / `test_observed`. | Missing `artifact_version_id`, `tested_at` or `steps` is refused; a store-inventory check catches any new table or KV namespace. | CR-13 |
-| CR-T14 | Playwright e2e | Same criteria, same version, same viewport give the same verdicts; a file, criterion or viewport change marks the earlier verdict "re-check needed". | Two runs on v0 give identical per-criterion verdicts. | After editing a file, showing the earlier pass as current fails. | CR-14 |
+| CR-T14 | Playwright e2e | Same criteria, same version, same viewport give the same verdicts; a criterion whose verdict differs between such runs is reported as non-reproducible. (Stale marking after a change is AE-37's check.) | Two runs on v0 give identical per-criterion verdicts. | A planted flaky fixture (a button that fails on alternate loads) makes the two runs disagree; the criterion is reported non-reproducible, not pass. | CR-14 |
 | CR-T15 | unit | Each verdict cites steps and an observation; vision is used only for criteria marked visual and is labelled. | A pass citing a snapshot ref and a fail citing a console record validate. | A verdict with no cited observation is downgraded to "not verified"; an unlabelled vision verdict is refused. | CR-15 |
-| CR-T16 | Playwright e2e | A failed criterion becomes a fix request linked to the report, and the re-test runs the same criterion ID. | Fix then re-test of criterion 2 yields `retest_confirmed` for criterion 2. | Re-testing a different criterion yields no `retest_confirmed`. | CR-16 |
+| CR-T16 | Playwright e2e | A failed criterion becomes a fix request that references the report, criterion ID and version, and the re-test runs that criterion ID on the fixed version. | Criterion 2 fails; the fix request carries report, criterion 2 and v0; the re-test of criterion 2 on v1 passes and `retest_confirmed` appears for criterion 2. | A planted fix request with the report reference removed is refused, not sent to the coach as free text. (Retest rules are SX-15's check.) | CR-16 |
+| CR-T76 | unit + Playwright e2e | "Verified" is shown only for a version with an all-pass `hps-verification/1` report bound to it. | A version whose report has three passes shows verified; one whose report has a fail shows the fail. | A version with no report, a version whose only report is bound to another version, and a version after a coach message saying "완료했어요" all show not verified. | CR-81 |
 
 ## D. Publish for User Test
 
@@ -62,17 +63,20 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 | CR-T20 | real-Mac + real phone | Publish action to published version under 10 s; publish action to first render on a second device under 60 s. | Recorded timings on the reference Mac and phone with sample size and p50/p95. | A planted slow upload shows as a recorded miss with its cause, not as a pass. | CR-20, CR-64 |
 | CR-T21 | worker D1 | Every participant session and event carries project, experiment and version. | Events from the published v0 carry the three IDs of their experiment. | An event whose version is not the experiment's is refused. | CR-21 |
 | CR-T22 | worker D1 | Publishing v1 while an experiment on v0 runs leaves the experiment on v0. | Participants of the running experiment keep getting v0 and their events stay attributed to v0. | A link of the running experiment that starts serving v1 fails. | CR-22 |
+| CR-T68 | worker D1 | Several channel-labelled links of one experiment attribute their sessions to their own channel. | Two links of one experiment labelled with two channels attribute each session to its link's channel. | An event through another experiment's link is refused; a session with no recorded link is "unknown channel"; after revoking one channel's link the other still serves. | CR-73 |
 
 ## E. Evidence Capture
 
 | ID | Layer | What it checks | Positive control | Negative control | Targets |
 |---|---|---|---|---|---|
-| CR-T23 | worker D1 | Six participant event kinds under an anonymous session ID with `source_state` real, stored through the existing learning-event store. | One scripted participant session produces all six kinds with a random session ID and no identity fields. | Events for a revoked version are refused; an event carrying a name or e-mail field is refused; the store inventory shows no new evidence table. | CR-23, CR-65 |
+| CR-T23 | worker D1 | Six participant event kinds under an anonymous session ID with `source_state` real, stored through the existing learning-event store. | One scripted participant session produces all six kinds with a random session ID, a participant pseudonym and no identity fields. | Events for a revoked version are refused; an event carrying a name or e-mail field is refused; the store inventory shows no new evidence table. | CR-23, CR-65 |
 | CR-T24 | unit | Five manual record kinds with kind-specific provenance and `source_state`; KO/EN text kept verbatim. | An interview note with speaker, date and situation validates; mixed Korean/English text round-trips unchanged. | A record without provenance or `source_state` is refused. | CR-24 |
 | CR-T25 | unit | Evidence drafts keep the four sections as separate types and refuse unresolvable observed statements (planted answers). | A draft whose three observed statements cite real event and note IDs validates. | Three planted fabricated statements (missing ID, other project's ID, deleted ID) are refused — exactly three. | CR-25 |
 | CR-T26 | unit | Accept / edit / reject creates interpretation revisions; raw record bytes are unchanged. | Editing an interpretation adds a revision; raw record hashes are identical before and after. | A code path that rewrites a raw note during an edit is caught by the hash comparison. | CR-26 |
 | CR-T27 | Playwright e2e | Clicking an observed claim opens its source sessions and notes. | Clicking the "2 of 3 paused" claim opens the three session records it cites. | A claim whose reference no longer resolves shows "needs review". | CR-27 |
 | CR-T28 | unit | The review input builder reads evidence items, not chat history. | A project with evidence items yields review claims citing them. | A project with only chat history yields "no evidence recorded" and no claims. | CR-28 |
+| CR-T67 | worker D1 | Returning sessions of a declared repeated-use experiment give return counts and intervals as observed items citing the sessions. | One pseudonym's three sessions over two days yield return count 2 and both intervals, each citing the three session records. | An undeclared experiment shows "not measured", not 0; sessions from two experiments are never merged; a return count citing no sessions is refused. | CR-72 |
+| CR-T69 | worker D1 + unit | A comparison experiment attributes every record to one variant and reports per variant. | A fixture with v1 and one outside alternative (observed through notes) yields per-variant results under the same criteria, each citing its own records. | An event without a variant is refused; a comparison claim citing one variant is flagged unsupported; publishing v2 leaves both variants' pinned versions unchanged. | CR-74 |
 
 ## F. HypeProof AI Gateway
 
@@ -80,10 +84,11 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 |---|---|---|---|---|---|
 | CR-T29 | worker D1 + unit | The student-app endpoint with an app-scoped token and origin-bound CORS; the generated app bundle carries no provider key. | The kiosk-practice app calls `text.fast` from its published origin and gets an answer. | A provider-key pattern planted in a bundle is found by the scan; the same token from another origin or app is refused. | CR-29 |
 | CR-T30 | unit | Capability requests map to the policy's model with the mapping revision recorded; model IDs and unmapped capabilities are explicit errors. | `text.fast` resolves to the policy model and the call record names the policy revision. | A request naming a model ID is refused; `image.generate` with no mapping returns an explicit error, not a silent text answer. | CR-30 |
-| CR-T31 | unit | One normalised request through a recorded real-adapter fixture and a mock adapter gives the same normalised shape. | Both adapters return the same fields for the same request. | An adapter returning a provider-specific shape fails the contract. | CR-31 |
+| CR-T31 | unit | One normalised request through a recorded real-adapter fixture and a mock adapter gives the same normalised shape, for a plain, a streaming and a schema-constrained request. | Both adapters return the same fields for the plain request, the same normalised stream events ending in one terminal event for the streaming request, and schema-valid output for a `reason({ input, schema })` request. | An adapter returning a provider-specific shape fails the contract; a schema-constrained response that does not validate is an explicit typed error, never passed through; a streaming request to an adapter without streaming is an explicit error, not a silently buffered answer. | CR-30, CR-31 |
 | CR-T32 | unit | Retry policy: one same-model retry for a transient failure before output, every attempt metered; no other provider; typed error. | A 503 before any output is retried once on the same model and both attempts are metered. | After partial stream output there is no retry; with the mapped provider down, a spy records zero calls to any other provider and the caller gets a typed error. | CR-32 |
 | CR-T33 | worker D1 | Hard ceiling with atomic reservation; predictable 429. | Requests up to the ceiling succeed. | The next request gets 429 with a reason code and no upstream call; 20 concurrent requests at the edge do not overshoot; an unconfigured ceiling blocks. | CR-33 |
-| CR-T34 | worker D1 | Usage rows carry organisation, cohort, team, student, project, skill, capability and provider/model on existing ledgers. | A skill-issued call produces one row with all eight dimensions. | The same attempt counted in two ledgers fails; a missing dimension recorded as a guess instead of unknown fails. | CR-34 |
+| CR-T34 | worker D1 | Usage rows carry organisation, cohort, team, student, project, skill, capability and provider/model on existing ledgers. | A call issued by a registered skill (cr-skills) produces one row with all eight dimensions. | The same attempt counted in two ledgers fails; a missing dimension recorded as a guess instead of unknown fails. | CR-34 |
+| CR-T75 | worker D1 | Per-app-token and per-participant-session rate limits on the student-app endpoint. | Requests under the limit from two participant sessions of one app succeed. | A burst of limit + 5 from one session gets 429 `rate_limited` after the limit, a spy sees no upstream call for the throttled requests, the team ceiling reservation is unchanged, and the other session still succeeds; 100 fabricated session IDs on one app token stop at the app-token limit. | CR-80 |
 
 ## G. Venture Memory
 
@@ -94,6 +99,11 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 | CR-T37 | worker D1 | Director traversal hypothesis → evidence → decision → version within scope. | A director reads the chain for a directed team. | A director reading another cohort's team is refused. | CR-37 |
 | CR-T38 | unit | Decisions link evidence and affected slides and record their actor. | A student decision with two evidence refs and slides 2–3 validates. | A dangling evidence ref is refused; an AI-actor decision is never rendered as the team's decision. | CR-38 |
 | CR-T39 | unit | Validators for the Experiment, Evidence item, Decision and Artifact contracts of PRD §10. | The four PRD §10 samples validate. | Each sample with one required field removed is refused; an observed evidence item with empty `source_refs`, a slide number 9 and an artifact without `entry_html` are refused. | CR-39, CR-40, CR-41, CR-42 |
+| CR-T70 | unit | Stakeholder roles (user, payer, beneficiary) with evidence refs. | A stakeholder holding user and payer roles with evidence refs validates and shows both roles. | A stakeholder with no role is refused; a role marked observed with no evidence refs is refused. | CR-75 |
+| CR-T71 | unit | Metric definitions and values with sources and `source_state`. | An impact metric computed from three real events shows its value with the three source refs. | A value with no source is shown unsupported; a simulated input counted into a real result fails; an impact metric with no stakeholder is refused. | CR-76 |
+| CR-T72 | unit | Product version diff with the decision and evidence behind the newer version. | The v0 → v1 diff lists the changed files and the decision with its evidence. | A diff across two projects is refused; a version with no recorded decision shows "no recorded decision", not a reason. | CR-77 |
+| CR-T73 | unit | Project timeline built from stored records without model calls. | The Week 1 → 2 fixture yields a time-ordered timeline whose every entry opens its record, with zero model calls. | A planted entry with no record fails; an AI-actor suggestion shown as a decision fails. | CR-78 |
+| CR-T74 | unit | "Belief changed because…" assembled only from hypothesis revisions and their linked decisions and evidence. | A hypothesis revised after a decision shows the before and after statements with the decision and evidence cited. | A revision with no linked decision shows "reason not recorded"; an update that overwrites the earlier statement fails the revision check. | CR-79 |
 
 ## H. Curriculum Skills
 
@@ -111,7 +121,7 @@ The registry trace itself (every CR row has a CR-T that lists it, every CR-T is 
 |---|---|---|---|---|---|
 | CR-T45 | unit | The pack builder emits ten sections with source links for factual claims and interpretation apart. | The Week 2 fixture yields ten sections, each factual claim linked. | A factual claim without a source link fails. | CR-48 |
 | CR-T46 | worker D1 | Staleness by input digest and section-only regeneration. | Changing one evidence item marks only the sections that read it stale; regeneration calls the model once per stale section. | Regenerating an unchanged section, or presenting a stale pack as current, fails. | CR-49 |
-| CR-T47 | worker D1 | Opening the latest valid pack makes zero model calls. | A spy on the gateway records zero calls when the pack opens. | A stale pack opens with its stale marking and still makes zero calls; any call fails. | CR-50 |
+| CR-T47 | worker D1 | Opening the latest valid pack makes zero model calls. | A spy on every model-call path the pack builder can reach (the existing coach route, and the gateway once `cr-gateway` has landed) records zero calls when the pack opens. | A stale pack opens with its stale marking and still makes zero calls; any call fails. | CR-50 |
 | CR-T48 | Playwright e2e | The director records decision and next experiment on the review screen and both write back to memory. | After reopening, the Decision (director actor, evidence linked) and the Experiment draft exist. | A decision stored without a director actor, or missing after reopen, fails. | CR-51, CR-52 |
 | CR-T49 | worker D1 | Four-team overview with fresh / stale / missing and no model calls. | Four fixture teams show their three states correctly. | A team from another cohort appears, or a model call occurs, and fails. | CR-53 |
 
@@ -141,7 +151,7 @@ Timing rows record the machine, app build, sample size, p50, p95, max and failur
 
 | ID | Layer | What it checks | Positive control | Negative control | Targets |
 |---|---|---|---|---|---|
-| CR-T60 | unit | The participant event schema has no identity fields and session IDs are random. | Two sessions from the same device get unrelated IDs. | A schema change adding `email` or `name` fails the schema check. | CR-65 |
+| CR-T60 | unit | The participant event schema has no identity fields; session IDs are random; the participant pseudonym is random, scoped to one experiment on one device, and links sessions only when the experiment declares repeated-use measurement. | Two sessions from the same browser in a declared experiment share one pseudonym and have different session IDs; the same browser in a second experiment gets an unrelated pseudonym. | A schema change adding `email` or `name` fails the schema check; a pseudonym computed from user agent or IP fails; two sessions of an undeclared experiment carrying the same pseudonym fail. | CR-65 |
 | CR-T61 | Playwright e2e | The published runtime denies microphone and camera unless the experiment declares them; automation never grants them. | A declared experiment shows the browser's own permission prompt. | An undeclared experiment's page calling `getUserMedia` is denied; an automation step that grants a device permission fails. | CR-66 |
 | CR-T62 | worker D1 | Typed participant input is not retained by default. | An experiment declaring raw-input retention stores the typed text. | Typed text stored for an undeclared experiment fails. | CR-67 |
 | CR-T63 | Playwright e2e | The automation indicator is visible while the runner or agent browser tools act and disappears after. | Indicator shown during a verify run and gone after it ends. | An automation step with no visible indicator fails. | CR-68 |
@@ -152,7 +162,40 @@ Timing rows record the machine, app build, sample size, p50, p95, max and failur
 
 | ID | Layer | What it checks | Positive control | Negative control | Targets |
 |---|---|---|---|---|---|
-| CR-T66 | real-Mac + real phone (scripted run plus one live run) | The fifteen steps of PRD §14 on the kiosk-practice app, each step reading the previous step's record. | Scripted run: all fifteen steps pass on the dev host. Live run: one real Mac and one real phone complete the loop; evidence class live-host. | A planted break between steps 8 and 10 (events not reaching the Evidence skill) stops the loop at step 10; a live-run step satisfied only by synthetic data is recorded as NOT RUN, not PASS. | CR-71 |
+| CR-T66 | real-Mac + real phone (scripted run plus one live run) | The fifteen steps of CR-71 (PRD §14) on the kiosk-practice app, each step reading the previous step's record, as listed in the §14 procedure below. | Scripted run: all fifteen steps pass on the dev host. Live run: one real Mac and one real phone complete the loop; evidence class live-host. | A planted break between steps 8 and 10 (events not reaching the Evidence skill) stops the loop at step 10; a live-run step satisfied only by synthetic data is recorded as NOT RUN, not PASS. | CR-71 |
+
+### §14 procedure (CR-T66)
+
+Both runs follow CR-71's fifteen steps in this order. A step passes only when it produces the record in the third column and the next step reads that record through the product's own API or store, not through a variable the script kept or a fixture standing in for it.
+
+| Step | Action | Record the next step reads | Rows exercised |
+|---|---|---|---|
+| 1 | Open or build v0 of the kiosk-practice HTML app. | Artifact version v0 with its file-set digest. | CR-42 |
+| 2 | v0 runs in the Experiment Browser. | An observation bound to v0: URL, snapshot, screenshot, viewport, document generation. | CR-04, CR-10 |
+| 3 | Select one rendered element and request an AI edit. | The element context payload the student approved, and the edited artifact version v0′ (new digest). | CR-09 |
+| 4 | Define three observable acceptance criteria. | Three `criterion_set` events with the student actor, on v0′. | CR-12 |
+| 5 | AI Verify runs the criteria. | An `hps-verification/1` report bound to v0′, with per-criterion verdicts and steps. | CR-13, CR-15, CR-81 |
+| 6 | Publish the verified version. | A test version keyed by v0′'s digest, its share URL and QR code, and an experiment pinned to it. | CR-17, CR-18, CR-22 |
+| 7 | A participant opens the link from a phone. | First render on the phone and a participant session start. | CR-18, CR-20 |
+| 8 | Studio records the anonymous session and events. | Participant events with session ID, pseudonym, project, experiment and version, `source_state` real. | CR-21, CR-23, CR-65 |
+| 9 | Add one manual observation. | An observer note with its provenance and `source_state`. | CR-24 |
+| 10 | The Evidence skill drafts Observation / Interpretation / Assumption. | A draft whose observed statements cite the step 8 events and the step 9 note. | CR-25, CR-46 |
+| 11 | Accept or edit the interpretation. | An interpretation revision, with raw record hashes unchanged. | CR-26 |
+| 12 | Venture Memory stores hypothesis, experiment, evidence and decision. | Hypothesis, Experiment, EvidenceItem and Decision records linked to each other. | CR-35, CR-38 |
+| 13 | Produce v1. | Product version v1, named by the decision's `resulting_version_id`. | CR-41 |
+| 14 | The Weekly Review shows v0 → test → evidence → decision → v1. | A cached pack whose claims link to the records of steps 5–13. | CR-48, CR-50 |
+| 15 | The Deck Builder proposes changes to the relevant slides only. | Slide patch proposals with evidence refs, for the affected slides only. | CR-56, CR-57 |
+
+Scripted run: `node e2e/classroom/cr-e2e.mjs` on the dev host (the name is a proposal; `cr-e2e` fixes it). Steps 7–8 use a second browser context in Playwright mobile emulation at 390 px, so their evidence class is synthetic. The script prints one line per step with the record ID it read.
+
+Live run, real-phone step (steps 6–8):
+
+- Device: any phone the tester holds, with no HypeProof app and no login. Record the phone model, OS version and browser version.
+- Network: the phone uses mobile data, not the Mac's Wi-Fi, so a link that only works on the local network cannot pass.
+- Opening: scan the QR code shown in Studio with the phone's camera app and open the link it offers. If scanning fails, record why and type the share URL instead; the QR half of CR-18 is then FAIL or NOT RUN, not PASS.
+- Timing: measure from the publish action in Studio to first render on the phone (CR-20) and from the publish action to the published version being ready (CR-64).
+- Task: the phone user completes the kiosk task once (choose a menu item, pick an option, reach the order screen). Nothing typed on the phone is expected to be kept unless the experiment declared it (CR-67).
+- Evidence file (`docs/testing/curriculum-runtime-<date>-evidence.md`): Studio commit and build, Mac model and macOS version, phone model / OS / browser, network, both timings, the participant session ID and pseudonym as Studio recorded them, phone screenshots of the first render and of the final screen, the result of each of the fifteen steps with its evidence class, and every step NOT RUN with its reason.
 
 ## Coverage
 
@@ -189,7 +232,7 @@ One line per requirement. It must equal the union of the Targets column above; t
 | CR-27 | CR-T27 |
 | CR-28 | CR-T28 |
 | CR-29 | CR-T29 |
-| CR-30 | CR-T30 |
+| CR-30 | CR-T30, CR-T31 |
 | CR-31 | CR-T31 |
 | CR-32 | CR-T32 |
 | CR-33 | CR-T33 |
@@ -231,6 +274,16 @@ One line per requirement. It must equal the union of the Targets column above; t
 | CR-69 | CR-T64 |
 | CR-70 | CR-T65 |
 | CR-71 | CR-T66 |
+| CR-72 | CR-T67 |
+| CR-73 | CR-T68 |
+| CR-74 | CR-T69 |
+| CR-75 | CR-T70 |
+| CR-76 | CR-T71 |
+| CR-77 | CR-T72 |
+| CR-78 | CR-T73 |
+| CR-79 | CR-T74 |
+| CR-80 | CR-T75 |
+| CR-81 | CR-T76 |
 
 ## Run status
 

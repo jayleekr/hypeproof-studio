@@ -3,6 +3,7 @@
 상태: 실행 계약 · 2026-09-13 · [#1007](https://github.com/jayleekr/hypeproof-studio/issues/1007).
 범위: 멤버 기능 카탈로그가 참조하는 11문서 289개 요구사항과 독립 강의 개설 #1006의 7개 계약.
 현재 `docs/requirements/*.md`에서 폐기된 선택형 웹 체험 1문서를 제외한 12문서 296개를 38개 실행 단위에 연결한다.
+Addendum 2026-09-29, outside the #1007 scope above: the [Curriculum Runtime](#curriculum-runtime) section adds 1 document, 81 requirements and 11 work units, so the tables below list 13 documents, 377 requirements and 49 units. Other documents registered in `config/requirement-work.json` since #1007 are not listed here; the ledger is the complete inventory.
 이 원장은 구현 완료·지원 OS 인수·운영 활성화·사람 학습 효과를 선언하지 않는다. 기존 `docs/studio-requirements.md`의 기초 계약과 제품 밖의 모든 가능성을 전수 완료했다는 뜻도 아니다.
 
 ## 왜 작업이 있는데 없다고 읽힐 수 있었나
@@ -44,7 +45,7 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 | [classroom-design.md](../../docs/requirements/classroom-design.md) | 12 | [classroom-design.md](../../docs/requirements/classroom-design.md) | [classroom-admin.md](../../docs/testing/classroom-admin.md) |
 | [capability-model-contract.md](../../docs/requirements/capability-model-contract.md) | 8 | [philosophy-alignment-2026-09-08.md](../../docs/design/philosophy-alignment-2026-09-08.md) | [capability-and-access.md](../../docs/testing/capability-and-access.md) |
 | [independent-course.md](../../docs/requirements/independent-course.md) | 7 | [independent-course.md](../../docs/requirements/independent-course.md) | [independent-course.md](../../docs/requirements/independent-course.md) |
-| [curriculum-runtime.md](../../docs/requirements/curriculum-runtime.md) | 71 | [curriculum-runtime.md](../../docs/plan/curriculum-runtime.md) | [curriculum-runtime.md](../../docs/testing/curriculum-runtime.md) |
+| [curriculum-runtime.md](../../docs/requirements/curriculum-runtime.md) | 81 | [curriculum-runtime.md](../../docs/plan/curriculum-runtime.md) | [curriculum-runtime.md](../../docs/testing/curriculum-runtime.md) |
 
 ## 기능별 실행 단위
 
@@ -562,7 +563,7 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 
 ## Curriculum Runtime
 
-Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388): 1 document, 71 requirements, 11 work items. Intent: [INT-CR-00–09](../intents/curriculum-runtime.md). Order, DAG and the provisional gap matrix: [curriculum-runtime plan](curriculum-runtime.md). The entries below are written in English (repository language rule); the ledger is their source.
+Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388): 1 document, 81 requirements, 11 work items. Intent: [INT-CR-00–09](../intents/curriculum-runtime.md). Order, DAG and the provisional gap matrix: [curriculum-runtime plan](curriculum-runtime.md). The entries below are written in English (repository language rule); the ledger is their source.
 
 <a id="cr-recon"></a>
 
@@ -571,9 +572,9 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 - Issue: [#1390](https://github.com/jayleekr/hypeproof-studio/issues/1390) · design
 - Requirements: curriculum-runtime: CR-01
 - Depends on: —
-- Next action: Read the ten PRD §13 Phase 0 areas on origin/main and write the architecture map (exact paths, symbols, extension points, data flows) and the per-row gap matrix into docs/plan/curriculum-runtime.md, replacing the provisional matrix. Decide whether the upstream browserView tools can be driven from hypeproof-chat through vscodium-base/patches and where the adapter boundary sits, how the CR switch (CR-02) is resolved, and which skill loader CR-43 uses.
+- Next action: Read the ten PRD §13 Phase 0 areas (docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md) on origin/main and write the architecture map (exact paths, symbols, extension points, data flows) and the per-row gap matrix into docs/plan/curriculum-runtime.md, replacing the provisional matrix. Decide whether the upstream browserView tools can be driven from hypeproof-chat through vscodium-base/patches and where the adapter boundary sits, how the CR switch (CR-02) is resolved, and which skill loader CR-43 uses.
 - Design change: No production code. Every claim names a path or symbol that exists at the recorded commit; unknowns stay unknown. Before calling a gap new, check the owners of the reused requirements (review-validity #557, publish-recovery #1018, sx-p1-evidence-capture #1172, measurement-core-dogfood #1020, model-routing #1009) and their open PRs.
-- Positive control: Every map entry resolves to a path and symbol at the recorded commit; the matrix has one verdict (reuse / extend / new) for each of CR-01–71.
+- Positive control: Every map entry resolves to a path and symbol at the recorded commit; the matrix has one verdict (reuse / extend / new) for each CR row.
 - Negative control: A map entry with a non-existent path or symbol, a missing PRD area, or a CR row missing from the matrix fails CR-T01. A gap called new while an open PR already implements it is recorded as a finding.
 - Implementation paths to check: `docs/plan/curriculum-runtime.md`, `extensions/hypeproof-chat/src/browserControl.ts`, `extensions/hypeproof-chat/src/browserMcp.ts`, `extensions/hypeproof-chat/src/nativeBrowser.ts`, `extensions/hypeproof-chat/src/sdkCoachHelpers.ts`, `worker/src/routes`, `worker/src/lib/measurement-core`
 
@@ -595,12 +596,12 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 ### AI Verify: test my product against observable criteria
 
 - Issue: [#1392](https://github.com/jayleekr/hypeproof-studio/issues/1392) · implementation
-- Requirements: curriculum-runtime: CR-03, CR-12, CR-13, CR-14, CR-15, CR-16, CR-61
+- Requirements: curriculum-runtime: CR-03, CR-12, CR-13, CR-14, CR-15, CR-16, CR-61, CR-81
 - Depends on: cr-browser
-- Next action: Add the 'Test my product' action that takes 1–5 criteria, runs them with the CR-06 actions (DOM and accessibility first), and writes an hps-verification/1 report through criterion_set / test_observed bound to the artifact version; hand failed criteria to the coach as a fix request and re-test by criterion ID.
+- Next action: Add the 'Test my product' action that takes 1–5 criteria, runs them with the CR-06 actions (DOM and accessibility first), and writes an hps-verification/1 report through criterion_set / test_observed bound to the artifact version; hand failed criteria to the coach as a fix request and re-test by criterion ID; show 'verified' only for a version with an all-pass report.
 - Design change: The report is a view over existing learning events plus artifact references (SX-48); no new store. AI-proposed criteria stay AI-actor drafts until the student confirms (SX-14, HC-04). Stale-pass handling reuses AE-37 (#557).
 - Positive control: Three student criteria on the kiosk fixture give the same verdicts on two runs of the same version; a failed criterion re-tested after a fix yields retest_confirmed.
-- Negative control: Zero or six criteria are refused; an unconfirmed AI criterion does not run; a verdict without a cited observation is 'not verified'; an earlier pass shown as current after a file change fails.
+- Negative control: Zero or six criteria are refused; an unconfirmed AI criterion does not run; a verdict without a cited observation is 'not verified'; an earlier pass shown as current after a file change fails. 'Verified' shown for a version without an all-pass report bound to it fails.
 - Implementation paths to check: `extensions/hypeproof-chat/src/browserControl.ts`, `extensions/hypeproof-chat/src/browserMcp.ts`, `extensions/hypeproof-chat/src/nativeObservationRecorder.ts`, `extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx`, `worker/src/lib/measurement-core/learning-events.ts`
 
 <a id="cr-publish"></a>
@@ -608,12 +609,12 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 ### Publish for user test: immutable versions, links and QR
 
 - Issue: [#1393](https://github.com/jayleekr/hypeproof-studio/issues/1393) · implementation
-- Requirements: curriculum-runtime: CR-17, CR-18, CR-19, CR-20, CR-21, CR-22, CR-64, CR-65, CR-66
+- Requirements: curriculum-runtime: CR-17, CR-18, CR-19, CR-20, CR-21, CR-22, CR-64, CR-65, CR-66, CR-73
 - Depends on: cr-verify
-- Next action: Read galleryPublish.ts, the Lab /api/gallery/publish route and publish-recovery #1018, then generalise that path to publish a chosen verified version as a content-addressed test version with share URL, client-side QR, revocation, required expiry, anonymous participant sessions and project / experiment / version attribution.
+- Next action: Read galleryPublish.ts, the Lab /api/gallery/publish route and publish-recovery #1018, then generalise that path to publish a chosen verified version as a content-addressed test version with share URL, client-side QR, revocation, required expiry, anonymous participant sessions, project / experiment / version attribution and channel-labelled links.
 - Design change: One publish path, not a second one beside gallery publish; WEB-07/08 stay with #1018. Test versions are immutable and keyed by digest; experiments pin a version. Until Jay sets a default expiry, publishing requires an explicit one. The published runtime denies microphone and camera unless the experiment declares them. Lab-side changes go in a separate Lab PR linked from #1393.
-- Positive control: Same bytes publish to the same version ID; a phone (emulated, and one real) opens the link at 390 px without login; publishing v1 leaves the running v0 experiment on v0.
-- Negative control: Changing files behind a published version is refused; a revoked or expired link answers 410 with no content; an event whose version is not the experiment's is refused; an undeclared page calling getUserMedia is denied.
+- Positive control: Same bytes publish to the same version ID; a phone (emulated, and one real) opens the link at 390 px without login; publishing v1 leaves the running v0 experiment on v0. Two channel-labelled links of one experiment attribute sessions to their own channel.
+- Negative control: Changing files behind a published version is refused; a revoked or expired link answers 410 with no content; an event whose version is not the experiment's is refused; an undeclared page calling getUserMedia is denied. An event through another experiment's link is refused.
 - Implementation paths to check: `extensions/hypeproof-chat/src/galleryPublish.ts`, `worker/src/routes`, `worker/migrations`, `e2e/tests`
 
 <a id="cr-evidence"></a>
@@ -621,12 +622,12 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 ### Evidence capture: participant events, notes and sourced drafts
 
 - Issue: [#1394](https://github.com/jayleekr/hypeproof-studio/issues/1394) · implementation
-- Requirements: curriculum-runtime: CR-23, CR-24, CR-25, CR-26, CR-27, CR-28, CR-65, CR-67, CR-69, CR-70
+- Requirements: curriculum-runtime: CR-23, CR-24, CR-25, CR-26, CR-27, CR-28, CR-65, CR-67, CR-69, CR-70, CR-72, CR-74
 - Depends on: cr-publish
-- Next action: Add a lightweight event snippet to published test versions for the six participant event kinds and store them as learning events on the existing measurement-core path with source_state real and the anonymous session ID; add the five manual record kinds with provenance; build Observed / Interpreted / Assumed / Next drafts whose observed statements must resolve their source_refs.
+- Next action: Add a lightweight event snippet to published test versions for the six participant event kinds and store them as learning events on the existing measurement-core path with source_state real and the anonymous session ID; add the five manual record kinds with provenance; build Observed / Interpreted / Assumed / Next drafts whose observed statements must resolve their source_refs; derive returning-session evidence for experiments that declare it and per-variant results for comparison experiments.
 - Design change: SX-48: extend hps-observation/1 and learning-events; no new table, KV namespace, validator copy or scorer. Raw records are immutable; interpretation edits are revisions (MC-22). Raw participant input is not retained unless the experiment declares it, and its retention default waits for Jay. Deletion propagates to derived drafts following MC-31 and classroom-erasure.ts.
-- Positive control: One scripted participant session yields the six kinds; three real citations validate; editing an interpretation leaves raw hashes unchanged; clicking a claim opens its sources.
-- Negative control: Three planted fabricated statements are refused; events for a revoked version and events with identity fields are refused; typed text for an undeclared experiment is not stored; a store-inventory check finds no new evidence table.
+- Positive control: One scripted participant session yields the six kinds; three real citations validate; editing an interpretation leaves raw hashes unchanged; clicking a claim opens its sources. A declared repeated-use experiment reports one pseudonym's return count citing its sessions; a two-variant comparison reports per variant.
+- Negative control: Three planted fabricated statements are refused; events for a revoked version and events with identity fields are refused; typed text for an undeclared experiment is not stored; a store-inventory check finds no new evidence table. An undeclared experiment shows returns as 'not measured', not 0; an event without a variant in a comparison experiment is refused.
 - Implementation paths to check: `worker/src/lib/measurement-core`, `worker/src/lib/classroom-erasure.ts`, `extensions/hypeproof-chat/src/nativeObservationRecorder.ts`, `extensions/hypeproof-chat/src/sessionSpool.ts`, `extensions/hypeproof-chat/src/evidenceSnapshot.ts`, `extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx`
 
 <a id="cr-memory"></a>
@@ -634,12 +635,12 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 ### Venture Memory: structured learning state
 
 - Issue: [#1395](https://github.com/jayleekr/hypeproof-studio/issues/1395) · implementation
-- Requirements: curriculum-runtime: CR-35, CR-36, CR-37, CR-38, CR-39, CR-40, CR-41, CR-42
+- Requirements: curriculum-runtime: CR-35, CR-36, CR-37, CR-38, CR-39, CR-40, CR-41, CR-42, CR-75, CR-76, CR-77, CR-78, CR-79
 - Depends on: cr-evidence
-- Next action: Implement the PRD §10 Experiment, Evidence item, Decision and Artifact contracts and the project entity set as a worker schema extension that links hypotheses, experiments, evidence (by reference), decisions, product versions and deck slides, with a director traversal API limited to the director's scope.
+- Next action: Implement the PRD §10 Experiment, Evidence item, Decision and Artifact contracts and the project entity set as a worker schema extension that links hypotheses, experiments, evidence (by reference), decisions, product versions and deck slides, with stakeholder roles, metric definitions, a product version diff, a project timeline, hypothesis revisions for the "belief changed because…" view, and a director traversal API limited to the director's scope.
 - Design change: Observations and evidence items are references into the measurement-core store, never copies (SX-48). Extend hps-session-design/1 conventions without changing its schema ID unless Jay approves a breaking change. Director scope reuses the issuer identity (SX-38); no new role.
-- Positive control: The four PRD §10 samples validate; a project reopened with chat history deleted shows the same state; a director walks hypothesis → evidence → decision → version.
-- Negative control: Each sample missing a required field is refused; an observed evidence item with empty source_refs, slide number 9 and an artifact without entry_html are refused; a director outside scope is refused; a duplicated evidence table fails the store inventory.
+- Positive control: The four PRD §10 samples validate; a project reopened with chat history deleted shows the same state; a director walks hypothesis → evidence → decision → version. A v0 → v1 diff names the decision and evidence behind v1; every timeline entry opens its record.
+- Negative control: Each sample missing a required field is refused; an observed evidence item with empty source_refs, slide number 9 and an artifact without entry_html are refused; a director outside scope is refused; a duplicated evidence table fails the store inventory. A stakeholder with no role is refused; a simulated metric input counted as a real result fails; a belief change with no linked decision shows 'reason not recorded'.
 - Implementation paths to check: `worker/src/lib/session-design.ts`, `worker/src/lib/measurement-core`, `worker/migrations`, `worker/src/routes`, `extensions/hypeproof-chat/src/localReviewService.ts`, `extensions/hypeproof-chat/src/localRecordFile.ts`
 
 <a id="cr-skills"></a>
@@ -650,7 +651,7 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 - Requirements: curriculum-runtime: CR-43, CR-44, CR-45, CR-46, CR-47
 - Depends on: cr-memory
 - Next action: With the loader cr-recon chose, read versioned skill contracts and curriculum v5 data, validate outputs before write-back, and ship Experiment, Evidence, Product Builder and Deck Builder first, then Interview, Critic and Demo Coach.
-- Design change: No parallel plugin framework. Skill loading must not let workspace settings add tool allow-rules (the SDK coach keeps settingSources: [] or an equivalent restriction). Curriculum content is data, never code (SX-56). Skill outputs and gateway calls carry skill ID and version.
+- Design change: No parallel plugin framework. Skill loading must not let workspace settings add tool allow-rules (the SDK coach keeps settingSources: [] or an equivalent restriction). Curriculum content is data, never code (SX-56). Skill outputs and the model requests a skill issues carry skill ID and version and name a capability, not a model ID. Until cr-gateway lands (it depends on this item), skills call models through the existing coach route, where the capability is recorded but resolved by the existing lesson model policy.
 - Positive control: A complete skill contract loads; valid Evidence output writes only its declared targets; planted-answer fixtures give the expected outputs.
 - Negative control: A skill missing a contract field is not loaded; invalid output writes nothing; a workspace allow-rule has no effect; planted leading questions, weak claims, out-of-scope file changes and unaffected-slide edits are caught.
 - Implementation paths to check: `extensions/hypeproof-chat/src/sdkCoachHelpers.ts`, `worker/src/lib/lesson-help-mode.ts`, `worker/src/prompts`, `worker/src/lib/session-design.ts`
@@ -660,12 +661,12 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 ### AI Gateway for student apps: capabilities, ceiling and attribution
 
 - Issue: [#1397](https://github.com/jayleekr/hypeproof-studio/issues/1397) · implementation
-- Requirements: curriculum-runtime: CR-29, CR-30, CR-31, CR-32, CR-33, CR-34, CR-70
-- Depends on: cr-memory
-- Next action: Add a student-app endpoint on the worker with app-scoped tokens and origin-bound CORS, a capability → model policy table, a normalised adapter interface with a mock adapter, a hard credit ceiling on the existing budget admission, and attribution by organisation, cohort, team, student, project, skill, capability and provider/model.
+- Requirements: curriculum-runtime: CR-29, CR-30, CR-31, CR-32, CR-33, CR-34, CR-70, CR-80
+- Depends on: cr-skills
+- Next action: Add a student-app endpoint on the worker with app-scoped tokens and origin-bound CORS, a capability → model policy table, a normalised adapter interface with a mock adapter, a hard credit ceiling on the existing budget admission, per-app-token and per-participant-session rate limits, and attribution by organisation, cohort, team, student, project, skill, capability and provider/model.
 - Design change: Adapt the existing /v1/chat/completions and /v1/messages stack, budgets and ledgers instead of a new gateway. MU-02 stays: same-provider retry of the mapped model only before output, every attempt metered; no automatic substitution to another provider or an unmapped model; failures are typed errors. The model-practice route keeps MU-02's single upstream call. Admin ceilings reuse AB-04 authorisation.
-- Positive control: The kiosk app calls text.fast from its published origin without a key; the same request passes through a recorded real adapter and the mock with one shape; requests up to the ceiling succeed with full attribution.
-- Negative control: A planted key pattern in a bundle is found; a token from another origin is refused; a model ID in a request is refused; after a mapped-provider failure a spy sees zero calls to another provider; the request past the ceiling gets 429 with no upstream call; 20 concurrent requests do not overshoot.
+- Positive control: The kiosk app calls text.fast from its published origin without a key; the same request passes through a recorded real adapter and the mock with one shape; requests up to the ceiling succeed with full attribution. Requests under the rate limit from two participant sessions succeed.
+- Negative control: A planted key pattern in a bundle is found; a token from another origin is refused; a model ID in a request is refused; after a mapped-provider failure a spy sees zero calls to another provider; the request past the ceiling gets 429 with no upstream call; a burst from one participant session gets 429 rate_limited without draining the team ceiling; 20 concurrent requests do not overshoot.
 - Implementation paths to check: `worker/src/routes/chat.ts`, `worker/src/routes/messages.ts`, `worker/src/routes/access.ts`, `worker/src/env.ts`, `worker/src/lib/budgets.ts`, `worker/src/lib/budget-admission.ts`, `worker/src/lib/usage-costs.ts`, `worker/src/lib/model-usage.ts`, `worker/src/lib/access-contracts.ts`, `worker/src/lib/lesson-model-policy.ts`, `worker/src/lib/model-caps.ts`
 
 <a id="cr-review"></a>
@@ -700,8 +701,8 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 
 - Issue: [#1400](https://github.com/jayleekr/hypeproof-studio/issues/1400) · validation
 - Requirements: curriculum-runtime: CR-02, CR-71
-- Depends on: cr-deck
-- Next action: Script the fifteen PRD §14 steps on the kiosk-practice app under e2e/classroom, run it on the dev host, then run it once live on a real Mac with a real phone and record the evidence file.
+- Depends on: cr-deck, cr-gateway
+- Next action: Script the fifteen PRD §14 steps (the §14 procedure in docs/testing/curriculum-runtime.md) on the kiosk-practice app under e2e/classroom, run it on the dev host, then run it once live on a real Mac with a real phone and record the evidence file.
 - Design change: Uses only shipped CR behaviour behind the switch; no test-only shortcuts in product code. Each step reads the previous step's record. The existing preview and HTML regressions are re-run with the switch off.
 - Positive control: All fifteen steps pass on the dev host; the live run completes with a real phone; the switch-off regressions stay green.
 - Negative control: A planted break between steps 8 and 10 stops the loop at step 10; a live-run step satisfied only by synthetic data is NOT RUN, not PASS.

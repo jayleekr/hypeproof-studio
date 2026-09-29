@@ -1,7 +1,7 @@
 # Curriculum Runtime — delivery plan
 
 Status: active plan, no work item started. 2026-09-29. Owner: jayleekr. Epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
-Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–71](../requirements/curriculum-runtime.md) · verification: [CR-T01–T66](../testing/curriculum-runtime.md) · ledger: [`config/requirement-work.json`](../../config/requirement-work.json) (work items `cr-*`) · execution index: [requirements-activation](requirements-activation.md#curriculum-runtime).
+Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–81](../requirements/curriculum-runtime.md) · verification: [CR-T01–T76](../testing/curriculum-runtime.md) · source: [PRD v1.0, preserved](../design/curriculum-runtime-prd-v1.0-2026-09-28.md) · ledger: [`config/requirement-work.json`](../../config/requirement-work.json) (work items `cr-*`) · execution index: [requirements-activation](requirements-activation.md#curriculum-runtime).
 
 This document owns the order of the Curriculum Runtime work and what "done" means for each step. The ledger's `depends_on` is the machine-readable copy of the DAG below; if they disagree, the ledger wins and this page is fixed. Work availability (ready / claimed / in review / dependency) comes from `python3 scripts/next-work.py`, never from this page.
 
@@ -13,17 +13,17 @@ PRD §13 phases, in PRD §16 priority order, one work item and one execution iss
 |---|---|---|---|---|---|---|
 | Phase 0 — reconnaissance | `cr-recon` | [#1390](https://github.com/jayleekr/hypeproof-studio/issues/1390) | design | CR-01 | — | W1 |
 | Phase 1 — Experiment Browser | `cr-browser` | [#1391](https://github.com/jayleekr/hypeproof-studio/issues/1391) | implementation | CR-02–11, CR-59, CR-60, CR-68 | `cr-recon` | W1 |
-| Phase 1 — AI Verify | `cr-verify` | [#1392](https://github.com/jayleekr/hypeproof-studio/issues/1392) | implementation | CR-03, CR-12–16, CR-61 | `cr-browser` | W2 |
-| Phase 2 — Publish | `cr-publish` | [#1393](https://github.com/jayleekr/hypeproof-studio/issues/1393) | implementation | CR-17–22, CR-64–66 | `cr-verify` | W1 |
-| Phase 2 — Evidence | `cr-evidence` | [#1394](https://github.com/jayleekr/hypeproof-studio/issues/1394) | implementation | CR-23–28, CR-65, CR-67, CR-69, CR-70 | `cr-publish` | W1 |
-| Phase 3 — Venture Memory | `cr-memory` | [#1395](https://github.com/jayleekr/hypeproof-studio/issues/1395) | implementation | CR-35–42 | `cr-evidence` | W1 |
+| Phase 1 — AI Verify | `cr-verify` | [#1392](https://github.com/jayleekr/hypeproof-studio/issues/1392) | implementation | CR-03, CR-12–16, CR-61, CR-81 | `cr-browser` | W1 |
+| Phase 2 — Publish | `cr-publish` | [#1393](https://github.com/jayleekr/hypeproof-studio/issues/1393) | implementation | CR-17–22, CR-64–66, CR-73 | `cr-verify` | W1 |
+| Phase 2 — Evidence | `cr-evidence` | [#1394](https://github.com/jayleekr/hypeproof-studio/issues/1394) | implementation | CR-23–28, CR-65, CR-67, CR-69, CR-70, CR-72, CR-74 | `cr-publish` | W1 |
+| Phase 3 — Venture Memory | `cr-memory` | [#1395](https://github.com/jayleekr/hypeproof-studio/issues/1395) | implementation | CR-35–42, CR-75–79 | `cr-evidence` | W1 |
 | Phase 3 — Curriculum Skills | `cr-skills` | [#1396](https://github.com/jayleekr/hypeproof-studio/issues/1396) | implementation | CR-43–47 | `cr-memory` | W1 |
-| Phase 4 — AI Gateway | `cr-gateway` | [#1397](https://github.com/jayleekr/hypeproof-studio/issues/1397) | implementation | CR-29–34, CR-70 | `cr-memory` | W2 |
+| Phase 4 — AI Gateway | `cr-gateway` | [#1397](https://github.com/jayleekr/hypeproof-studio/issues/1397) | implementation | CR-29–34, CR-70, CR-80 | `cr-skills` | W1 |
 | Phase 5 — Weekly Review + Director | `cr-review` | [#1398](https://github.com/jayleekr/hypeproof-studio/issues/1398) | implementation | CR-48–53, CR-62 | `cr-skills` | W2 |
 | Phase 6 — Deck lifecycle | `cr-deck` | [#1399](https://github.com/jayleekr/hypeproof-studio/issues/1399) | implementation | CR-54–58, CR-63 | `cr-review` | W2 |
-| §14 — end-to-end loop | `cr-e2e` | [#1400](https://github.com/jayleekr/hypeproof-studio/issues/1400) | validation | CR-71, CR-02 | `cr-deck` | W1 |
+| §14 — end-to-end loop | `cr-e2e` | [#1400](https://github.com/jayleekr/hypeproof-studio/issues/1400) | validation | CR-71, CR-02 | `cr-deck`, `cr-gateway` | W1 |
 
-Rows shared by two items (CR-02, CR-03, CR-65, CR-70) are established by the first item and re-checked by the second; the second does not re-implement them. §11 targets and §12 rows sit in the item whose code they constrain; there is no separate performance or safety slice.
+Rows shared by two items (CR-02, CR-03, CR-65, CR-70) are established by the first item and re-checked by the second; the second does not re-implement them. §11 targets and §12 rows sit in the item whose code they constrain; there is no separate performance or safety slice. "Earliest week" is computed from the ledger by the ranking rule below, shared rows included.
 
 ## Dependency DAG
 
@@ -31,16 +31,17 @@ Rows shared by two items (CR-02, CR-03, CR-65, CR-70) are established by the fir
 graph LR
   recon[cr-recon] --> browser[cr-browser] --> verify[cr-verify] --> publish[cr-publish] --> evidence[cr-evidence] --> memory[cr-memory]
   memory --> skills[cr-skills] --> review[cr-review] --> deck[cr-deck] --> e2e[cr-e2e]
-  memory --> gateway[cr-gateway]
+  skills --> gateway[cr-gateway] --> e2e
 ```
 
 - The spine follows PRD §16: Experiment Browser → Publish / User Test → Evidence → Venture Memory → Curriculum Skills → Weekly Review + Deck → AI Gateway optimisation.
-- `cr-gateway` starts once `cr-memory` is complete and runs in parallel with `cr-skills`, `cr-review` and `cr-deck`. Its attribution dimensions (project, skill) need memory entities; nothing on the spine needs the gateway.
-- `cr-e2e` depends on `cr-deck` only. PRD §14 makes the Week 1 → Week 2 loop the first milestone, "not completion of every P0 feature"; the loop does not call the student-app gateway.
+- `cr-gateway` starts once `cr-skills` is complete and runs in parallel with `cr-review` and `cr-deck`. Its attribution dimensions need memory entities (project) and a real skill-issued call (skill, CR-T34), so it follows `cr-skills` rather than `cr-memory`.
+- Model path before `cr-gateway` lands: skills (`cr-skills`) and the Weekly Review (`cr-review`) call models through the existing coach route (worker `/v1/messages` and `/v1/chat/completions` under the lesson model policy). Each request names a capability and carries the skill ID and version (CR-45); the capability is recorded there but resolved by the existing policy. `cr-gateway` then routes capabilities through the policy table (CR-30) and writes the eight attribution dimensions onto the usage ledgers (CR-34). The zero-model-call check of an opened Weekly Review pack (CR-T47) spies on whichever of those paths exist when it runs.
+- `cr-e2e` depends on `cr-deck` and `cr-gateway`. The §14 loop itself does not call the student-app gateway, and PRD §14 calls the loop the first milestone rather than "completion of every P0 feature"; the loop still runs last because this delivery's scope is every P0 item (epic #1388), and its switch-off regression check (CR-02) should see every CR surface.
 
 ## Ranking rule for the next slice
 
-When more than one item is ready, order by: (1) dependency order; (2) priority (all CR rows are P0); (3) the earliest curriculum week among the item's requirements (the Weeks column of the requirements). The Harness `hype-align` skill applies this rule; this page only states it.
+When more than one item is ready, order by: (1) dependency order; (2) priority (all CR rows are P0); (3) the earliest curriculum week among all of the item's requirements, shared rows included (the Weeks column of the requirements). The Harness `hype-align` skill applies this rule; this page only states it. Because the shared CR-70 is tagged W1, `cr-gateway` ranks ahead of `cr-review` when both become ready after `cr-skills`; the two run in parallel, so the rank only decides which starts first.
 
 ## Gap matrix — provisional, to be confirmed by `cr-recon`
 
@@ -50,7 +51,7 @@ Built from the 2026-09-29 reading of Studio `origin/main` (b95093fc). It is a le
 |---|---|---|---|
 | P0-1 Experiment Browser | Partial, strong base | `extensions/hypeproof-chat/src/browserControl.ts` (`BrowserControl.execute`: navigate, read with `[ref=eN]` snapshot, screenshot, click, type, back, forward, dialog; `loadInPinnedTab`), `cdpSession.ts`, `browserControlHelpers.ts` (`buildAxSnapshot`), `browserMcp.ts` (`mcp__hypeproof__browser_{open,screenshot,read,click,type}`, `live_preview_start`), `nativeBrowser.ts` (`capturePageContext`), `liveServer.ts`, `previewProvider.ts`, ADR 0002; upstream `vscodium-base/vscode/src/vs/workbench/contrib/browserView/electron-browser/{features,tools}` via patches only | Console, runtime and network capture (no `Runtime.consoleAPICalled` / `exceptionThrown` / `Network.loadingFailed` handling exists); select, scroll, hover, reload; element → coach context; binding results to an artifact version; origin scope for the runner |
 | P0-2 AI Verify | None | `criterion_set` / `test_observed` / `retest_confirmed` in `worker/src/lib/measurement-core/learning-events.ts`; AE-05/18/37 review validity (#557); `webview-ui/src/EvidenceDrawer.tsx` | "Test my product" action; criteria runner; `hps-verification/1` report |
-| P0-3 Publish | Minimal | `galleryPublish.ts` → Lab `POST /api/gallery/publish` (Supabase storage); WEB-07/08/09; work item `publish-recovery` (#1018) | Immutable content-addressed test versions, QR, expiry and revocation, anonymous participant sessions, experiment attribution |
+| P0-3 Publish | Minimal | `galleryPublish.ts` → Lab `POST /api/gallery/publish` (Supabase storage); WEB-07/08; work item `publish-recovery` (#1018) | Immutable content-addressed test versions, QR, expiry and revocation, anonymous participant sessions, experiment attribution |
 | P0-4 Evidence | Partial | `learning-events.ts` (eight kinds, `evidence_refs`, `source_state`), `measurement-core/{evidence,interpretation,legacy-observation}.ts` (`hps-observation/1`, `teacher_state`), `nativeObservationRecorder.ts`, `sessionSpool.ts`, `evidenceSnapshot.ts`; SX-17–24, SX-44–48, MC-* | Participant events from published pages, five manual record kinds, Observed / Interpreted / Assumed drafts with `source_refs`. SX-48: extend, never fork |
 | P0-5 AI Gateway | Strong for the coach | `worker/src/routes/chat.ts` (`/v1/chat/completions`), `routes/messages.ts` (`/v1/messages`), `env.ts` (`LLMProvider`: gemini, anthropic, openai, glm), `lib/{budgets,budget-admission,usage-costs,model-usage,access-contracts,lesson-model-policy,model-caps}.ts`, `routes/access.ts` | CORS endpoint and app tokens for student apps, capability vocabulary and policy mapping, hard credit ceiling for app calls, curriculum attribution dimensions, mock adapter |
 | P0-6 Venture Memory | Minimal | Learning-event log, `worker/src/lib/session-design.ts` (`hps-session-design/1`), `localReviewService.ts`, `localRecordFile.ts` | Project / Hypothesis / Experiment / ProductVersion / Decision / Metric / DeckSlide entities and traversal |
@@ -69,10 +70,10 @@ CR rows reference these requirements instead of restating them. Their work items
 | AE-23 | `computer-use` [#752](https://github.com/jayleekr/hypeproof-studio/issues/752) | `cr-browser` |
 | WEB-04 | `acceptance-chalk-authoring` [#732](https://github.com/jayleekr/hypeproof-studio/issues/732) | `cr-browser`, `cr-publish` |
 | WEB-07, WEB-08 | `publish-recovery` [#1018](https://github.com/jayleekr/hypeproof-studio/issues/1018) | `cr-publish` |
-| SX-14, SX-15, SX-17, SX-19–22, SX-24, SX-44–48 | `sx-p1-evidence-capture` [#1172](https://github.com/jayleekr/hypeproof-studio/issues/1172) | `cr-verify`, `cr-evidence`, `cr-memory`, `cr-review`, `cr-deck` |
-| SX-32 | `sx-p3-change-record` [#1174](https://github.com/jayleekr/hypeproof-studio/issues/1174) | `cr-evidence` |
+| SX-14, SX-15, SX-16, SX-17, SX-19–22, SX-24, SX-44–48 | `sx-p1-evidence-capture` [#1172](https://github.com/jayleekr/hypeproof-studio/issues/1172) | `cr-browser`, `cr-verify`, `cr-publish`, `cr-evidence`, `cr-memory`, `cr-review`, `cr-deck` |
+| SX-32, SX-33 | `sx-p3-change-record` [#1174](https://github.com/jayleekr/hypeproof-studio/issues/1174) | `cr-evidence` |
 | SX-38 | `sx-p4-instructor-evidence` [#1175](https://github.com/jayleekr/hypeproof-studio/issues/1175) | `cr-memory`, `cr-review` |
-| SX-56, SX-58 | `sx-p0-curriculum-first` [#1171](https://github.com/jayleekr/hypeproof-studio/issues/1171) | `cr-skills`, `cr-deck` |
+| SX-56, SX-58 | `sx-p0-curriculum-first` [#1171](https://github.com/jayleekr/hypeproof-studio/issues/1171) | `cr-publish`, `cr-skills`, `cr-deck` |
 | HC-04 | `candidate-contract` [#852](https://github.com/jayleekr/hypeproof-studio/issues/852) | `cr-verify` |
 | MC-09, MC-14, MC-15, MC-22, MC-31 | `measurement-core-dogfood` [#1020](https://github.com/jayleekr/hypeproof-studio/issues/1020) | `cr-browser`, `cr-verify`, `cr-evidence`, `cr-memory` |
 | AE-25, AE-28, AE-30, AE-33 | `model-routing` [#1009](https://github.com/jayleekr/hypeproof-studio/issues/1009) | `cr-gateway` |
@@ -90,6 +91,7 @@ These block a default value, not the design. Ask Jay when the slice reaches them
 
 - Default expiry of a published test link (CR-19). Until decided, publishing requires an explicit expiry.
 - Default retention period for declared raw participant input (CR-67).
+- Whether returning-session linkage (the participant pseudonym of CR-65, used by CR-72) may be on by default for minor cohorts, and how long a pseudonym lives. Until decided, linkage needs the experiment's declaration and a pseudonym ends with the experiment's link.
 - Consent path for minor cohorts and external participants who are minors (Lab MISSION child-safety decision).
 - Any breaking change to a stored schema (`hps-observation/1`, `hps-session-design/1`, usage ledgers).
 

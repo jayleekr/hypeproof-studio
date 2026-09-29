@@ -13,10 +13,11 @@ Venture Memory keeps hypotheses, experiments, decisions and versions; curriculum
 skills, a cached Weekly Review Pack and an evidence-aware HTML deck close the loop.
 Student apps call AI through capability names without provider keys; MU-02 stays,
 so there is no automatic cross-provider substitution. Source: HypeProof Studio
-Curriculum Runtime PRD v1.0 (2026-09-28).
+Curriculum Runtime PRD v1.0 (2026-09-28), preserved at
+[design/curriculum-runtime-prd-v1.0-2026-09-28.md](design/curriculum-runtime-prd-v1.0-2026-09-28.md).
 [Intent INT-CR-00–09](intents/curriculum-runtime.md),
-[CR-01–71 requirements](requirements/curriculum-runtime.md),
-[CR-T01–T66 validation](testing/curriculum-runtime.md),
+[CR-01–81 requirements](requirements/curriculum-runtime.md),
+[CR-T01–T76 validation](testing/curriculum-runtime.md),
 [plan, DAG and gap matrix](plan/curriculum-runtime.md),
 [epic #1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
 Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.

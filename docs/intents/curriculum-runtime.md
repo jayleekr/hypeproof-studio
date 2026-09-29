@@ -1,7 +1,7 @@
 # Curriculum Runtime — Product Intent
 
 Status: proposed contract, not implemented and not used in a class. 2026-09-29.
-Owner: jayleekr. Source: *HypeProof Studio Curriculum Runtime — Product & Engineering Requirements, AI for Good v5*, v1.0, 2026-09-28 (the PRD; §-numbers below refer to it).
+Owner: jayleekr. Source: *HypeProof Studio Curriculum Runtime — Product & Engineering Requirements, AI for Good v5*, v1.0, 2026-09-28 (the PRD; §-numbers below refer to it), preserved verbatim at [docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md](../design/curriculum-runtime-prd-v1.0-2026-09-28.md) and not edited by the documents derived from it.
 Epic: [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
 Parent: [Product Intent](../PRODUCT-INTENT.md) (Useful work first, Human judgment stays visible, Evidence over claims, Capability models are hypotheses). Sibling intents are referenced, not copied: [INT-SX-00–10](studio-learning-experience.md) owns what the student screen shows during work; [INT-MC-01–03](measurement-core.md) owns observation, evidence and interpretation. Lab [PHILOSOPHY.md](https://github.com/jayleekr/hypeprooflab/blob/main/PHILOSOPHY.md) and [MISSION.md](https://github.com/jayleekr/hypeprooflab/blob/main/MISSION.md) keep ownership of the learning philosophy and child-safety decisions.
 
@@ -52,11 +52,11 @@ MU-02 also says "one upstream call per user request" on the model-practice route
 
 ### D3. Registry placement (Jay, 2026-09-29)
 
-The PRD enters the Studio ledger as a new requirement document with prefix `CR-` and intents `INT-CR-*`. Where an existing ID already governs a behaviour — review validity (AE-05/18/37), publish (WEB-06–09), evidence and the single store (SX-17–24, SX-44–48, MC-*), model use and budgets (MU-*, AB-*, HC-*, AE-25–33) — the CR row references it and states only the curriculum-specific delta. In particular **SX-48 binds every CR evidence and memory row: no second store, no second scorer.**
+The PRD enters the Studio ledger as a new requirement document with prefix `CR-` and intents `INT-CR-*`. Where an existing ID already governs a behaviour — review validity (AE-05/18/37), publish (WEB-07/08) and error inspection (WEB-06), evidence and the single store (SX-17–24, SX-44–48, MC-*), model use and budgets (MU-*, AB-*, HC-*, AE-25–33) — the CR row references it and states only the curriculum-specific delta. In particular **SX-48 binds every CR evidence and memory row: no second store, no second scorer.**
 
 ## First user and first scene
 
-The first scene is the PRD §14 loop on a simple kiosk-practice app, run by Jay and staff before any student pilot. A student pilot with minors waits for the Lab child-safety decisions (guardian consent, instructor-mediated path) and for the retention and expiry defaults that CR-19 and CR-67 leave open.
+The first scene is the PRD §14 loop on a simple kiosk-practice app, run by Jay and staff before any student pilot. A student pilot with minors waits for the Lab child-safety decisions (guardian consent, instructor-mediated path) and for the defaults that CR-19 (link expiry), CR-67 (raw-input retention) and CR-65 (returning-session linkage) leave open.
 
 1. The student builds v0 HTML and sees it in the Experiment Browser.
 2. The student selects a rendered element and asks for an edit ("이 버튼이 왜 안 돼?").
@@ -78,4 +78,4 @@ P0 = PRD P0-1..P0-9 plus the §14 end-to-end loop. P1 items in PRD §8 (model co
 
 ## Derived contracts
 
-[Requirements CR-01–71](../requirements/curriculum-runtime.md) → [plan, DAG and gap matrix](../plan/curriculum-runtime.md) → [verification CR-T01–T66](../testing/curriculum-runtime.md). Registry entries: `config/requirement-work.json` (work items `cr-*`), `config/traceability.json` (`ST-INT-CR`, `ST-REQ-CR`, `ST-DES-CR`, `ST-TEST-CR`).
+[Requirements CR-01–81](../requirements/curriculum-runtime.md) → [plan, DAG and gap matrix](../plan/curriculum-runtime.md) → [verification CR-T01–T76](../testing/curriculum-runtime.md). Registry entries: `config/requirement-work.json` (work items `cr-*`), `config/traceability.json` (`ST-INT-CR`, `ST-REQ-CR`, `ST-DES-CR`, `ST-TEST-CR`; the preserved PRD is a source of `ST-INT-CR`).

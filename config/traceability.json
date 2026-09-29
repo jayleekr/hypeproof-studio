@@ -2942,6 +2942,9 @@
       "sources": [
         {
           "path": "docs/intents/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
         }
       ]
     },

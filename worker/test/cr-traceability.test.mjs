@@ -30,7 +30,10 @@ const LEDGER = JSON.parse(read("../../config/requirement-work.json"));
 const WEEKS = new Set(["W1", "W2", "W3", "W4", "W5", "W6"]);
 // Sections whose rows store or read evidence and memory; SX-48 must bind each of them.
 const SX48_SECTIONS = new Set(["E", "G"]);
-const SX48_EXTRA_ROWS = new Set(["CR-13"]);
+// Rows outside those sections that read or write the same store. Every row citing SX-48 today
+// is locked here, so dropping the citation fails; the requirements doc's "SX-48 constraint"
+// sentence must name the same set (check 6b).
+const SX48_EXTRA_ROWS = new Set(["CR-10", "CR-13", "CR-21", "CR-48", "CR-52", "CR-67", "CR-69", "CR-73", "CR-81"]);
 
 /** Requirement rows: `| CR-xx | stage / intent | weeks | requirement | reuses | verification |`. */
 function parseRequirements(text) {
@@ -191,6 +194,14 @@ function sx48Binds(req) {
   return bad;
 }
 
+/** 6b. The requirements doc's "SX-48 constraint" sentence names exactly the locked extra rows. */
+function sx48SentenceAgrees(text) {
+  const line = text.split("\n").find((l) => l.includes("**SX-48 constraint**"));
+  if (!line) return ['no "**SX-48 constraint**" line in the requirements doc'];
+  const named = new Set(line.match(/CR-\d+/g) ?? []);
+  return same(named, SX48_EXTRA_ROWS) ? [] : [`sentence names [${[...named].sort()}], test locks [${[...SX48_EXTRA_ROWS].sort()}]`];
+}
+
 /** 7. The ledger registers exactly the rows the document defines. */
 function ledgerMatches(req, ledger) {
   const doc = ledger.documents.find((d) => d.path === REQ_PATH);
@@ -212,9 +223,9 @@ const docText = (path) => {
 };
 
 // 0. Empty samples make every check below pass vacuously.
-assert.ok(req.size >= 71, `read only ${req.size} requirement rows — the parser is broken`);
-assert.ok(tests.size >= 66, `read only ${tests.size} test rows — the parser is broken`);
-assert.ok(coverage.size >= 71, `read only ${coverage.size} coverage rows — the parser is broken`);
+assert.ok(req.size >= 81, `read only ${req.size} requirement rows — the parser is broken`);
+assert.ok(tests.size >= 76, `read only ${tests.size} test rows — the parser is broken`);
+assert.ok(coverage.size >= 81, `read only ${coverage.size} coverage rows — the parser is broken`);
 assert.ok(intents.size >= 10, `read only ${intents.size} intents — the parser is broken`);
 assert.deepEqual(reqProblems, [], `malformed requirement rows:\n  ${reqProblems.join("\n  ")}`);
 assert.deepEqual(testProblems, [], `malformed test rows:\n  ${testProblems.join("\n  ")}`);
@@ -226,6 +237,7 @@ const checks = {
   "stage / intent / week tags": rowTags(req, intents),
   "reuse references": reusesResolve(req, index, docText),
   "SX-48 constraint": sx48Binds(req),
+  "SX-48 sentence": sx48SentenceAgrees(REQ),
   "ledger registration": ledgerMatches(req, LEDGER),
 };
 for (const [name, bad] of Object.entries(checks)) {
@@ -253,6 +265,11 @@ for (const [name, bad] of Object.entries(checks)) {
 
   const r6 = clone(req); r6.get("CR-23").reuses = r6.get("CR-23").reuses.filter((id) => id !== "SX-48");
   assert.ok(sx48Binds(r6).some((p) => p.startsWith("CR-23")), "check 6 missed an evidence row without SX-48");
+
+  const r6x = clone(req); r6x.get("CR-48").reuses = r6x.get("CR-48").reuses.filter((id) => id !== "SX-48");
+  assert.ok(sx48Binds(r6x).some((p) => p.startsWith("CR-48")), "check 6 missed a locked row outside E/G without SX-48");
+
+  assert.ok(sx48SentenceAgrees(REQ.replace(/(\*\*SX-48 constraint\*\*[^\n]*?)CR-52, /, "$1")).length > 0, "check 6b missed a sentence that dropped a locked row");
 
   const r7 = clone(req); r7.delete("CR-71");
   assert.ok(ledgerMatches(r7, LEDGER).length > 0, "check 7 missed a ledger/document mismatch");
