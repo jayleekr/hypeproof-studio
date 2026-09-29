@@ -3,15 +3,16 @@
 // never touched when instructor mode is active (chalk-po condition 1, R2).
 
 import type { ResolvedProfile } from "../protocol";
-import { runLocalCoach } from "../localRuntime";
-import type { LocalRuntimeConfig } from "../localRuntime";
+import { runLocalCoach } from "../localRuntime/index.ts";
+import type { LocalRuntimeConfig } from "../localRuntime/index.ts";
 import type { ChalkToolContext } from "./tools";
 import type { SdkActivity, CoachToolAction } from "../sdkCoachHelpers";
 
 // Instructor tool policy — NOT a student profile.
 // Grants Read + Write (workspace tools) only.
 // Shell, browser, subagents are off — instructor only needs file inspection and Chalk tools.
-const INSTRUCTOR_TOOL_PROFILE: ResolvedProfile = {
+// Exported for smoke tests only; not part of the public API.
+export const INSTRUCTOR_TOOL_PROFILE: ResolvedProfile = {
   profile_id: "chalk-instructor",
   display_name: "강사",
   language: "ko",

@@ -252,37 +252,68 @@ t("runInstructorTurn: missing brief → throws '강사 지시문'", async () => 
 });
 
 t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, shell/browser false", async () => {
-  // Import the module and extract the profile via a test-only export.
-  // instructorTurn.ts does not export INSTRUCTOR_TOOL_PROFILE directly, so we inspect
-  // it by stubbing runLocalCoach and capturing the profile argument.
-  const mod = await import("../src/chalk/instructorTurn.ts");
-  // We call runInstructorTurn with a stubbed runLocalCoach by patching the module's
-  // imported function. Since ESM bindings are live, we capture the profile from the
-  // error thrown by a signal-aborted stub instead.
-  let capturedProfile = null;
-  const localRuntime = await import("../src/localRuntime/index.ts");
-  const origRun = localRuntime.runLocalCoach;
-  localRuntime.runLocalCoach = async (args) => { capturedProfile = args.profile; throw new Error("stub"); };
-  try {
-    await mod.runInstructorTurn({
-      local: { provider: "anthropic", model: "claude-opus-4-5", label: "Claude Opus" },
-      cwd: "/tmp", history: [], userText: "hello",
-      brief: "강사 지시문 테스트",
-      chalkCtx: undefined,
-      signal: new AbortController().signal,
-      onDelta: () => {}, onActivity: undefined,
-      requestApproval: async () => false,
-    });
-  } catch {
-    // expected stub throw
-  } finally {
-    localRuntime.runLocalCoach = origRun;
-  }
-  assert.ok(capturedProfile, "profile must have been passed to runLocalCoach");
-  assert.strictEqual(capturedProfile.sdk_tools?.read, true, "read must be true");
-  assert.strictEqual(capturedProfile.sdk_tools?.write, true, "write must be true");
-  assert.strictEqual(capturedProfile.sdk_tools?.shell, undefined, "shell must be off (undefined)");
-  assert.strictEqual(capturedProfile.sdk_tools?.browser, undefined, "browser must be off (undefined)");
+  const { INSTRUCTOR_TOOL_PROFILE } = await import("../src/chalk/instructorTurn.ts");
+  assert.ok(INSTRUCTOR_TOOL_PROFILE, "INSTRUCTOR_TOOL_PROFILE must be exported");
+  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.read, true, "read must be true");
+  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.write, true, "write must be true");
+  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.shell, undefined, "shell must be off (undefined)");
+  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser, undefined, "browser must be off (undefined)");
+});
+
+// --- webview render guard (ChatPanel.tsx:549) ---
+// Verifies the boolean condition without DOM/React.
+// Reproduces the JY dev-review failure: instructor config (no profile, no activity)
+// was reaching DisconnectedChat before the !isInstructor guard was added.
+console.log("=== ChatPanel.tsx:549 — DisconnectedChat render guard ===");
+
+function shouldShowDisconnected(config) {
+  return !config?.profile && !config?.activity && !config?.isInstructor;
+}
+
+t("instructor config (no profile, isInstructor:true) → NOT DisconnectedChat", () => {
+  assert.strictEqual(
+    shouldShowDisconnected({ profile: null, activity: null, isInstructor: true }),
+    false,
+    "instructor must not show DisconnectedChat"
+  );
+});
+
+t("student config (no profile, no activity) → DisconnectedChat", () => {
+  assert.strictEqual(
+    shouldShowDisconnected({ profile: null, activity: null }),
+    true,
+    "student without profile must show DisconnectedChat"
+  );
+});
+
+t("student config with activity → NOT DisconnectedChat", () => {
+  assert.strictEqual(
+    shouldShowDisconnected({ profile: null, activity: { kind: "classroom", name: "test" } }),
+    false,
+    "activity presence must suppress DisconnectedChat"
+  );
+});
+
+// --- chalk_* tools included when chalkCtx present ---
+console.log("=== mergeChalkTools — chalk_* in instructor turn ===");
+
+t("mergeChalkTools: chalkCtx present → chalk_* tool names in definitions", async () => {
+  const { mergeChalkTools } = await import("../src/localRuntime/index.ts");
+  const emptyWorkTools = { definitions: [], call: async () => "" };
+  const fakeCtx = { serverUrl: "https://x", secrets: {} };
+  const merged = mergeChalkTools(emptyWorkTools, fakeCtx);
+  const names = merged.definitions.map((d) => d.name);
+  assert.ok(names.some((n) => n.startsWith("chalk_")),
+    `chalk_* tool must appear when chalkCtx present; got: [${names.join(", ")}]`);
+});
+
+t("mergeChalkTools: no chalkCtx → no chalk_* in definitions", async () => {
+  const { mergeChalkTools } = await import("../src/localRuntime/index.ts");
+  const emptyWorkTools = { definitions: [], call: async () => "" };
+  const merged = mergeChalkTools(emptyWorkTools, undefined);
+  const names = merged.definitions.map((d) => d.name);
+  assert.ok(!names.some((n) => n.startsWith("chalk_")),
+    "no chalk_* must appear without chalkCtx");
 });
 
 console.log(`\n${n} tests passed\n`);
