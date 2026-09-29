@@ -1,4 +1,4 @@
-> Preserved source · received 2026-09-29 as `HypeProof_Studio_Curriculum_Runtime_PRD_v1.0.md` (sha256 203edac0074c766b006f4e8f543152a6499f230f351bf101dffcf6f5b33ff6bf) · owner: jayleekr.
+> Preserved source · status: active (preserved original, not edited) · received 2026-09-29 as `HypeProof_Studio_Curriculum_Runtime_PRD_v1.0.md` (sha256 203edac0074c766b006f4e8f543152a6499f230f351bf101dffcf6f5b33ff6bf) · owner: jayleekr.
 > Everything below this quote block is the PRD verbatim. Do not edit it; fix the derived documents instead: [intent INT-CR](../intents/curriculum-runtime.md), [requirements CR](../requirements/curriculum-runtime.md), [verification CR-T](../testing/curriculum-runtime.md), [plan](../plan/curriculum-runtime.md). Where a derived document departs from this text (for example the P0-5 retry/fallback rewrite, intent decision D2), the derived document says so.
 
 # HypeProof Studio Curriculum Runtime

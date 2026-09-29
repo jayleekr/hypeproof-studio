@@ -1,7 +1,7 @@
 # Curriculum Runtime — delivery plan
 
 Status: active plan, no work item started. 2026-09-29. Owner: jayleekr. Epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
-Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–81](../requirements/curriculum-runtime.md) · verification: [CR-T01–T76](../testing/curriculum-runtime.md) · source: [PRD v1.0, preserved](../design/curriculum-runtime-prd-v1.0-2026-09-28.md) · ledger: [`config/requirement-work.json`](../../config/requirement-work.json) (work items `cr-*`) · execution index: [requirements-activation](requirements-activation.md#curriculum-runtime).
+Intent: [INT-CR-00–09](../intents/curriculum-runtime.md) · requirements: [CR-01–84](../requirements/curriculum-runtime.md) · verification: [CR-T01–T79](../testing/curriculum-runtime.md) · source: [PRD v1.0, preserved](../design/curriculum-runtime-prd-v1.0-2026-09-28.md) · ledger: [`config/requirement-work.json`](../../config/requirement-work.json) (work items `cr-*`) · execution index: [requirements-activation](requirements-activation.md#curriculum-runtime).
 
 This document owns the order of the Curriculum Runtime work and what "done" means for each step. The ledger's `depends_on` is the machine-readable copy of the DAG below; if they disagree, the ledger wins and this page is fixed. Work availability (ready / claimed / in review / dependency) comes from `python3 scripts/next-work.py`, never from this page.
 
@@ -13,17 +13,17 @@ PRD §13 phases, in PRD §16 priority order, one work item and one execution iss
 |---|---|---|---|---|---|---|
 | Phase 0 — reconnaissance | `cr-recon` | [#1390](https://github.com/jayleekr/hypeproof-studio/issues/1390) | design | CR-01 | — | W1 |
 | Phase 1 — Experiment Browser | `cr-browser` | [#1391](https://github.com/jayleekr/hypeproof-studio/issues/1391) | implementation | CR-02–11, CR-59, CR-60, CR-68 | `cr-recon` | W1 |
-| Phase 1 — AI Verify | `cr-verify` | [#1392](https://github.com/jayleekr/hypeproof-studio/issues/1392) | implementation | CR-03, CR-12–16, CR-61, CR-81 | `cr-browser` | W1 |
-| Phase 2 — Publish | `cr-publish` | [#1393](https://github.com/jayleekr/hypeproof-studio/issues/1393) | implementation | CR-17–22, CR-64–66, CR-73 | `cr-verify` | W1 |
-| Phase 2 — Evidence | `cr-evidence` | [#1394](https://github.com/jayleekr/hypeproof-studio/issues/1394) | implementation | CR-23–28, CR-65, CR-67, CR-69, CR-70, CR-72, CR-74 | `cr-publish` | W1 |
-| Phase 3 — Venture Memory | `cr-memory` | [#1395](https://github.com/jayleekr/hypeproof-studio/issues/1395) | implementation | CR-35–42, CR-75–79 | `cr-evidence` | W1 |
-| Phase 3 — Curriculum Skills | `cr-skills` | [#1396](https://github.com/jayleekr/hypeproof-studio/issues/1396) | implementation | CR-43–47 | `cr-memory` | W1 |
-| Phase 4 — AI Gateway | `cr-gateway` | [#1397](https://github.com/jayleekr/hypeproof-studio/issues/1397) | implementation | CR-29–34, CR-70, CR-80 | `cr-skills` | W1 |
-| Phase 5 — Weekly Review + Director | `cr-review` | [#1398](https://github.com/jayleekr/hypeproof-studio/issues/1398) | implementation | CR-48–53, CR-62 | `cr-skills` | W2 |
-| Phase 6 — Deck lifecycle | `cr-deck` | [#1399](https://github.com/jayleekr/hypeproof-studio/issues/1399) | implementation | CR-54–58, CR-63 | `cr-review` | W2 |
+| Phase 1 — AI Verify | `cr-verify` | [#1392](https://github.com/jayleekr/hypeproof-studio/issues/1392) | implementation | CR-02, CR-03, CR-12–16, CR-61, CR-81 | `cr-browser` | W1 |
+| Phase 2 — Publish | `cr-publish` | [#1393](https://github.com/jayleekr/hypeproof-studio/issues/1393) | implementation | CR-02, CR-17–22, CR-64–66, CR-73 | `cr-verify` | W1 |
+| Phase 2 — Evidence | `cr-evidence` | [#1394](https://github.com/jayleekr/hypeproof-studio/issues/1394) | implementation | CR-02, CR-23–28, CR-65, CR-67, CR-69, CR-70, CR-72, CR-74 | `cr-publish` | W1 |
+| Phase 3 — Venture Memory | `cr-memory` | [#1395](https://github.com/jayleekr/hypeproof-studio/issues/1395) | implementation | CR-02, CR-35–42, CR-75–79, CR-82 | `cr-evidence` | W1 |
+| Phase 3 — Curriculum Skills | `cr-skills` | [#1396](https://github.com/jayleekr/hypeproof-studio/issues/1396) | implementation | CR-02, CR-43–47 | `cr-memory` | W1 |
+| Phase 4 — AI Gateway | `cr-gateway` | [#1397](https://github.com/jayleekr/hypeproof-studio/issues/1397) | implementation | CR-02, CR-29–34, CR-70, CR-80, CR-83, CR-84 | `cr-skills` | W1 |
+| Phase 5 — Weekly Review + Director | `cr-review` | [#1398](https://github.com/jayleekr/hypeproof-studio/issues/1398) | implementation | CR-02, CR-48–53, CR-62 | `cr-skills` | W1 |
+| Phase 6 — Deck lifecycle | `cr-deck` | [#1399](https://github.com/jayleekr/hypeproof-studio/issues/1399) | implementation | CR-02, CR-54–58, CR-63 | `cr-review` | W1 |
 | §14 — end-to-end loop | `cr-e2e` | [#1400](https://github.com/jayleekr/hypeproof-studio/issues/1400) | validation | CR-71, CR-02 | `cr-deck`, `cr-gateway` | W1 |
 
-Rows shared by two items (CR-02, CR-03, CR-65, CR-70) are established by the first item and re-checked by the second; the second does not re-implement them. §11 targets and §12 rows sit in the item whose code they constrain; there is no separate performance or safety slice. "Earliest week" is computed from the ledger by the ranking rule below, shared rows included.
+CR-02, the switch, is in every implementation item and in `cr-e2e`: `cr-browser` builds it, each later item puts its own commands, panels, tools and worker routes behind it and adds them to the CR-T02 switch-off inventory, and `cr-e2e` re-runs the whole inventory. Rows shared by two items (CR-03, CR-65, CR-70) are established by the first item and re-checked by the second; the second does not re-implement them. §11 targets and §12 rows sit in the item whose code they constrain; there is no separate performance or safety slice. "Earliest week" is computed from the ledger by the ranking rule below, shared rows included.
 
 ## Dependency DAG
 
@@ -41,7 +41,7 @@ graph LR
 
 ## Ranking rule for the next slice
 
-When more than one item is ready, order by: (1) dependency order; (2) priority (all CR rows are P0); (3) the earliest curriculum week among all of the item's requirements, shared rows included (the Weeks column of the requirements). The Harness `hype-align` skill applies this rule; this page only states it. Because the shared CR-70 is tagged W1, `cr-gateway` ranks ahead of `cr-review` when both become ready after `cr-skills`; the two run in parallel, so the rank only decides which starts first.
+When more than one item is ready, order by: (1) dependency order; (2) priority (all CR rows are P0); (3) the earliest curriculum week among all of the item's requirements, shared rows included (the Weeks column of the requirements). The Harness `hype-align` skill applies this rule; this page only states it. Every implementation item carries CR-02, which is tagged W1, so the week key is W1 for all of them and does not separate `cr-gateway` from `cr-review` when both become ready after `cr-skills`. `hype-align` breaks that tie toward the item that unblocks more unfinished work, so `cr-review` (unblocks `cr-deck` and `cr-e2e`) comes before `cr-gateway` (unblocks `cr-e2e`). The two run in parallel, so the rank only decides which starts first.
 
 ## Gap matrix — provisional, to be confirmed by `cr-recon`
 
@@ -70,7 +70,7 @@ CR rows reference these requirements instead of restating them. Their work items
 | AE-23 | `computer-use` [#752](https://github.com/jayleekr/hypeproof-studio/issues/752) | `cr-browser` |
 | WEB-04 | `acceptance-chalk-authoring` [#732](https://github.com/jayleekr/hypeproof-studio/issues/732) | `cr-browser`, `cr-publish` |
 | WEB-07, WEB-08 | `publish-recovery` [#1018](https://github.com/jayleekr/hypeproof-studio/issues/1018) | `cr-publish` |
-| SX-14, SX-15, SX-16, SX-17, SX-19–22, SX-24, SX-44–48 | `sx-p1-evidence-capture` [#1172](https://github.com/jayleekr/hypeproof-studio/issues/1172) | `cr-browser`, `cr-verify`, `cr-publish`, `cr-evidence`, `cr-memory`, `cr-review`, `cr-deck` |
+| SX-14, SX-15, SX-16, SX-17, SX-19–22, SX-24, SX-44–48 | `sx-p1-evidence-capture` [#1172](https://github.com/jayleekr/hypeproof-studio/issues/1172) | `cr-browser`, `cr-verify`, `cr-publish`, `cr-evidence`, `cr-memory`, `cr-skills`, `cr-review`, `cr-deck` |
 | SX-32, SX-33 | `sx-p3-change-record` [#1174](https://github.com/jayleekr/hypeproof-studio/issues/1174) | `cr-evidence` |
 | SX-38 | `sx-p4-instructor-evidence` [#1175](https://github.com/jayleekr/hypeproof-studio/issues/1175) | `cr-memory`, `cr-review` |
 | SX-56, SX-58 | `sx-p0-curriculum-first` [#1171](https://github.com/jayleekr/hypeproof-studio/issues/1171) | `cr-publish`, `cr-skills`, `cr-deck` |
@@ -90,7 +90,7 @@ CR rows reference these requirements instead of restating them. Their work items
 These block a default value, not the design. Ask Jay when the slice reaches them; do not pick a value in code.
 
 - Default expiry of a published test link (CR-19). Until decided, publishing requires an explicit expiry.
-- Default retention period for declared raw participant input (CR-67).
+- Default retention period for declared raw participant input (CR-67, and the gateway path of CR-83).
 - Whether returning-session linkage (the participant pseudonym of CR-65, used by CR-72) may be on by default for minor cohorts, and how long a pseudonym lives. Until decided, linkage needs the experiment's declaration and a pseudonym ends with the experiment's link.
 - Consent path for minor cohorts and external participants who are minors (Lab MISSION child-safety decision).
 - Any breaking change to a stored schema (`hps-observation/1`, `hps-session-design/1`, usage ledgers).

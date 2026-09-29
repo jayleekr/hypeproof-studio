@@ -200,12 +200,14 @@ publication is not implementation and is not human acceptance.
 
 | ID | Area | Acceptance criteria | Primary paths |
 |---|---|---|---|
-| REQ-STUDIO-CURRICULUM-RUNTIME | curriculum loop runtime (CR-01..81) | Experiment Browser observes and operates the student's HTML artifact; "Test my product" verifies 1–5 criteria against an artifact version; immutable, revocable test links; participant events and notes as sourced evidence on the existing store (SX-48); Venture Memory; curriculum skills; cached Weekly Review Pack; evidence-aware HTML deck; capability-based AI for student apps without provider keys (MU-02 kept). Proposed, not yet implemented. | `docs/requirements/curriculum-runtime.md`, `extensions/hypeproof-chat/src/browserControl.ts`, `worker/src/lib/measurement-core/`, `worker/src/routes/` |
+| REQ-STUDIO-CURRICULUM-RUNTIME | curriculum loop runtime (CR-01..84) | Experiment Browser observes and operates the student's HTML artifact; "Test my product" verifies 1–5 criteria against an artifact version; immutable, revocable test links; participant events and notes as sourced evidence on the existing store (SX-48); Venture Memory; curriculum skills; cached Weekly Review Pack; evidence-aware HTML deck; capability-based AI for student apps without provider keys (MU-02 kept). Proposed, not yet implemented. | `docs/requirements/curriculum-runtime.md`, `extensions/hypeproof-chat/src/browserControl.ts`, `worker/src/lib/measurement-core/`, `worker/src/routes/` |
 
 [INT-CR-00–09](../intents/curriculum-runtime.md) →
-[CR-01–81](../requirements/curriculum-runtime.md) →
-[CR-T01–T76](../testing/curriculum-runtime.md) →
+[CR-01–84](../requirements/curriculum-runtime.md) →
+[CR-T01–T79](../testing/curriculum-runtime.md) →
 [plan, DAG and gap matrix](../plan/curriculum-runtime.md).
+The source PRD is preserved in [curriculum-runtime-prd-v1.0-2026-09-28](../design/curriculum-runtime-prd-v1.0-2026-09-28.md)
+and is not edited by derived documents.
 Every CR-T row starts NOT RUN. `worker/test/cr-traceability.test.mjs` checks that the
 three documents and the ledger agree; it does not check implementation.
 
