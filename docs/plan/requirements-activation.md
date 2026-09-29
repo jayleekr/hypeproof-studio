@@ -576,7 +576,7 @@ Added 2026-09-29 for epic [#1388](https://github.com/jayleekr/hypeproof-studio/i
 - Design change: No production code. Every claim names a path or symbol that exists at the recorded commit; unknowns stay unknown. Before calling a gap new, check the owners of the reused requirements (review-validity #557, publish-recovery #1018, sx-p1-evidence-capture #1172, measurement-core-dogfood #1020, model-routing #1009) and their open PRs.
 - Positive control: Every map entry resolves to a path and symbol at the recorded commit; the matrix has one verdict (reuse / extend / new) for each CR row.
 - Negative control: A map entry with a non-existent path or symbol, a missing PRD area, or a CR row missing from the matrix fails CR-T01. A gap called new while an open PR already implements it is recorded as a finding.
-- Implementation paths to check: `docs/plan/curriculum-runtime-recon.md`, `docs/plan/curriculum-runtime.md`, `docs/testing/curriculum-runtime.md`, `worker/test/cr-recon.test.mjs`, `worker/package.json`, `e2e/curriculum-runtime`
+- Implementation paths to check: `docs/plan/curriculum-runtime-recon.md`, `docs/plan/curriculum-runtime.md`, `docs/testing/curriculum-runtime.md`, `worker/test/cr-recon.test.mjs`, `worker/test/fixtures/cr-recon/frozen-inputs.json`, `worker/package.json`, `e2e/curriculum-runtime`
 
 <a id="cr-browser"></a>
 

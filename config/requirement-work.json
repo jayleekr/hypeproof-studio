@@ -2826,12 +2826,14 @@
         "docs/plan/curriculum-runtime.md",
         "docs/testing/curriculum-runtime.md",
         "worker/test/cr-recon.test.mjs",
+        "worker/test/fixtures/cr-recon/frozen-inputs.json",
         "worker/package.json",
         "e2e/curriculum-runtime"
       ],
       "verification_inputs": [
         "docs/plan/curriculum-runtime-recon.md",
         "worker/test/cr-recon.test.mjs",
+        "worker/test/fixtures/cr-recon/frozen-inputs.json",
         "e2e/curriculum-runtime/cdp-probe.mjs",
         "e2e/curriculum-runtime/cdp-probe-extension/extension.js",
         "e2e/curriculum-runtime/cdp-probe-extension/package.json"

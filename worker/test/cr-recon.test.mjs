@@ -19,23 +19,33 @@
 //   5. every later cr-* item has implementation notes; the interface proposal exists;
 //   6. the plan no longer carries a provisional matrix and links here.
 //
-// "True on its own commit" decides which tree the cross-file checks read (CR-T01's wording is
-// "at the map's commit"). Later slices rename symbols and edit the ledger; that must not turn
-// CI red, because the recon is not rewritten per slice (the page says why):
-//   - no cr-recon completion in the ledger, or the page differs from the one it pins:
-//     the page is being written or re-verified, so everything is read from this tree;
-//   - the page is byte-identical to the one cr-recon's completion pins: everything is read at
-//     the completion's commit through git, so a later rename or ledger edit cannot fail it;
-//   - that commit is absent (a shallow CI checkout): the verdict recorded there is not re-run.
-//     This tree's divergence from the map is printed as information in the last two cases.
+// "True on its own commit" decides which tree the verdict reads (CR-T01's wording is "at the
+// map's commit"). Later slices rename symbols and edit the ledger; once cr-recon is recorded
+// that must not turn CI red, because the recon is not rewritten per slice (the page says why).
+// "Recorded state" = the page and the frozen control inputs (FROZEN_PATH) are byte-identical to
+// the ones cr-recon's completion pins.
+//   - live: no cr-recon completion yet, or not the recorded state. The page is being written
+//     or re-verified, so the verdict reads this tree. Until the record lands on main this is
+//     every run, and a rename of a mapped symbol fails worker `npm test` (the page says so).
+//   - commit: the recorded state, and the completion's commit is in this clone. The verdict
+//     reads that commit through git, so a later rename or ledger edit cannot fail it.
+//   - unresolved: the recorded state, and the commit is absent. CI is always here after the
+//     record: `pr-ci.yml` checks out at depth 1. The verdict is not re-run; the pins hold the
+//     page and the frozen inputs to what was verified.
+// This tree's divergence from the map is printed as information in the last two modes.
 //
-// The negative controls at the bottom plant one defect of each kind into a copy of the page
-// and require exactly the planted problem back. A check that cannot fail is not a check.
+// The negative controls at the bottom plant one defect of each kind into a copy of the page and
+// require exactly the planted problem back. A check that cannot fail is not a check. They never
+// read this tree beyond the page: the ledger, testing contract, requirements and PRD come from
+// FROZEN_PATH (the projection of the verdict's inputs, which the verdict asserts while it runs;
+// regenerate it with HPS_CR_RECON_FREEZE=1 while the page is being written), and paths and
+// symbols resolve against the page's own entries. The resolver itself is tested on a temp
+// directory. So no later tree state can make a control pass or fail, in any mode.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,32 +57,51 @@ const PLAN_PATH = "docs/plan/curriculum-runtime.md";
 const TESTING_PATH = "docs/testing/curriculum-runtime.md";
 const LEDGER_PATH = "config/requirement-work.json";
 const PRD_PATH = "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md";
+const FROZEN_PATH = "worker/test/fixtures/cr-recon/frozen-inputs.json";
 const RECON_ITEM = "cr-recon";
 
 const AREAS = 10;
 const DECISIONS = 11;
 const MIN_DECISION_WORDS = 12;
 const VERDICTS = new Set(["reuse", "extend", "new"]);
+// A decision paragraph that defers the decision. Plain "later" is not in it: "later exposable"
+// describes a consequence, not a deferral.
+const PLACEHOLDER = new RegExp(
+  [
+    String.raw`\b(TBD|TBC|TODO|FIXME|undecided|unresolved)\b`,
+    String.raw`\bto be (decided|determined|confirmed|agreed|defined|settled)\b`,
+    String.raw`\b(decide|decided|determine|determined|settle|settled) later\b`,
+    String.raw`\bnot (yet )?(decided|determined|settled)\b`,
+    String.raw`\bopen question\b`,
+    String.raw`\bpending\b`,
+  ].join("|"),
+  "i",
+);
 
 // ── Where the inputs are read ────────────────────────────────────────────────
 const git = (args) =>
   execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 26 });
 
-/** A cached, read-only view of the repository: the working tree, or one commit through git. */
-function source(commit) {
+const cached = (map, key, fn) => (map.has(key) ? map.get(key) : (map.set(key, fn()), map.get(key)));
+
+/** A cached, read-only view of a directory's working tree (this repository, or a temp fixture). */
+function treeSource(root, where = "this tree") {
   const texts = new Map();
   const kinds = new Map();
-  const cached = (map, key, fn) => (map.has(key) ? map.get(key) : (map.set(key, fn()), map.get(key)));
-  if (!commit) {
-    return {
-      where: "this tree",
-      read: (p) => cached(texts, p, () => readFileSync(join(ROOT, p), "utf8")),
-      kind: (p) => cached(kinds, p, () => {
-        const f = join(ROOT, p);
-        return existsSync(f) ? (statSync(f).isFile() ? "file" : "dir") : null;
-      }),
-    };
-  }
+  return {
+    where,
+    read: (p) => cached(texts, p, () => readFileSync(join(root, p), "utf8")),
+    kind: (p) => cached(kinds, p, () => {
+      const f = join(root, p);
+      return existsSync(f) ? (statSync(f).isFile() ? "file" : "dir") : null;
+    }),
+  };
+}
+
+/** A cached, read-only view of one commit of this repository, through git. */
+function commitSource(commit) {
+  const texts = new Map();
+  const kinds = new Map();
   return {
     where: `commit ${commit.slice(0, 12)}`,
     read: (p) => cached(texts, p, () => git(["show", `${commit}:${p}`])),
@@ -87,12 +116,22 @@ function source(commit) {
   };
 }
 
-/** Which tree holds the map's truth (see the header). */
-function chooseSource(ledger, reconBytes) {
+/** An in-memory source: exactly the files given, nothing else exists. */
+function memorySource(files, where) {
+  return { where, read: (p) => files.get(p), kind: (p) => (files.has(p) ? "file" : null) };
+}
+
+/**
+ * Which tree holds the map's truth (see the header). `pinned` maps each file of the recorded
+ * state (the page, the frozen control inputs) to its bytes in this tree.
+ */
+function chooseSource(ledger, pinned) {
   const done = ledger.work_items.find((i) => i.id === RECON_ITEM)?.completion;
   if (!done) return { mode: "live", why: "cr-recon has no completion yet" };
-  const now = createHash("sha256").update(reconBytes).digest("hex");
-  if (done.inputs?.[RECON_PATH] !== now) return { mode: "live", why: "the page differs from the one cr-recon's completion pins" };
+  for (const [p, bytes] of Object.entries(pinned)) {
+    const now = createHash("sha256").update(bytes).digest("hex");
+    if (done.inputs?.[p] !== now) return { mode: "live", why: `${p} differs from the one cr-recon's completion pins` };
+  }
   const commit = String(done.commit ?? "");
   if (!/^[0-9a-f]{40}$/.test(commit)) return { mode: "unresolved", why: "cr-recon's completion names no full commit" };
   try {
@@ -100,7 +139,7 @@ function chooseSource(ledger, reconBytes) {
   } catch {
     return { mode: "unresolved", commit, why: `this clone lacks ${commit.slice(0, 12)}, where cr-recon was recorded (shallow checkout)` };
   }
-  return { mode: "commit", commit, why: `the page is the one cr-recon recorded at ${commit.slice(0, 12)}` };
+  return { mode: "commit", commit, why: `the page and frozen inputs are the ones cr-recon recorded at ${commit.slice(0, 12)}` };
 }
 
 // ── Parsers ──────────────────────────────────────────────────────────────────
@@ -271,6 +310,54 @@ function inputsFrom(src) {
   };
 }
 
+// ── Frozen control inputs ────────────────────────────────────────────────────
+const byId = (a, b) => a.localeCompare(b, "en", { numeric: true });
+
+/** What checkRecon reads from everything but the page, as data (FROZEN_PATH holds this). */
+function freeze(inp) {
+  const ids = (s) => [...s].sort(byId);
+  return {
+    about: `CR-T01 negative-control inputs: the projection of ${REQ_PATH}, ${TESTING_PATH}, ${LEDGER_PATH} and ${PRD_PATH} that worker/test/cr-recon.test.mjs reads. Generated; regenerate with HPS_CR_RECON_FREEZE=1 while the recon page is being written.`,
+    requirements: ids(requirementIds(inp.requirements)),
+    tests: Object.fromEntries([...testTargets(inp.testing)].sort(([a], [b]) => byId(a, b)).map(([t, s]) => [t, ids(s)])),
+    items: Object.fromEntries([...ledgerItems(inp.ledger)].map(([i, s]) => [i, ids(s)])),
+    phase0: phaseZero(inp.prd),
+  };
+}
+
+/** Every in-repository [path, symbol] pair the page's map and matrix name. */
+function pageEntries(recon) {
+  const out = [];
+  for (const name of ["1. Architecture map", "4. Gap matrix"]) {
+    for (const line of (section(recon, name) ?? "").split("\n")) {
+      if (!/^\|\s*(M\d+\.\d+|CR-\d+)\s*\|/.test(line)) continue;
+      const c = cells(line);
+      const [path, symbol] = name.startsWith("1.") ? [ticked(c[1]), ticked(c[2])] : [ticked(c[2]), ticked(c[3])];
+      if (path && symbol && !/^((vscodium|vscode)@[0-9A-Za-z.]+|lab):/.test(path)) out.push([path, symbol]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The control world: the page itself, the frozen projection rendered back into the shapes the
+ * parsers read, and a source in which exactly the page's own entries exist. A plant is then the
+ * only thing that can be wrong, whatever this tree looks like.
+ */
+function frozenInputs(recon, frozen) {
+  const files = new Map();
+  for (const [path, symbol] of pageEntries(recon)) files.set(path, `${files.get(path) ?? ""}${symbol}\n`);
+  return {
+    recon,
+    plan: "The reconnaissance is [curriculum-runtime-recon.md](curriculum-runtime-recon.md).\n",
+    requirements: frozen.requirements.map((id) => `| ${id} | frozen |`).join("\n") + "\n",
+    testing: Object.entries(frozen.tests).map(([t, crs]) => `| ${t} | frozen | ${crs.join(", ")} |`).join("\n") + "\n",
+    ledger: { work_items: Object.entries(frozen.items).map(([id, ids]) => ({ id, requirements: [{ path: REQ_PATH, ids }] })) },
+    prd: `## Phase 0 — frozen\n\n${frozen.phase0.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n`,
+    resolve: makeResolver(declaredPins(recon), memorySource(files, "the page's own entries"), {}),
+  };
+}
+
 // ── The check ────────────────────────────────────────────────────────────────
 /** The whole CR-T01 check. Pure over its inputs; returns problems and the unchecked external entries. */
 function checkRecon({ recon, plan, requirements, testing, ledger, prd, resolve }) {
@@ -334,7 +421,7 @@ function checkRecon({ recon, plan, requirements, testing, ledger, prd, resolve }
       if (!block) { problems.push(`decisions: R${r} is missing`); continue; }
       const stated = block.match(/\*\*Decision\.\*\*([^\n]*(?:\n(?!\n)[^\n]*)*)/)?.[1] ?? "";
       const n = stated.trim().split(/\s+/).filter(Boolean).length;
-      if (n < MIN_DECISION_WORDS || /\b(TBD|TBC|TODO|FIXME)\b|to be decided/i.test(stated)) problems.push(`decisions: R${r} states no decision`);
+      if (n < MIN_DECISION_WORDS || PLACEHOLDER.test(stated)) problems.push(`decisions: R${r} states no decision`);
     }
   }
 
@@ -414,10 +501,11 @@ function checkRecon({ recon, plan, requirements, testing, ledger, prd, resolve }
 }
 
 // ── Positive control: the page on the map's commit ───────────────────────────
-const live = source(null);
-const liveInputs = inputsFrom(live);
-const chosen = chooseSource(liveInputs.ledger, readFileSync(join(ROOT, RECON_PATH)));
-const verdictInputs = chosen.mode === "live" ? liveInputs : chosen.mode === "commit" ? inputsFrom(source(chosen.commit)) : null;
+const live = treeSource(ROOT);
+const pageBytes = readFileSync(join(ROOT, RECON_PATH));
+let frozenBytes = Buffer.alloc(0);
+try { frozenBytes = readFileSync(join(ROOT, FROZEN_PATH)); } catch { /* missing: never the recorded state */ }
+const chosen = chooseSource(JSON.parse(live.read(LEDGER_PATH)), { [RECON_PATH]: pageBytes, [FROZEN_PATH]: frozenBytes });
 const sane = (inp) => {
   // Empty inputs make every check pass vacuously.
   assert.ok(requirementIds(inp.requirements).size >= 84, "read fewer than 84 CR rows — the parser is broken");
@@ -427,101 +515,153 @@ const sane = (inp) => {
   assert.equal(phaseZero(inp.prd).length, AREAS, "the PRD Phase 0 list did not parse");
 };
 let real = null;
-if (verdictInputs) {
-  sane(verdictInputs);
-  real = checkRecon(verdictInputs);
-  assert.deepEqual(real.problems, [], `CR-T01 on ${RECON_PATH} (${chosen.mode === "live" ? live.where : `commit ${chosen.commit.slice(0, 12)}`}):\n  ${real.problems.join("\n  ")}`);
+if (chosen.mode !== "unresolved") {
+  const src = chosen.mode === "live" ? live : commitSource(chosen.commit);
+  const inp = inputsFrom(src);
+  sane(inp);
+  real = checkRecon(inp);
+  assert.deepEqual(real.problems, [], `CR-T01 on ${RECON_PATH} (${src.where}):\n  ${real.problems.join("\n  ")}`);
+  // The controls' frozen inputs are these inputs, projected.
+  const want = `${JSON.stringify(freeze(inp), null, 2)}\n`;
+  let have = null;
+  try { have = src.read(FROZEN_PATH); } catch { /* missing: stale */ }
+  if (have !== want) {
+    if (chosen.mode === "live" && process.env.HPS_CR_RECON_FREEZE === "1") {
+      mkdirSync(join(ROOT, FROZEN_PATH, ".."), { recursive: true });
+      writeFileSync(join(ROOT, FROZEN_PATH), want);
+      console.log(`wrote ${FROZEN_PATH} from ${src.where}`);
+    } else {
+      assert.fail(`${FROZEN_PATH} is not the projection of the verdict's inputs (${src.where}); ` +
+        "regenerate it with HPS_CR_RECON_FREEZE=1 while the page is being written, and commit it with the page");
+    }
+  }
 }
-// Where the verdict is not this tree's, this tree's divergence is information for the plan.
-const liveRun = chosen.mode === "live" ? real : checkRecon(liveInputs);
 
 // ── Negative controls: each planted defect is reported, exactly once ─────────
-// They run on the verdict's inputs, or on this tree's where the verdict is not re-run; a
-// plant must add exactly one problem to that baseline.
-const ctl = verdictInputs ?? liveInputs;
-if (!verdictInputs) sane(ctl);
-const baseline = verdictInputs ? [] : liveRun.problems;
+// The control world is the page plus the frozen inputs, never this tree's ledger, testing
+// contract or files (header). It must be clean before anything is planted.
+const page = pageBytes.toString("utf8");
+const ctl = frozenInputs(page, JSON.parse(readFileSync(join(ROOT, FROZEN_PATH), "utf8")));
+sane(ctl);
+assert.deepEqual(checkRecon(ctl).problems, [], "the page on its frozen inputs must be clean before anything is planted");
 let controls = 0;
 {
   const run = (text, extra = {}) => checkRecon({ ...ctl, recon: text, ...extra }).problems;
   const plant = (from, to) => {
-    assert.ok(ctl.recon.includes(from), `negative control anchor missing: ${from}`);
-    return ctl.recon.replace(from, to);
-  };
-  const added = (problems) => {
-    const left = [...baseline];
-    return problems.filter((p) => {
-      const i = left.indexOf(p);
-      if (i < 0) return true;
-      left.splice(i, 1);
-      return false;
-    });
+    assert.ok(page.includes(from), `negative control anchor missing: ${from}`);
+    return page.replace(from, to);
   };
   const expectOne = (problems, needle, what) => {
-    const fresh = added(problems);
-    const hits = fresh.filter((p) => p.includes(needle));
-    assert.equal(hits.length, 1, `${what}: expected exactly one problem naming "${needle}", got:\n  ${fresh.join("\n  ")}`);
-    assert.equal(fresh.length, 1, `${what}: the plant produced unrelated problems:\n  ${fresh.join("\n  ")}`);
+    const hits = problems.filter((p) => p.includes(needle));
+    assert.equal(hits.length, 1, `${what}: expected exactly one problem naming "${needle}", got:\n  ${problems.join("\n  ")}`);
+    assert.equal(problems.length, 1, `${what}: the plant produced unrelated problems:\n  ${problems.join("\n  ")}`);
     controls++;
   };
-  const recon = ctl.recon;
+  const decision = (r, text) => {
+    const out = page.replace(new RegExp(`(### R${r} · [^\\n]*\\n\\n\\*\\*Decision\\.\\*\\*)[^\\n]*`), `$1 ${text}`);
+    assert.notEqual(out, page, `negative control anchor missing: R${r}'s decision paragraph`);
+    return out;
+  };
 
   expectOne(run(plant("| M1.5 | `extensions/hypeproof-chat/src/cdpSession.ts`", "| M1.5 | `extensions/hypeproof-chat/src/cdpSessionGone.ts`")),
     "cdpSessionGone.ts: path does not exist", "non-existent map path");
   expectOne(run(plant("| M1.5 | `extensions/hypeproof-chat/src/cdpSession.ts` | `CdpSession` |", "| M1.5 | `extensions/hypeproof-chat/src/cdpSession.ts` | `CdpSessionPool` |")),
     "symbol `CdpSessionPool` not found", "non-existent map symbol");
-  expectOne(run(plant("| M1.5 | `extensions/hypeproof-chat/src/cdpSession.ts` | `CdpSession` |", "| M1.5 | `extensions/hypeproof-chat/src/cdpSession.ts` | `spike` |")),
-    "symbol `spike` not found", "a word only a comment of the file mentions");
-  expectOne(run(recon.replace(/\n### A7 · [^\n]*\n[\s\S]*?(?=\n### A8 · )/, "\n")), "area A7 is missing", "missing area");
-  expectOne(run(recon.replace(/^### A9 · [^\n]*$/m, "### A9 · x")), "A9 title \"x\" does not name PRD Phase 0 item 9", "area retitled away from its PRD item");
-  expectOne(run(recon.replace(/^\| CR-47 \|[^\n]*\n/m, "")), "CR-47 has no row", "CR row absent from the matrix");
-  expectOne(run(recon.replace(/^(\| CR-47 \|[^\n]*\n)/m, "$1$1")), "CR-47 has 2 rows", "duplicated CR row");
+  expectOne(run(page.replace(/\n### A7 · [^\n]*\n[\s\S]*?(?=\n### A8 · )/, "\n")), "area A7 is missing", "missing area");
+  expectOne(run(page.replace(/^### A9 · [^\n]*$/m, "### A9 · x")), "A9 title \"x\" does not name PRD Phase 0 item 9", "area retitled away from its PRD item");
+  expectOne(run(page.replace(/^\| CR-47 \|[^\n]*\n/m, "")), "CR-47 has no row", "CR row absent from the matrix");
+  expectOne(run(page.replace(/^(\| CR-47 \|[^\n]*\n)/m, "$1$1")), "CR-47 has 2 rows", "duplicated CR row");
   expectOne(run(plant("| CR-59 | reuse |", "| CR-59 | maybe |")), "CR-59: verdict \"maybe\"", "invalid verdict");
   expectOne(run(plant("| CR-12 | new | `worker/src/lib/measurement-core/learning-events.ts` | `criterion_set` | `cr-verify` |",
     "| CR-12 | new | `worker/src/lib/measurement-core/learning-events.ts` | `criterion_set` | `cr-deck` |")),
     "cr-deck does not cite CR-12", "row owned by an item that does not cite it");
-  expectOne(run(recon.replace("`vscode@1.116.0:src/vs/workbench/contrib/browserView/electron-browser/tools/browserTools.contribution.ts`",
+  expectOne(run(plant("`vscode@1.116.0:src/vs/workbench/contrib/browserView/electron-browser/tools/browserTools.contribution.ts`",
     "`vscode@1.117.0:src/vs/workbench/contrib/browserView/electron-browser/tools/browserTools.contribution.ts`")),
     "external pin vscode@1.117.0 is not declared", "external entry with an undeclared pin");
-  expectOne(run(recon.replace("### R6 · ", "### R6-dropped · ")), "R6 is missing", "missing decision");
-  expectOne(run(recon.replace(/(### R3 · [^\n]*\n\n\*\*Decision\.\*\*)[^\n]*/, "$1 TBD.")), "R3 states no decision", "placeholder decision");
-  expectOne(run(recon.replace(/^\| `cr-skills` \|[^\n]*\n/m, "")), "cr-skills has no row", "item absent from the strategy");
-  expectOne(run(recon.replace("| `cr-skills` | CR-T02, CR-T40–T44 |", "| `cr-skills` | CR-T02, CR-T40–T43 |")),
+  expectOne(run(plant("### R6 · ", "### R6-dropped · ")), "R6 is missing", "missing decision");
+  expectOne(run(decision(3, "TBD.")), "R3 states no decision", "placeholder decision");
+  expectOne(run(decision(3, "To be determined after cr-browser measures the options in its own tree first.")),
+    "R3 states no decision", "a deferral long enough to pass the word count");
+  expectOne(run(decision(5, "Storage stays undecided until the director has seen how the first cohort uses the product.")),
+    "R5 states no decision", "a decision left undecided in other words");
+  expectOne(run(page.replace(/^\| `cr-skills` \|[^\n]*\n/m, "")), "cr-skills has no row", "item absent from the strategy");
+  expectOne(run(plant("| `cr-skills` | CR-T02, CR-T40–T44 |", "| `cr-skills` | CR-T02, CR-T40–T43 |")),
     "CR-47 is not targeted", "strategy row missing a requirement's test");
-  expectOne(run(recon.replace("### `cr-deck`", "### `cr-deck-notes`")), "cr-deck has no subsection", "missing per-slice notes");
-  expectOne(run(recon, { plan: `${ctl.plan}\n## Gap matrix — provisional, to be confirmed by \`cr-recon\`\n` }),
+  expectOne(run(plant("### `cr-deck`", "### `cr-deck-notes`")), "cr-deck has no subsection", "missing per-slice notes");
+  expectOne(run(page, { plan: `${ctl.plan}\n## Gap matrix — provisional, to be confirmed by \`cr-recon\`\n` }),
     "provisional gap matrix", "plan still carrying the provisional matrix");
-  expectOne(run(recon, { plan: `${ctl.plan}\n## Gap matrix (provisional)\n| PRD item | x |\n` }),
+  expectOne(run(page, { plan: `${ctl.plan}\n## Gap matrix (provisional)\n| PRD item | x |\n` }),
     "provisional gap matrix", "plan carrying a provisional matrix under another heading");
+}
 
-  // The resolver itself: a real external checkout path must be able to fail too.
-  const fakeVscode = mkdtempSync(join(tmpdir(), "cr-recon-vscode-"));
+// The resolver itself, on a temp directory rather than on this repository's files, so that no
+// later edit to a mapped file can fail it: every refusal it must make, and the acceptances.
+{
+  const tmp = mkdtempSync(join(tmpdir(), "cr-recon-resolver-"));
   try {
-    writeFileSync(join(fakeVscode, "package.json"), JSON.stringify({ version: "1.116.0" }));
+    const repo = join(tmp, "repo"), vscodeOk = join(tmp, "vscode-pinned"), vscodeOther = join(tmp, "vscode-other");
+    for (const d of [join(repo, "lib"), vscodeOk, vscodeOther]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(repo, "lib/tokens.ts"), [
+      "// spike only in a line comment",
+      "/* spikeBlock only in a block comment */",
+      "export async function verify(token: string) { return 'a // stringTail'; }",
+      "const label = \"spikeString\";",
+      "",
+    ].join("\n"));
+    writeFileSync(join(repo, "schema.sql"), "-- sqlOnlyInComment\nCREATE TABLE usage_log (id INTEGER);\n");
+    writeFileSync(join(vscodeOk, "package.json"), JSON.stringify({ version: "1.116.0" }));
+    writeFileSync(join(vscodeOther, "package.json"), JSON.stringify({ version: "9.9.9" }));
     const pins = new Set(["vscode@1.116.0"]);
-    const fake = makeResolver(pins, live, { HPS_VSCODE_SRC: fakeVscode });
-    assert.match(String(fake("vscode@1.116.0:no/such/file.ts", "x")), /not found in/, "resolver accepted a missing external file");
-    assert.match(String(makeResolver(pins, live, { HPS_VSCODE_SRC: ROOT })("vscode@1.116.0:worker/src/lib/tokens.ts", "verify")),
-      /HPS_VSCODE_SRC is vscode .*not the pinned 1\.116\.0/, "resolver accepted a VS Code checkout at another version");
-    assert.equal(fake("worker/src/lib/tokens.ts", "verify"), null, "resolver refused a real path and symbol");
-    assert.match(String(fake("worker/src/lib/tokens.ts", "verif")), /not found/, "resolver matched a symbol by prefix");
-    assert.match(String(fake("worker/src/lib", "verify")), /not a file/, "resolver accepted a directory as a symbol source");
+    const r = makeResolver(pins, treeSource(repo, "temp repo"), { HPS_VSCODE_SRC: vscodeOk });
+    const cases = [
+      [r("lib/tokens.ts", "verify"), null, "resolver refused a real path and symbol"],
+      [r("lib/tokens.ts", "spikeString"), null, "resolver refused a symbol inside a string literal"],
+      [r("schema.sql", "usage_log"), null, "resolver refused a SQL identifier"],
+      [r("lib/tokens.ts", "verif"), /symbol `verif` not found/, "resolver matched a symbol by prefix"],
+      [r("lib/tokens.ts", "spike"), /symbol `spike` not found/, "resolver accepted a word only a line comment mentions"],
+      [r("lib/tokens.ts", "spikeBlock"), /symbol `spikeBlock` not found/, "resolver accepted a word only a block comment mentions"],
+      [r("schema.sql", "sqlOnlyInComment"), /not found/, "resolver accepted a word only a SQL comment mentions"],
+      [r("lib/gone.ts", "verify"), /path does not exist/, "resolver accepted a missing path"],
+      [r("lib", "verify"), /not a file/, "resolver accepted a directory as a symbol source"],
+      [r("vscode@1.116.0:no/such/file.ts", "x"), /not found in/, "resolver accepted a missing external file"],
+      [r("vscode@1.117.0:lib/tokens.ts", "verify"), /external pin vscode@1\.117\.0 is not declared/, "resolver accepted an undeclared pin"],
+      [makeResolver(pins, treeSource(repo, "temp repo"), { HPS_VSCODE_SRC: vscodeOther })("vscode@1.116.0:lib/tokens.ts", "verify"),
+        /HPS_VSCODE_SRC is vscode 9\.9\.9, not the pinned 1\.116\.0/, "resolver accepted a VS Code checkout at another version"],
+      [JSON.stringify(makeResolver(pins, treeSource(repo, "temp repo"), {})("vscode@1.116.0:lib/tokens.ts", "verify")),
+        /"external"/, "resolver claimed to check an external entry with no checkout supplied"],
+    ];
+    for (const [got, want, what] of cases) {
+      if (want === null) assert.equal(got, null, `${what}: ${got}`);
+      else assert.match(String(got), want, what);
+      controls++;
+    }
     assert.equal(withoutComments("const a = 'x // y'; // spike\n/* spike */ b", "f.ts"), "const a = 'x // y'; \n  b", "comment stripping mangled code or strings");
-    controls += 6;
+    controls++;
   } finally {
-    rmSync(fakeVscode, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-const entries = (ctl.recon.match(/^\| M\d+\.\d+ \|/gm) ?? []).length;
-const ext = (real ?? liveRun).external;
+const entries = (page.match(/^\| M\d+\.\d+ \|/gm) ?? []).length;
+const verdict = chosen.mode === "unresolved"
+  ? `verdict NOT RE-RUN (${chosen.why}); the page and the frozen inputs are the recorded ones`
+  : `verdict read at ${chosen.mode === "live" ? "this tree" : `commit ${chosen.commit.slice(0, 12)}`} (${chosen.why})`;
+const ext = real?.external ?? [];
 console.log(
-  `cr-recon (CR-T01): OK — ${chosen.mode === "unresolved" ? "verdict NOT RE-RUN" : `verdict read at ${chosen.mode === "live" ? "this tree" : `commit ${chosen.commit.slice(0, 12)}`}`} (${chosen.why}) · ` +
-    `${AREAS} areas · ${entries} map entries · ${requirementIds(ctl.requirements).size} matrix rows · ${DECISIONS} decisions · ` +
-    `${controls} negative controls each caught · external not checked here: ${ext.length}` + (ext.length ? ` (${ext.join(", ")})` : ""),
+  `cr-recon (CR-T01): OK — ${verdict} · ${AREAS} areas · ${entries} map entries · ${requirementIds(ctl.requirements).size} matrix rows · ` +
+    `${DECISIONS} decisions · ${controls} negative controls each caught, on the frozen inputs and a temp directory` +
+    (real ? ` · external not checked here: ${ext.length}` + (ext.length ? ` (${ext.join(", ")})` : "") : ""),
 );
 if (chosen.mode !== "live") {
-  console.log(liveRun.problems.length
-    ? `INFO  this tree differs from the recorded map in ${liveRun.problems.length} place(s); record them as deviations in ${PLAN_PATH}, not by editing the recon:\n  ${liveRun.problems.join("\n  ")}`
-    : "INFO  this tree still matches the recorded map");
+  // Information only: nothing below can fail the test.
+  let info;
+  try {
+    const now = checkRecon(inputsFrom(live)).problems;
+    info = now.length
+      ? `INFO  this tree differs from the recorded map in ${now.length} place(s); record them as deviations in ${PLAN_PATH}, not by editing the recon:\n  ${now.join("\n  ")}`
+      : "INFO  this tree still matches the recorded map";
+  } catch (err) {
+    info = `INFO  this tree could not be compared with the recorded map: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  console.log(info);
 }
