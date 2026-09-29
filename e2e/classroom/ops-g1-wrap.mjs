@@ -11,6 +11,11 @@
 //   E  route-backed finished: every eligible record verified, every draft approved, every message delivered → done, in words
 //   F  transient errors: a failed re-read is "unknown" (last value named as such) and recovers on the next good read
 //   G  another class run: nothing of the previous run's batch; everyone excluded is "nothing to do", not done
+//   Q  reviewer quarantine (#1246 review) — a draft the reviewer quarantined is a review decision, not a failed draft: steps 2·3
+//      count it apart ("검수에서 격리 N", row "검수에서 격리됨") and never call it "could not make a draft". The queue cannot tell which
+//      messages carried which draft, so steps 1–3, the queue summary and the row say nothing about sending (no "보내지 않음",
+//      "발송 대상에서 빠짐", "전달 후 격리"); step 4 alone speaks for delivery and reads exactly as it did before the quarantine.
+//      Q1 (in C) quarantined before any send, beside a refused draft · Q2 (after F) quarantined after its report was delivered.
 // Real: Chalk page and script in Chromium, the Service router + SQLite, the upload/seal routes, the report queue, the review
 // route, the delivery routes and the operator delivery-event route. Synthetic: accounts, the device uploads (the App's own freezer
 // via the harness, not a Studio window), the model (transport stub), the mail provider (transport stub) and its "delivered" events.
@@ -95,15 +100,32 @@ try {
   evaluatorOn(true); await upload('S2', b1); await upload('S3', b1); await page.locator('#ops-jobs-go').click();
   s = await until(page, ['blocked', 'blocked', 'pending', 'idle'], 'mixed arrivals, one refusal'); results.mixed = s;
   assert.match(s[0].text, /서버 검증 3 \/ 회수 대상 4명 .* 도착하지 않음: 기기 연결 없음 1 · 동의 없어 제외 1 — 더 기다려도 오지 않을 수 있습니다/);
-  assert.match(s[1].text, /초안 2 \/ 대상 3건 · 실패·격리 1 · 검증된 기록 없음 2 \(0점 아님\) — 초안을 만들지 못한 학생이 있습니다/); assert.match(s[2].text, /내용 승인 0 \/ 초안 2건 · 검수 대기 2/);
+  assert.match(s[1].text, /초안 2 \/ 대상 3건 · 초안 실패 1 · 검증된 기록 없음 2 \(0점 아님\) — 초안을 만들지 못한 학생이 있습니다/); assert.doesNotMatch(s[1].text, /격리/); assert.match(s[2].text, /내용 승인 0 \/ 초안 2건 · 검수 대기 2/);
   const approve = async (student) => { await page.locator('#ops-reports-list p').filter({ hasText: student }).getByRole('button', { name: '초안 열기' }).click(); await page.getByRole('button', { name: '근거 확인하고 내용 승인' }).click(); await page.locator('#ops-reports-state').filter({ hasText: '검수 결과를 저장했습니다' }).waitFor(); };
+  // The reviewer's quarantine goes through the Service review route (this page offers approve / needs_observation only); the page
+  // learns it from its own queue re-read ('검수 목록 새로 보기').
+  const quarantine = async (batch, student) => { const q = await local.request(`${local.base}/report-batches/${batch}/reports`), j = q.json.jobs.filter((x) => x.student_id === student && x.draft_digest).pop(); assert.ok(j, student + ' has a draft');
+    const r = await local.request(`${local.base}/report-batches/${batch}/reports/${j.id}/review`, 'PUT', { decision: 'quarantine', expected_revision: j.revision, draft_digest: j.draft_digest }); assert.equal(r.status, 200, r.raw); assert.equal(r.json.state, 'quarantined');
+    await page.locator('#ops-reports-refresh').click(); await page.locator('#ops-reports-list p').filter({ hasText: student }).filter({ hasText: '검수에서 격리됨' }).waitFor(); };
+  // Steps 1–3, the queue summary and the quarantined learner's row never guess whether a report went out — that is step 4's alone.
+  const sendGuess = /보내지 않|발송 대상|발송 여부|발송되지|전달 후|전달 전|전달되지/;
+  const noSendGuess = async (st, student) => { const r = await page.locator('#ops-reports-list p').filter({ hasText: student }).innerText(); assert.match(r, /검수에서 격리됨/); assert.doesNotMatch(r, /근거 불일치|reviewer_quarantined/);
+    for (const x of [...st.slice(0, 3).map((y) => y.text), r, await page.locator('#ops-reports-state').innerText()]) assert.doesNotMatch(x, sendGuess, x); return r; };
   await approve('student-01'); s = await until(page, ['blocked', 'blocked', 'partial', 'idle'], 'one of two approved');
   assert.match(s[2].text, /^3 검수 ◐ 일부만\n내용 승인 1 \/ 초안 2건 · 검수 대기 1/); await shot(page, 'wrap-mixed-partial-1280.png');
+  // Q1 — nothing of batch 1 is sent yet; the reviewer quarantines student-02's draft. S3's refusal stays the only failed draft.
+  { const before4 = s[3].text; await quarantine(b1, 'student-02');
+    s = await until(page, ['blocked', 'blocked', 'partial', 'idle'], 'one refused, one quarantined by the reviewer');
+    assert.match(s[1].text, /^2 보고서 초안 ! 확인 필요\n초안 2 \/ 대상 3건 · 초안 실패 1 · 검수에서 격리 1 · 검증된 기록 없음 2 \(0점 아님\) — 초안을 만들지 못한 학생이 있습니다/);
+    assert.match(s[2].text, /^3 검수 ◐ 일부만\n내용 승인 1 \/ 초안 2건 · 검수에서 격리 1 · 검수 대기 0 · 아직 초안이 다 나오지 않았습니다 — 승인은 내용 확인이며 발송 승인이 아닙니다/);
+    assert.equal(s[3].text, before4, 'step 4 reads as before the quarantine'); results.quarantine_before_send = { steps: s, row: await noSendGuess(s, 'student-02') }; }
   { const look = await badgeLook(page, 'blocked'), body = await page.locator('#ops-wrap-steps > li.wrap-blocked p').first().evaluate((e) => getComputedStyle(e).color); assert.ok(look.contrast >= 4.5 && look.size >= 14, JSON.stringify(look)); assert.notEqual(body, 'rgb(255, 157, 140)', 'the card body is not painted with the page-wide red .blocked colour'); }
   assert.equal((await recipients(['student-01'])).status, 201); await page.locator('#ops-recipients-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '보낼 메시지 1건' }).waitFor();
   await page.locator('#ops-approve-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '아직 아무것도 보내지 않았습니다' }).waitFor(); s = await until(page, [null, null, null, 'idle'], 'approved, not sent'); assert.match(s[3].text, /발송 승인 1건 · 아직 보내지 않았습니다/); assert.equal(mails.length, 0);
   await page.locator('#ops-send-go').click(); await page.locator('#ops-send-yes').click(); s = await until(page, [null, null, null, 'pending'], 'provider accepted');
   assert.match(s[3].text, /^4 발송 … 진행 중\n전달 확인 0 \/ 보낸 메시지 1건 · 제공자 접수 1 \(전달 미확인\) — 요청·접수는 전달이 아닙니다/); assert.equal(mails.length, 1);
+  assert.match(s[1].text, /초안 실패 1 · 검수에서 격리 1/); assert.match(s[2].text, /검수에서 격리 1/); results.quarantine_before_send.after_other_send = { steps: s, row: await noSendGuess(s, 'student-02') };
+  ok('Q1 reviewer quarantine before any send: 초안 실패 1 and 검수에서 격리 1 counted apart; steps 1–3 and the row never guess sending; step 4 unchanged by it');
   ok('C2 mixed: 3 of 4 verified + an unconnected seat = 확인 필요; a refused draft = 확인 필요; 1 of 2 approved = 일부만; approval = 시작 전 (not sent); provider acceptance = 진행 중 (not delivered)');
 
   // ── D. stale answers from batch 1 arriving after batch 2 started ──
@@ -116,7 +138,7 @@ try {
   s = await until(page, ['pending', 'pending', 'idle', 'idle'], 'batch 2 right after its start');
   for (const r of held.splice(0)) await r.continue(); await page.waitForTimeout(800); await page.unroute(b1url);
   s = await steps(page); results.stale_answers = s; assert.deepEqual(s.map((x) => x.state), ['pending', 'pending', 'idle', 'idle'], 'batch 1 answers landing late label nothing of batch 2');
-  assert.match(s[0].text, /서버 검증 0 \/ 회수 대상 4명 · 도착 전 4/); assert.doesNotMatch(s.map((x) => x.text).join('\n'), /내용 승인 1 |제공자 접수|발송 승인 \d/);
+  assert.match(s[0].text, /서버 검증 0 \/ 회수 대상 4명 · 도착 전 4/); assert.doesNotMatch(s.map((x) => x.text).join('\n'), /내용 승인 1 |제공자 접수|발송 승인 \d|검수에서 격리/);
   assert.equal(await page.locator('#ops-send-go').isDisabled(), true, 'the batch 1 approval is not armed against batch 2');
   ok('D stale: batch 1 collection / queue / delivery answers held until batch 2 started are dropped; batch 1\'s approval and send do not label batch 2');
 
@@ -147,6 +169,21 @@ try {
   s = await until(page, [null, null, null, 'unknown'], 'delivery re-read failed'); assert.match(s[3].text, /전달 확인 4 \/ 보낸 메시지 4건 .*다시 읽지 못했습니다/); await page.unroute(dl);
   await page.locator('#ops-deliveries-go').click(); await until(page, ['done', 'done', 'done', 'done'], 'delivery recovered');
   ok('F transient: a failed collection or delivery re-read is ? 확인 불가 with the last value named as such, and recovers on the next good read');
+
+  // ── Q2. reviewer quarantine after delivery (route-backed, batch 2) ──
+  // The Service takes a quarantine of an approved draft too — here student-04's, whose report E delivered. Drafts and review stay done
+  // (no failed draft), and step 4 and the delivery rows, re-read after the quarantine, read exactly as before.
+  { const before4 = (await steps(page))[3].text, rows4 = await page.locator('#ops-delivery-list p').allInnerTexts(); assert.equal(rows4.length, 4);
+    await quarantine(b2, 'student-04');
+    await page.locator('#ops-delivery-list p').evaluateAll((l) => l.forEach((e) => { e.dataset.old = '1'; })); await page.locator('#ops-deliveries-go').click();
+    await page.waitForFunction(() => document.querySelectorAll('#ops-delivery-list p').length === 4 && !document.querySelector('#ops-delivery-list p[data-old]'));
+    s = await until(page, ['done', 'done', 'done', 'done'], 'a reviewer quarantine after delivery');
+    assert.match(s[1].text, /^2 보고서 초안 ✓ 완료\n초안 4 \/ 대상 4건 · 검수에서 격리 1 · 검증된 기록 없음 1 \(0점 아님\) — 대상 모두 초안이 있습니다/); assert.doesNotMatch(s[1].text, /실패|초안을 만들지 못한/);
+    assert.match(s[2].text, /^3 검수 ✓ 완료\n내용 승인 3 \/ 초안 4건 · 검수에서 격리 1 · 검수 대기 0 — 승인은 내용 확인이며 발송 승인이 아닙니다/);
+    assert.equal(s[3].text, before4, 'step 4 reads as before the quarantine'); assert.match(s[3].text, /^4 발송 ✓ 완료\n전달 확인 4 \/ 보낸 메시지 4건/);
+    assert.deepEqual(await page.locator('#ops-delivery-list p').allInnerTexts(), rows4, 'the delivery rows read as before the quarantine');
+    results.quarantine_after_delivery = { steps: s, row: await noSendGuess(s, 'student-04'), delivery_rows: rows4 }; await shot(page, 'wrap-reviewer-quarantine-1280.png'); }
+  ok('Q2 reviewer quarantine after delivery: drafts and review stay ✓ 완료 with 검수에서 격리 1 (not a failed draft); no step guesses sending; step 4 and the delivery rows unchanged');
 
   // ── G. another class run; everyone excluded ──
   const run2 = 'ops-test-run-2', t = Date.now(); local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run2, local.cohort, local.profile, new Date(t - 60000).toISOString(), new Date(t + 3600000).toISOString());
