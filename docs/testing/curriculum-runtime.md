@@ -17,7 +17,7 @@ Every row has a positive control (a sample that must pass, to catch an instrumen
 | Playwright e2e | Real Electron app, webview, commands, screens, mobile emulation for the published runtime | `cd e2e && npm test` · one spec: `npx playwright test tests/<name>.spec.ts` (pattern of `09-preview.spec.ts`) |
 | real-Mac | Installed or dev-host Studio on a reference Mac; timings; the end-to-end loop | `node e2e/classroom/<name>.mjs` (pattern of `mac-devhost.mjs`, `g4-journey.mjs`) |
 | real phone | A physical phone opening a published link | manual, recorded in the evidence file |
-| doc check | Registry and recon documents | `cd worker && node --experimental-strip-types test/cr-traceability.test.mjs` (registry trace; runs in `npm test`) |
+| doc check | Registry and recon documents | `cd worker && node --experimental-strip-types test/cr-traceability.test.mjs` (registry trace) · `cd worker && node --experimental-strip-types test/cr-recon.test.mjs` (CR-T01, the recon map); both run in `npm test` |
 
 The registry trace itself (every CR row has a CR-T that lists it, every CR-T is referenced, every reuse ID resolves) is `worker/test/cr-traceability.test.mjs`. It is a gate on these documents, not a CR-T row.
 
