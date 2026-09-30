@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  Kiosk-practice fixture (cr-browser #1391; reused by cr-verify and cr-e2e).
+  A five-step order flow a Week 1-2 student might build. Planted modes, by query string:
+    ?plant=console-step3   step 3 (+1) raises console.error once        (CR-T08)
+    ?plant=disabled-step4  step 4 (담기) is disabled, the flow cannot end (CR-T07 negative)
+    ?plant=errors          on load: one console.error, one throw, one 404 (CR-T05)
+  Everything else is a clean page: no console output, no errors, no failed request.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>키오스크 연습</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>어르신도 쉬운 키오스크</h1>
+  <section id="start">
+    <p>화면을 눌러 주문을 시작하세요.</p>
+    <button id="begin" type="button">주문 시작</button>
+    <button id="large" type="button">큰 글씨로 보기</button>
+  </section>
+  <section id="menu" hidden>
+    <label for="drink">음료 고르기</label>
+    <select id="drink">
+      <option value="">골라 주세요</option>
+      <option value="tea">아이스티</option>
+      <option value="coffee">커피</option>
+    </select>
+    <p id="chosen">고른 음료: 없음</p>
+    <button id="plus" type="button">수량 늘리기</button>
+    <p id="qty">수량: 1</p>
+    <div class="spacer"></div>
+    <button id="add" type="button">장바구니에 담기</button>
+    <p id="cart">장바구니: 0개</p>
+    <button id="pay" type="button">주문하기</button>
+  </section>
+  <section id="done" hidden>
+    <h2>주문이 완료되었어요</h2>
+  </section>
+  <script src="app.js"></script>
+</body>
+</html>
