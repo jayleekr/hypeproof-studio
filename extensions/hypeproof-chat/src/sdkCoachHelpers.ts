@@ -31,7 +31,10 @@ import {
   MCP_BROWSER_CLICK,
   MCP_BROWSER_TYPE,
   MCP_LIVE_PREVIEW_START,
+  MCP_CR_BROWSER_TOOLS,
+  MCP_BROWSER_SELECT,
 } from "./browserMcp.ts";
+import { isCurriculumRuntimeEnabled } from "./curriculumRuntime.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
 import { isDestructiveCommand } from "./shellPolicy.ts";
@@ -222,7 +225,10 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
  */
 export function permittedMcpToolsFor(profile: ResolvedProfile): string[] {
   if (profile.sdk_tools?.browser === true && !isMinorTier(profile)) {
-    return [...MCP_BROWSER_TOOLS];
+    // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
+    return isCurriculumRuntimeEnabled(profile)
+      ? [...MCP_BROWSER_TOOLS, ...MCP_CR_BROWSER_TOOLS]
+      : [...MCP_BROWSER_TOOLS];
   }
   return [];
 }
@@ -1874,7 +1880,7 @@ export function isClassifiedSdkToolName(toolName: string): boolean {
   ) {
     return true;
   }
-  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName);
+  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName) || (MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName);
 }
 
 /** A tool action the coach wants to perform, surfaced to the host modal. */
@@ -1941,6 +1947,17 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
   // 추가됐는데 여기 매핑이 빠져서 "미지의 툴" 폴백(executeShell)으로 떨어졌다.
   // 그래서 클릭인데 **셸 모달**이 뜨고, 셸 분기는 payload.command 를 읽는데 클릭엔
   // 그게 없어서 문구가 통째로 비었다("코치가 명령을 실행하려고 해요:" 뒤가 공백).
+  // CR-06 — choosing an option acts inside the already-opened page like a click, so it
+  // takes the click's kind (auto-allowed by the default approval list).
+  if (action.toolName === MCP_BROWSER_SELECT) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    const value = firstString(action.input, ["value"]) ?? "";
+    return {
+      kind: "browserClick",
+      description: `선택 상자(${ref})에서 고르기: ${value.slice(0, 60)}`,
+      payload: { ref },
+    };
+  }
   if (action.toolName === MCP_BROWSER_CLICK) {
     const ref = firstString(action.input, ["ref"]) ?? "";
     return {
@@ -2279,6 +2296,11 @@ export function evaluateSdkToolUse(args: {
   }
   if (toolName === MCP_BROWSER_CLICK || toolName === MCP_BROWSER_TYPE) {
     return { decision: "ask" };
+  }
+  // CR-06 — observe/scroll/hover/reload look at or re-show the student's own preview
+  // (the origin scope, CR-11, is enforced by the executor); select acts like a click.
+  if ((MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName)) {
+    return toolName === MCP_BROWSER_SELECT ? { decision: "ask" } : { decision: "allow" };
   }
   if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {
     // Auto-allow once the browser capability is granted: a screenshot of the

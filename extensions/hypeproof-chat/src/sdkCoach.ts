@@ -19,8 +19,10 @@ import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { crMcpRegistration } from "./crHostWiring";
 import {
   buildHypeproofMcpServer,
+  crBrowserOpenRefusal,
   HYPEPROOF_MCP_SERVER_NAME,
   MCP_BROWSER_OPEN,
   resolveAlreadyOpen,
@@ -545,6 +547,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<SdkTurnEnd> {
         { createSdkMcpServer: sdk.createSdkMcpServer!, tool: sdk.tool! },
         z,
         args.browserHost,
+        // CR-02 — register the Experiment Browser tools only where they were granted.
+        crMcpRegistration(opts.permittedMcpTools),
       );
       mcpServers = {
         [HYPEPROOF_MCP_SERVER_NAME]: server as NonNullable<Options["mcpServers"]>[string],
@@ -674,8 +678,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<SdkTurnEnd> {
       // 된다(delegation_judgment). 판정은 핸들러와 동일한 resolveAlreadyOpen
       // 단일 소스 — 갈라지면 "모달 없는 실제 오픈" 구멍이 된다.
       if (name === MCP_BROWSER_OPEN && args.browserHost) {
-        const { alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
+        const { url: openUrl, alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
           (input as { url?: unknown } | undefined)?.url);
+        // CR-11 — with the switch on, an out-of-scope open is denied with its reason, not asked.
+        const crRefused = openUrl ? await crBrowserOpenRefusal(args.browserHost, openUrl) : null;
+        if (crRefused) { decision(false); return { behavior: "deny" as const, message: crRefused }; }
         if (alreadyOpen) { decision(true); return { behavior: "allow" as const, updatedInput: input }; }
       }
       // #403 — the modal blocks the SDK stream for as long as the human takes

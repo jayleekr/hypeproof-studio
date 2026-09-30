@@ -149,6 +149,12 @@
       {
         "command": "hypeproof-chat.classroomApproveArtifact",
         "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소"
+      },
+      {
+        "command": "hypeproof-chat.pickElement",
+        "title": "HypeProof: 화면에서 요소 골라 코치에게 묻기",
+        "icon": "$(inspect)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
       }
     ],
     "menus": {
@@ -172,6 +178,11 @@
           "command": "hypeproof-chat.localReview",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@4"
+        },
+        {
+          "command": "hypeproof-chat.pickElement",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
@@ -192,6 +203,10 @@
         {
           "command": "hypeproof-chat.diagnoseVoiceCapability",
           "when": "false"
+        },
+        {
+          "command": "hypeproof-chat.pickElement",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
         }
       ]
     },

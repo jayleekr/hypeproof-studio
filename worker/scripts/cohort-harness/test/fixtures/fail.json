@@ -86,6 +86,12 @@
       "write": true,
       "browser": true,
       "subagents": true
+    },
+    "curriculum_runtime": {
+      "enabled": true
+    },
+    "browser_control": {
+      "enabled": true
     }
   },
   {

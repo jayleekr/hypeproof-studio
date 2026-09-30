@@ -533,6 +533,11 @@ export async function activate(context: vscode.ExtensionContext) {
       // Notification"), which broke every capture in the workshop.
     }),
 
+    // CR-09 (cr-browser) — pick an element in the Experiment Browser and ask the coach
+    // about it. Gated by the CR switch in package.json AND re-checked inside
+    // pickElement(), because a command can be executed without its menu (recon R3).
+    vscode.commands.registerCommand("hypeproof-chat.pickElement", () => provider.pickElement()),
+
     // #384 — "drag a screenshot in" that survives VS Code. Dropping a file on
     // the editor makes VS Code open it as a tab (it intercepts the drop before
     // the chat webview ever sees it). So we watch for an image tab opening and
