@@ -17,7 +17,7 @@ const PROXY = "https://api.hypeproof-ai.xyz/v1";
 // --- helpers ---
 function withFetch(status, fn) {
   const orig = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: status < 400 });
+  globalThis.fetch = async () => ({ ok: status < 400, status });
   try { return fn(); } finally { globalThis.fetch = orig; }
 }
 
