@@ -548,8 +548,10 @@ export function ChatPanel(props: Props) {
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
   ) : null;
-  // #1298 — instructor prop unifies the isInstructor check; ChatPanel never shows DisconnectedChat for an instructor.
-  if (!config?.profile && !config?.activity && !props.instructor) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  // #1298 — config null means postConfig not yet received; show loading regardless of instructor role.
+  // Once config arrives, an instructor may render without a profile or activity.
+  if (!config) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  if (!config.profile && !config.activity && !props.instructor) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <>

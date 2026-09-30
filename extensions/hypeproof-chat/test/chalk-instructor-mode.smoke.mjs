@@ -260,22 +260,31 @@ t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, shell/browser fal
   assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser, undefined, "browser must be off (undefined)");
 });
 
-// --- webview render guard (ChatPanel.tsx:551) ---
+// --- webview render guard (ChatPanel.tsx:553-554) ---
 // Verifies the boolean condition without DOM/React.
-// #1298: now uses props.instructor (not config.isInstructor) so the guard works even when
-// the host has not yet pushed a config with isInstructor:true.
-console.log("=== ChatPanel.tsx:551 — DisconnectedChat render guard ===");
+// #1298: config null (postConfig not yet received) → DisconnectedChat regardless of instructor role.
+// Once config arrives, instructor may render without profile or activity.
+console.log("=== ChatPanel.tsx:553 — DisconnectedChat render guard ===");
 
-// Mirrors the condition at ChatPanel.tsx:551.
+// Mirrors the two-step guard at ChatPanel.tsx:553-554.
 function shouldShowDisconnected(config, instructor) {
-  return !config?.profile && !config?.activity && !instructor;
+  if (!config) return true;
+  return !config.profile && !config.activity && !instructor;
 }
 
-t("instructor prop:true (no profile, no activity) → NOT DisconnectedChat", () => {
+t("config null + instructor:true → DisconnectedChat (postConfig not yet received)", () => {
+  assert.strictEqual(
+    shouldShowDisconnected(null, true),
+    true,
+    "null config must show DisconnectedChat even for instructor"
+  );
+});
+
+t("instructor prop:true (config present, no profile, no activity) → NOT DisconnectedChat", () => {
   assert.strictEqual(
     shouldShowDisconnected({ profile: null, activity: null }, true),
     false,
-    "instructor must not show DisconnectedChat"
+    "instructor must not show DisconnectedChat when config is present"
   );
 });
 
