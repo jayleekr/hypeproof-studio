@@ -22,6 +22,7 @@ export const BROWSER_TOOL_MODULES = [
   "artifactVersion.ts",
   "browserResult.ts",
   "browserMcp.ts",
+  "crHostWiring.ts",
 ];
 const PROVIDER_SDK = /^(?:@anthropic-ai\/|openai(?:\/|$)|@google\/(?:genai|generative-ai)|@ai-sdk\/|ai$|@mistralai\/|cohere-ai|groq-sdk|zhipuai)/;
 const IMPORT_RE = /(?:^|[\s;])(?:import\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?|export\s+[^'"]*?\s+from\s+|require\(\s*|import\(\s*)["']([^"']+)["']/g;
@@ -130,5 +131,36 @@ ok("CR-T03 positive: the same five-call script gives identical tool results thro
 const lossy = (id, r) => { const x = fromProxy(id, r); return { ...x, blocks: x.blocks.filter((b) => b[0] !== "image") }; };
 assert.notDeepEqual(await run(lossy), viaSdk);
 ok("CR-T03 negative: an adapter that changes a result is caught by the parity check");
+
+// ── CR-11 parity: both runtimes refuse an external origin, with the same reason ──
+{
+  const { checkAgentOrigin } = await import("../src/experimentBrowser.ts");
+  const { buildHypeproofMcpServer } = await import("../src/browserMcp.ts");
+  const ORIGIN = "http://127.0.0.1:5173";
+  const page = makeFakePage();
+  const ex = new CrExecutor(fakePort(page), { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: async () => {} });
+  const proxy = fromProxy("p", await ex.execute("browser_navigate", { url: "https://example.com/" }));
+  const tools = new Map();
+  const opened = [];
+  buildHypeproofMcpServer(
+    { tool: (name, _d, _s, fn) => (tools.set(name, fn), name), createSdkMcpServer: (o) => o },
+    { string: () => "s", boolean: () => "b", number: () => "n" },
+    {
+      openBrowser: async (url) => { opened.push(url); },
+      screenshot: async () => null,
+      startLivePreview: async () => null,
+      livePreviewUrl: async () => `${ORIGIN}/`,
+      crEnabled: () => true,
+      crScope: (url) => checkAgentOrigin(url, [ORIGIN]),
+    },
+    { curriculumRuntime: true },
+  );
+  const sdk = fromMcp("s", await tools.get("browser_open")({ url: "https://example.com/" }));
+  assert.equal(proxy.error, true);
+  assert.equal(sdk.error, true);
+  assert.deepEqual(sdk.blocks, proxy.blocks, "the same refusal text through both runtimes");
+  assert.deepEqual(opened, [], "the SDK host opened nothing");
+  ok("CR-T03/CR-T11 parity: an external origin is refused by both runtimes with the same reason");
+}
 
 console.log(`\n${passed} provider-neutral checks passed`);

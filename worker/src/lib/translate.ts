@@ -380,7 +380,8 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
   const base = baseBrowserContractFor(profile, runtime);
   // CR-02 — the Experiment Browser tools exist only behind the CR switch, and only
   // where the runtime already grants browser tools at all.
-  if (!base || profile.curriculum_runtime?.enabled !== true) return base;
+  // Never for minors, on either runtime (fail-closed like the SDK grant).
+  if (!base || profile.curriculum_runtime?.enabled !== true || isMinorCohort(profile)) return base;
   return `${base}\n\n${curriculumRuntimeBrowserContractMd as unknown as string}`;
 }
 
@@ -608,7 +609,8 @@ export function translate(
   // the profile opts in; the extension host executes them via CDP.
   if (profile.browser_control?.enabled === true) {
     // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
-    const crTools = profile.curriculum_runtime?.enabled === true ? CR_BROWSER_TOOLS : [];
+    // Never for minors: the SDK grant checks the tier, and so does this one.
+    const crTools = profile.curriculum_runtime?.enabled === true && !isMinorCohort(profile) ? CR_BROWSER_TOOLS : [];
     for (const t of [...BROWSER_TOOLS, ...crTools]) {
       tools.push({ name: t.name, description: t.description, input_schema: t.input_schema });
     }

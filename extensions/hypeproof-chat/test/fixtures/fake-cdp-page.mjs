@@ -28,6 +28,9 @@ export function makeFakePage(opts = {}) {
       { key: "help", role: "button", name: "도움말", tag: "button", id: "help" },
     ],
     dom: { hovered: null, clicked: [], selected: {}, scrolledTo: null },
+    // HTTP errors of the current document's resource loads, as Resource Timing reports them.
+    loadFailures: opts.loadFailures ?? [],
+    stopped: false,
     // Planted behaviour: what a document does when it loads (console lines, throws, 404s).
     onLoad: opts.onLoad ?? (() => {}),
     onClick: opts.onClick ?? (() => {}),
@@ -70,6 +73,20 @@ export function makeFakePage(opts = {}) {
       emit("Network.responseReceived", { requestId, response: { status: 404, statusText: "Not Found", url: `${state.origin}${path}` } });
       emit("Network.loadingFinished", { requestId });
     },
+    /**
+     * A renderer-initiated main-frame navigation (a link, `location = …`, a form submit):
+     * requested first, committed a moment later unless `Page.stopLoading` came in between.
+     */
+    requestNavigation(url) {
+      state.stopped = false;
+      emit("Page.frameRequestedNavigation", { frameId: "F1", reason: "anchorClick", url, disposition: "currentTab" });
+      setTimeout(() => {
+        if (state.stopped) return;
+        const u = new URL(url);
+        state.origin = u.origin;
+        page.newDocument(u.pathname);
+      }, 5);
+    },
     /** A new document: new loader, new context, new node ids (a reload or navigation). */
     newDocument(route = state.route) {
       state.loader++;
@@ -104,6 +121,9 @@ export function makeFakePage(opts = {}) {
           case "Input.insertText":
           case "Input.dispatchKeyEvent":
             return {};
+          case "Page.stopLoading":
+            state.stopped = true;
+            return {};
           case "Page.getFrameTree":
             return { frameTree: { frame: { id: "F1", loaderId: loaderId(), url: `${state.origin}${state.route}` } } };
           case "Runtime.enable":
@@ -117,6 +137,7 @@ export function makeFakePage(opts = {}) {
             if (e === "location.href") return { result: { value: `${state.origin}${state.route}` } };
             if (e.includes("innerWidth")) return { result: { value: JSON.stringify({ w: state.viewport.width, h: state.viewport.height }) } };
             if (e.includes("document.readyState")) return { result: { value: "complete" } };
+            if (e.includes("getEntriesByType")) return { result: { value: JSON.stringify(state.loadFailures) } };
             if (e.includes("scrollBy")) {
               const dy = Number(/scrollBy\(0, (-?\d+)\)/.exec(e)?.[1] ?? 0);
               state.scrollY += dy;
@@ -179,6 +200,7 @@ export function makeFakePage(opts = {}) {
             if (params.type === "mouseMoved" && hit) state.dom.hovered = hit.key;
             if (params.type === "mouseReleased" && hit && !hit.disabled) {
               state.dom.clicked.push(hit.key);
+              if (hit.href) page.requestNavigation(hit.href);
               state.onClick(page, hit.key);
             }
             return {};
@@ -188,7 +210,10 @@ export function makeFakePage(opts = {}) {
             return {};
           case "Page.navigate": {
             const u = new URL(params.url);
-            setTimeout(() => page.newDocument(u.pathname), 5);
+            setTimeout(() => {
+              state.origin = u.origin;
+              page.newDocument(u.pathname);
+            }, 5);
             return { frameId: "F1", loaderId: `L${state.loader + 1}` };
           }
           case "Page.getNavigationHistory":

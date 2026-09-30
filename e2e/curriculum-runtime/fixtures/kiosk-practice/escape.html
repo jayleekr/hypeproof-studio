@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  Scope-escape fixture (cr-browser #1391, CR-T11). Three ways an agent action can take the
+  tab to another origin without browser_navigate: a link, a script setting location, and
+  a form submit. The other origin comes from ?ext=<origin>; its paths collide with this
+  project's own files on purpose (index.html), so a version lookup by path alone would
+  wrongly succeed there.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>범위 밖으로</title>
+</head>
+<body>
+  <a id="out" href="#">바깥 링크</a>
+  <button id="js" type="button">스크립트로 이동</button>
+  <form id="send" method="get"><button type="submit">보내기</button></form>
+  <a id="inside" href="index.html">키오스크로</a>
+  <script>
+    var ext = new URLSearchParams(location.search).get("ext") || "";
+    document.getElementById("out").href = ext + "/index.html";
+    document.getElementById("js").addEventListener("click", function () { location.href = ext + "/js.html"; });
+    document.getElementById("send").action = ext + "/index.html";
+  </script>
+</body>
+</html>

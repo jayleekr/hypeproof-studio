@@ -8,7 +8,7 @@
 // way the mock-channel smokes assume.
 //
 // CR-T04 observation · CR-T05 records · CR-T06 actions · CR-T07 five-step flow ·
-// CR-T08 step of a failure · CR-T09 element → AI · CR-T11 origin scope ·
+// CR-T08 step of a failure · CR-T09 element → AI · CR-T11 origin scope (direct and indirect) ·
 // CR-T63 indicator · CR-T56 capture timing (30 samples). Each with its controls.
 //
 // Run (from e2e/): node --experimental-strip-types curriculum-runtime/experiment-browser.real.mjs [--out result.json]
@@ -73,7 +73,7 @@ async function openTab(path) {
   const page = await context.newPage();
   const session = await context.newCDPSession(page);
   const EVENTS = [
-    "Page.frameNavigated", "Page.javascriptDialogOpening", "Page.javascriptDialogClosed",
+    "Page.frameNavigated", "Page.frameRequestedNavigation", "Page.frameStartedNavigating", "Page.javascriptDialogOpening", "Page.javascriptDialogClosed",
     "Runtime.executionContextCreated", "Runtime.executionContextDestroyed", "Runtime.consoleAPICalled", "Runtime.exceptionThrown",
     "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed", "Log.entryAdded", "Overlay.inspectNodeRequested",
   ];
@@ -97,8 +97,10 @@ async function openTab(path) {
   return { page, cdp, port };
 }
 
+// Mirrors the product hook (chatPanelProvider.crBrowserOptions): only the preview origin has a version.
 const version = (url) => {
   const u = new URL(url);
+  if (u.origin !== ORIGIN) throw new Error(`미리보기 주소가 아니에요: ${u.origin}`);
   return artifactVersionFor(ROOT, u.pathname);
 };
 const executor = (port, over = {}) =>
@@ -145,6 +147,19 @@ const refOf = (snapshot, role, name) => {
   await page.waitForTimeout(800);
   record("CR-T05", "a live-server SSE reload is seen as a new document", log.documentGeneration !== before, `${before} → ${log.documentGeneration}`);
   await page.close();
+}
+// Late attach: the first CR call of a turn comes after the page loaded (a new CDP session
+// per proxy turn). Network events are not replayed, so the load-time 404 must be recovered.
+{
+  const { port, page } = await openTab("/typo.html");
+  const r = await executor(port).execute("browser_observe");
+  const recs = r.observation?.records ?? [];
+  record("CR-T05", "late attach: a script 404 during load, before the log attached, is still reported", !r.isError && recs.some((x) => x.kind === "network" && /app-typo\.js/.test(x.message)) && r.observation.recordsPartial === true, JSON.stringify(recs.map((x) => x.message)));
+  await page.close();
+  const clean = await openTab("/index.html");
+  const c = await executor(clean.port).execute("browser_observe");
+  record("CR-T05", "late attach control: a clean page observed after load is \"none confirmed\", never a plain \"none\"", !c.isError && c.observation.records.length === 0 && /확인된 것 없음/.test(c.content[0].text) && !/실패한 요청: 없음/.test(c.content[0].text));
+  await clean.page.close();
 }
 
 // ── CR-T06 ──────────────────────────────────────────────────────────────────
@@ -225,6 +240,21 @@ async function runFlow(query) {
   const at3 = planted.failures.filter((f) => /planted-step3-error/.test(f.message));
   record("CR-T08", "a console error raised in step 3 is reported once, at step 3", at3.length === 1 && at3[0].step === 3 && planted.failures.length === 1, JSON.stringify(planted.failures));
   record("CR-T08", "negative: the unmodified flow reports no failure", clean.failures.length === 0, JSON.stringify(clean.failures));
+  const chatty = await runFlow("?plant=chatty");
+  record("CR-T08", "negative: console.log and console.info on every step are not failures", chatty.failedAt === null && chatty.failures.length === 0, JSON.stringify(chatty));
+}
+{
+  // An error the student causes between agent steps belongs to no step.
+  const { port, page } = await openTab("/index.html");
+  const ex = executor(port);
+  const o = (await ex.execute("browser_observe")).observation;
+  await ex.execute("browser_hover", { ref: refOf(o.snapshot, "button", "주문 시작") });
+  await page.evaluate(() => console.error("student-made-error-between-steps"));
+  await page.waitForTimeout(100);
+  const r = await ex.execute("browser_observe");
+  const rec = r.observation?.records.find((x) => x.message === "student-made-error-between-steps");
+  record("CR-T08", "an error outside any agent step carries step null, not the last step", !!rec && rec.step === null, JSON.stringify(rec ?? null));
+  await page.close();
 }
 
 // ── CR-T09: element → AI ─────────────────────────────────────────────────────
@@ -265,6 +295,20 @@ async function runFlow(query) {
   record("CR-T09", "negative: an element the script generates is \"unmapped\", never a guessed file", tip.source === "unmapped", JSON.stringify(tip.source));
   await page.close();
 }
+{
+  // A script-made clone whose text equals a static element's (#begin, line 4 area).
+  const { port, cdp, page } = await openTab("/index.html?plant=clone");
+  const ex = executor(port);
+  await ex.execute("browser_observe");
+  const log = await ex.logFor(cdp);
+  const deps = { root: ROOT, artifactVersion: version, refFor: (x) => ex.refFor(x), adopt: (r, g) => ex.adoptRefs(r, g) };
+  const idOf = async (sel) => (await cdp.send("DOM.describeNode", { objectId: (await cdp.send("Runtime.evaluate", { expression: `document.querySelector(${JSON.stringify(sel)})` })).result.objectId })).node.backendNodeId;
+  const clone = await buildElementContext(cdp, log, await idOf("#clone"), deps);
+  record("CR-T09", "negative: a script-made clone sharing a static element's text is \"unmapped\"", clone.source === "unmapped", JSON.stringify(clone.source));
+  const begin = await buildElementContext(cdp, log, await idOf("#begin"), deps);
+  record("CR-T09", "control: the static element next to its clone still maps by id", begin.source !== "unmapped" && begin.source.file === "index.html", JSON.stringify(begin.source));
+  await page.close();
+}
 
 // ── CR-T11 ──────────────────────────────────────────────────────────────────
 {
@@ -276,6 +320,40 @@ async function runFlow(query) {
   const out = await ex.execute("browser_navigate", { url: "https://example.com/" });
   record("CR-T11", "negative: navigating to an external origin is refused with a reason, before any CDP call", out.isError && /범위 밖이라 거절/.test(out.content[0].text) && cdp.calls.length === before && page.url().startsWith(ORIGIN));
   await page.close();
+}
+{
+  // Indirect escapes: a second local server stands in for "another origin". Its paths
+  // collide with the project's files (index.html), the case a path-only version would miss.
+  const external = createServer((req, res) => {
+    const r = serveStatic(ROOT, req.url ?? "/");
+    res.writeHead(r.status, { "content-type": r.contentType, "cache-control": "no-store" });
+    res.end(r.body);
+  });
+  await new Promise((r) => external.listen(0, "127.0.0.1", r));
+  const EXT = `http://127.0.0.1:${external.address().port}`;
+  let hits = 0;
+  external.on("request", () => { hits++; });
+  for (const [label, target] of [["a link click", ["link", "바깥 링크"]], ["a script setting location", ["button", "스크립트로 이동"]], ["a form submit", ["button", "보내기"]]]) {
+    const { port, page } = await openTab(`/escape.html?ext=${encodeURIComponent(EXT)}`);
+    const results = [];
+    const ex = executor(port, { onResult: (tool) => results.push(tool) });
+    const o = (await ex.execute("browser_observe")).observation;
+    const r = await ex.execute("browser_click", { ref: refOf(o.snapshot, ...target) });
+    await page.waitForTimeout(300);
+    const back = page.url();
+    record("CR-T11", `negative: ${label} to another origin is refused, nothing of it observed or recorded, tab back on the preview`,
+      r.isError && /범위 밖/.test(r.content[0].text) && !r.observation && results.length === 1 && back.startsWith(ORIGIN),
+      `${r.content[0].text.replace(/\s+/g, " ").slice(0, 140)} → tab ${back}`);
+    await page.close();
+  }
+  const { port, page } = await openTab(`/escape.html?ext=${encodeURIComponent(EXT)}`);
+  const ex = executor(port);
+  const o = (await ex.execute("browser_observe")).observation;
+  const inside = await ex.execute("browser_click", { ref: refOf(o.snapshot, "link", "키오스크로") });
+  record("CR-T11", "control: a link to the preview's own page is a normal result", !inside.isError && inside.observation?.route === "/index.html", inside.isError ? inside.content[0].text : "");
+  await page.close();
+  record("CR-T11", "instrument: the other origin was really reached by at least one attempt (the stop is not vacuous)", hits > 0, `requests to ${EXT}: ${hits}`);
+  external.close();
 }
 
 // ── CR-T63: the page outline is on during a step and off for evidence ──────

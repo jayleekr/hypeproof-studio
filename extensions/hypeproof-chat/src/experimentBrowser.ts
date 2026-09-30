@@ -44,6 +44,11 @@ export interface PageRecord {
 }
 
 const MAX_MESSAGE = 500;
+/** A Log entry without a request id arriving this soon after a commit may be the old document's. */
+const LOG_COMMIT_WINDOW_MS = 1000;
+/** HTTP errors of the current document's own resource loads (Resource Timing, Chromium 109+). */
+const LOAD_FAILURES_EXPR =
+  "JSON.stringify(performance.getEntriesByType('resource').filter(function(e){return e.responseStatus>=400}).map(function(e){return {u:e.name,s:e.responseStatus}}))";
 /** Log sources already covered by Runtime/Network events, so they would be counted twice. */
 const DUPLICATE_LOG_SOURCES = new Set(["network", "javascript", "console-api"]);
 
@@ -85,6 +90,10 @@ export class PageEventLog {
   private readonly docListeners = new Set<(generation: string) => void>();
   private sub: { dispose(): void } | undefined;
   private dialog: string | null = null;
+  /** When the main frame last committed a new document (epoch ms), for Log attribution. */
+  private committedAt = 0;
+  /** Documents this log first saw after they had loaded: their load-time records are partial. */
+  private readonly lateAttached = new Set<string>();
 
   constructor(opts: { maxPerDocument?: number; keepDocuments?: number; now?: () => number } = {}) {
     this.maxPerDocument = opts.maxPerDocument ?? 100;
@@ -109,6 +118,39 @@ export class PageEventLog {
     await cdp.send("Log.enable", {}).catch(() => {
       /* Log is supplementary; the three required record kinds come from Runtime/Network */
     });
+    // Network events are not replayed, so a document that loaded before this attach has
+    // lost its load-time request failures. Recover the HTTP errors from the document's own
+    // Resource Timing (it belongs to this document by construction) and mark the rest as
+    // unknown rather than reporting a clean page.
+    const seeded = this.generation;
+    if (seeded && typeof frame?.url === "string" && frame.url && frame.url !== "about:blank") {
+      this.lateAttached.add(seeded);
+      const r = await cdp
+        .send("Runtime.evaluate", { expression: LOAD_FAILURES_EXPR, returnByValue: true })
+        .catch(() => null);
+      let failures: Array<{ u?: unknown; s?: unknown }> = [];
+      try {
+        const parsed = JSON.parse(String(r?.result?.value ?? "[]"));
+        if (Array.isArray(parsed)) failures = parsed;
+      } catch {
+        /* not a page we can read: the generation stays marked partial */
+      }
+      for (const f of failures) {
+        const url = String(f.u ?? "");
+        const status = Number(f.s);
+        if (!url || !Number.isFinite(status) || status < 400) continue;
+        this.push(seeded, { kind: "network", level: "error", message: `${status} ${url}`, source: { url }, time: this.now() });
+      }
+    }
+  }
+
+  /** Did this log start after `generation` had loaded (its load-time records may be partial)? */
+  attachedLate(generation: string | null = this.generation): boolean {
+    return !!generation && this.lateAttached.has(generation);
+  }
+
+  get mainFrame(): string | null {
+    return this.mainFrameId;
   }
 
   dispose(): void {
@@ -244,7 +286,12 @@ export class PageEventLog {
         const entry = p.entry ?? {};
         if (DUPLICATE_LOG_SOURCES.has(String(entry.source))) return;
         if (entry.level !== "error" && entry.level !== "warning") return;
-        this.push(this.generation ?? undefined, {
+        // Attribute through the request when the entry names one; otherwise an entry that
+        // arrives right after a commit may be the previous document's, so it is dropped
+        // rather than guessed onto the new one (CR-05 negative).
+        const viaRequest = typeof entry.networkRequestId === "string" ? this.requests.get(entry.networkRequestId)?.generation : undefined;
+        if (!viaRequest && this.now() - this.committedAt < LOG_COMMIT_WINDOW_MS) return;
+        this.push(viaRequest ?? this.generation ?? undefined, {
           kind: "log",
           level: String(entry.level),
           message: String(entry.text ?? ""),
@@ -261,6 +308,7 @@ export class PageEventLog {
   private setGeneration(generation: string, notify: boolean): void {
     if (generation === this.generation) return;
     this.generation = generation;
+    if (notify) this.committedAt = this.now();
     if (!this.byGeneration.has(generation)) this.byGeneration.set(generation, { records: [], dropped: 0 });
     while (this.byGeneration.size > this.keepDocuments) {
       const oldest = this.byGeneration.keys().next().value as string;
@@ -326,6 +374,8 @@ export interface Observation {
   documentGeneration: string;
   records: PageRecord[];
   droppedRecords: number;
+  /** True when observation began after this document had loaded: load-time records may be missing. */
+  recordsPartial?: boolean;
   step: number | null;
   artifact: ArtifactVersionRef | null;
 }
@@ -365,6 +415,19 @@ export function routeOf(href: string): string {
 
 export type OriginVerdict = { ok: true } | { ok: false; reason: string };
 
+/** The live server's viewport-inspection wrapper (hypeproof-chat.previewViewport). */
+export const VIEWPORT_WRAPPER_PATH = "/__hp_viewport";
+
+/** An agent action moved the tab out of scope (CR-11); `url` is where it went. */
+export class ScopeEscapeError extends Error {
+  readonly url: string;
+  constructor(url: string, reason: string) {
+    super(reason);
+    this.name = "ScopeEscapeError";
+    this.url = url;
+  }
+}
+
 /**
  * May an agent browser action act on `url`? Only the student's own artifact origins
  * (`allowedOrigins`: the live-server origin today; published test origins of the same
@@ -379,6 +442,11 @@ export function checkAgentOrigin(url: string, allowedOrigins: readonly string[])
     return { ok: false, reason: `주소를 해석할 수 없어요: ${url}` };
   }
   const allowed = allowedOrigins.filter(Boolean);
+  if (origin !== "null" && new URL(url).pathname === VIEWPORT_WRAPPER_PATH) {
+    // The viewport wrapper shows the student's page in an iframe; the main-frame tree,
+    // refs and document generation would all be the wrapper's, not the student's page.
+    return { ok: false, reason: "화면 크기 비교 보기(__hp_viewport)에서는 실험 브라우저가 움직이지 않아요. 원래 미리보기 주소로 연 뒤에 다시 시도하세요." };
+  }
   if (allowed.length === 0) {
     return { ok: false, reason: "학생 미리보기가 켜져 있지 않아요. 실험 브라우저는 미리보기 주소에서만 움직여요 — 먼저 미리보기를 시작하세요." };
   }
@@ -591,8 +659,14 @@ export function observationText(o: Observation): string {
     `문서 세대: ${o.documentGeneration}`,
     `산출물 버전: ${o.artifact ? `${o.artifact.id} (${o.artifact.entry}, 파일 ${o.artifact.files.length}개)` : "없음"}`,
   ];
-  if (o.records.length === 0) lines.push("이 문서의 콘솔·오류·실패한 요청: 없음");
-  else {
+  if (o.records.length === 0) {
+    lines.push(
+      o.recordsPartial
+        ? "이 문서의 콘솔·오류·실패한 요청: 확인된 것 없음 — 단, 관찰이 페이지가 뜬 뒤에 시작돼 로드 중의 요청 실패는 HTTP 오류만 되살렸어요. 확실히 보려면 browser_reload 하세요."
+        : "이 문서의 콘솔·오류·실패한 요청: 없음",
+    );
+  } else {
+    if (o.recordsPartial) lines.push("(관찰이 페이지가 뜬 뒤에 시작돼 로드 중의 요청 실패는 HTTP 오류만 되살렸어요.)");
     lines.push(`이 문서의 콘솔·오류·실패한 요청 ${o.records.length}건${o.droppedRecords ? ` (+${o.droppedRecords}건 생략)` : ""}:`);
     for (const r of o.records) {
       const where = r.source?.url ? ` @ ${r.source.url}${r.source.line ? `:${r.source.line}` : ""}` : "";
@@ -736,8 +810,24 @@ export class CrExecutor {
     }
     const observeOnly = OBSERVE_ONLY.has(name);
     const step = observeOnly ? (this.step || null) : ++this.step;
+    const startUrl = name === "browser_navigate" ? null : this.port.tabUrl() ?? null;
     let cdp: CdpLike | null = null;
+    let log: PageEventLog | null = null;
     let indicator: AutomationIndicator | null = null;
+    /** The first out-of-scope main-frame navigation the step caused, if any (CR-11). */
+    const escape: { to: string | null } = { to: null };
+    let watch: { dispose(): void } | undefined;
+    const watchNavigations = (c: CdpLike, l: PageEventLog) => {
+      watch = c.onEvent((e) => {
+        if (escape.to) return;
+        const url = mainFrameNavigationUrl(e, l.mainFrame);
+        if (url && !checkAgentOrigin(url, allowed).ok) {
+          escape.to = url;
+          // Stop it before it commits where we can; the post-step check restores otherwise.
+          void c.send("Page.stopLoading", {}).catch(() => {});
+        }
+      });
+    };
     const showIndicator = async () => {
       if (!cdp) return;
       indicator ??= this.indicatorFor(cdp, name);
@@ -749,12 +839,14 @@ export class CrExecutor {
         this.hooks.onIndicator?.(true, name);
         await this.port.navigate(target!);
         cdp = await this.port.session();
-        (await this.logFor(cdp)).setStep(step);
+        log = await this.logFor(cdp);
+        log.setStep(step);
         await showIndicator();
       } else {
         cdp = await this.port.session();
-        const log = await this.logFor(cdp);
+        log = await this.logFor(cdp);
         log.setStep(step);
+        watchNavigations(cdp, log);
         this.hooks.onIndicator?.(true, name);
         // A native JS dialog blocks page evaluation, so the page outline cannot be drawn
         // while one is open; the dialog itself and the chat-panel line are what show.
@@ -762,15 +854,50 @@ export class CrExecutor {
         const message = await this.act(cdp, log, name, input);
         if (message === null) return crFail(`알 수 없는 도구: ${name}`);
         if (!observeOnly) await (this.hooks.sleep ?? defaultSleep)(this.hooks.settleMs ?? 250);
+        if (escape.to) {
+          const v = checkAgentOrigin(escape.to, allowed);
+          throw new ScopeEscapeError(escape.to, v.ok ? "" : v.reason);
+        }
         return await this.finish(cdp, name, input, message, step, indicator);
       }
       return await this.finish(cdp, name, input, `이동 완료 — ${target}`, step, indicator);
     } catch (err) {
+      if (err instanceof ScopeEscapeError && cdp && log) return crFail(await this.refuseEscape(cdp, log, name, err, startUrl));
       return crFail(err instanceof Error ? err.message : String(err));
     } finally {
+      watch?.dispose();
       if (indicator) await (indicator as AutomationIndicator).hide().catch(() => {});
       this.hooks.onIndicator?.(false, name);
+      // Records captured after this step belong to no step (CR-08): not carried over.
+      log?.setStep(null);
     }
+  }
+
+  /**
+   * An action navigated the tab off scope (a link, a script setting location, a form
+   * submit, a redirect). Nothing of that page is observed or returned: the load is
+   * stopped, the tab is taken back to where the step started, and the result is a
+   * refusal with the reason (CR-11). The refs are dropped, since they were the old page's.
+   */
+  private async refuseEscape(cdp: CdpLike, log: PageEventLog, name: string, err: ScopeEscapeError, startUrl: string | null): Promise<string> {
+    this.refs = new Map();
+    this.refsGeneration = null;
+    const allowed = this.hooks.allowedOrigins();
+    await cdp.send("Page.stopLoading", {}).catch(() => {});
+    let where = "";
+    const now = await currentHref(cdp).catch(() => null);
+    if (now && checkAgentOrigin(now, allowed).ok) where = `탭은 그대로 ${now} 에 있어요.`;
+    else if (startUrl && checkAgentOrigin(startUrl, allowed).ok) {
+      const before = log.documentGeneration;
+      try {
+        await cdp.send("Page.navigate", { url: startUrl });
+        await waitForDocument(cdp, log, before, this.hooks.sleep);
+        where = `탭을 ${startUrl} (으)로 되돌렸어요.`;
+      } catch {
+        where = `탭을 ${startUrl} (으)로 되돌리지 못했어요 — 미리보기를 다시 여세요.`;
+      }
+    } else where = "탭을 되돌릴 주소가 없어요 — 미리보기를 다시 여세요.";
+    return `${name} 때문에 페이지가 범위 밖(${err.url})으로 가려 해서 멈췄어요. ${err.message} ${where} 그 페이지는 관찰하지 않았어요. browser_observe로 다시 읽어 최신 ref를 받아주세요.`;
   }
 
   private indicatorFor(cdp: CdpLike, _tool: string): AutomationIndicator {
@@ -886,6 +1013,7 @@ export class CrExecutor {
     const observation = await observePage(cdp, log, {
       step,
       indicator,
+      scope: (url) => checkAgentOrigin(url, this.hooks.allowedOrigins()),
       artifactVersion: (url) => this.hooks.artifactVersion(url),
     });
     this.adoptRefs(observation.refMap, observation.documentGeneration);
@@ -902,6 +1030,25 @@ export class CrExecutor {
       observation: obs,
     };
   }
+}
+
+/** The URL a main-frame navigation event is heading to, or null for anything else. */
+function mainFrameNavigationUrl(e: { method: string; params: Record<string, any> }, mainFrameId: string | null): string | null {
+  const p = e.params ?? {};
+  if (e.method === "Page.frameRequestedNavigation" || e.method === "Page.frameStartedNavigating") {
+    if (mainFrameId && p.frameId !== mainFrameId) return null;
+    return typeof p.url === "string" ? p.url : null;
+  }
+  if (e.method === "Page.frameNavigated") {
+    if (!p.frame || p.frame.parentId) return null;
+    return typeof p.frame.url === "string" ? p.frame.url : null;
+  }
+  return null;
+}
+
+async function currentHref(cdp: CdpLike): Promise<string> {
+  const r = await cdp.send("Runtime.evaluate", { expression: "location.href", returnByValue: true }, 3000);
+  return String(r?.result?.value ?? "");
 }
 
 async function waitForDocument(cdp: CdpLike, log: PageEventLog, before: string | null, sleep = defaultSleep, timeoutMs = 12_000): Promise<void> {
@@ -926,6 +1073,8 @@ export async function observePage(
   opts: {
     step: number | null;
     indicator?: AutomationIndicator | null;
+    /** CR-11: a page out of scope is never observed; it throws ScopeEscapeError instead. */
+    scope?(url: string): OriginVerdict;
     artifactVersion(url: string): Promise<ArtifactVersionRef>;
   },
 ): Promise<Observation & { refMap: Map<string, number> }> {
@@ -935,6 +1084,8 @@ export async function observePage(
   });
   const page = JSON.parse(String(loc?.result?.value ?? "{}"));
   const url = String(page.h ?? "");
+  const inScope = opts.scope?.(url);
+  if (inScope && !inScope.ok) throw new ScopeEscapeError(url, inScope.reason);
   let generation = log.documentGeneration;
   let ax = await cdp.send("Accessibility.getFullAXTree", {});
   if (log.documentGeneration !== generation) {
@@ -964,6 +1115,7 @@ export async function observePage(
     documentGeneration: generation ?? "",
     records: log.records(generation),
     droppedRecords: log.dropped(generation),
+    ...(log.attachedLate(generation) ? { recordsPartial: true } : {}),
     step: opts.step,
     artifact,
   };

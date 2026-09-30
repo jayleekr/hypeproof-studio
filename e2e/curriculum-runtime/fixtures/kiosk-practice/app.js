@@ -11,6 +11,19 @@
     fetch("missing-404.json").catch(function () {});
   }
   if (plant === "disabled-step4") $("add").disabled = true;
+  if (plant === "chatty") {
+    document.addEventListener("click", function (e) {
+      console.log("clicked", e.target && e.target.id);
+      console.info("state ok");
+    });
+  }
+  if (plant === "clone") {
+    var clone = document.createElement("button");
+    clone.type = "button";
+    clone.id = "clone";
+    clone.textContent = "주문 시작";
+    document.body.appendChild(clone);
+  }
 
   $("begin").addEventListener("click", function () {
     $("start").hidden = true;

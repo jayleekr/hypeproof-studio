@@ -5,6 +5,8 @@
     ?plant=console-step3   step 3 (+1) raises console.error once        (CR-T08)
     ?plant=disabled-step4  step 4 (담기) is disabled, the flow cannot end (CR-T07 negative)
     ?plant=errors          on load: one console.error, one throw, one 404 (CR-T05)
+    ?plant=chatty          every click logs console.log and console.info, never an error (CR-T08 control)
+    ?plant=clone           the script adds <button id="clone">주문 시작</button>, same text as #begin (CR-T09)
   Everything else is a clean page: no console output, no errors, no failed request.
 -->
 <html lang="ko">

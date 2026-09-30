@@ -124,7 +124,7 @@ export class BrowserControl {
    */
   async pickElement(opts: { root: string | null; timeoutMs?: number }): Promise<ElementContext> {
     const cr = this.crExecutor();
-    if (!cr || !this.crOptions) throw new Error("이 코호트에서는 요소 고르기가 꺼져 있어요.");
+    if (!cr || !this.crOptions) throw new Error("지금 수업에서는 요소 고르기를 쓸 수 없어요.");
     const url = this.currentTab()?.url;
     if (!url) throw new Error("열린 미리보기 탭이 없어요. 먼저 미리보기를 여세요.");
     const scope = checkAgentOrigin(url, this.crOptions.allowedOrigins());

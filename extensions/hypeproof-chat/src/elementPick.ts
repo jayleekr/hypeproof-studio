@@ -100,8 +100,14 @@ export async function waitForPick(cdp: CdpLike, timeoutMs = 60_000): Promise<num
 }
 
 const ELEMENT_FACTS = `function(){
-  var t = (this.innerText || this.textContent || '').replace(/\\s+/g, ' ').trim();
-  return { tag: String(this.tagName || '').toLowerCase(), id: this.id || '', text: t.slice(0, 200) };
+  var norm = function(el){ return (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim(); };
+  var t = norm(this);
+  var twins = 0;
+  try {
+    var same = this.ownerDocument.getElementsByTagName(this.tagName);
+    for (var i = 0; i < same.length; i++) if (norm(same[i]) === t) twins++;
+  } catch (e) { twins = 0; }
+  return { tag: String(this.tagName || '').toLowerCase(), id: this.id || '', text: t.slice(0, 200), twins: twins };
 }`;
 
 /**
@@ -222,9 +228,12 @@ const lineAt = (text: string, index: number) => text.slice(0, index).split("\n")
 /**
  * Where in `html` is the element defined? By id when it has one, else by its exact text
  * inside a same-tag element. One match or nothing: two candidates are a guess, and a
- * guess is "unmapped".
+ * guess is "unmapped". An element with an id no markup defines was made by a script, so
+ * it is "unmapped" too (never matched by text to some other element). `twins` is how
+ * many same-tag elements in the live page carry the same text: more than one means a
+ * text match cannot tell them apart, so it is not tried.
  */
-export function mapSource(html: string, fileRel: string, el: { tag: string; id?: string; text?: string }): SourceMapping {
+export function mapSource(html: string, fileRel: string, el: { tag: string; id?: string; text?: string; twins?: number }): SourceMapping {
   const tag = (el.tag || "").toLowerCase();
   if (!/^[a-z][a-z0-9-]*$/.test(tag)) return "unmapped";
   const markup = markupOnly(html);
@@ -232,8 +241,9 @@ export function mapSource(html: string, fileRel: string, el: { tag: string; id?:
     const re = new RegExp(`<${tag}\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(el.id)}["']`, "gi");
     const hits = [...markup.matchAll(re)];
     if (hits.length === 1) return { file: fileRel, line: lineAt(markup, hits[0].index ?? 0) };
-    if (hits.length > 1) return "unmapped";
+    return "unmapped";
   }
+  if (typeof el.twins === "number" && el.twins > 1) return "unmapped";
   const want = norm(el.text ?? "");
   if (!want) return "unmapped";
   const open = new RegExp(`<${tag}\\b[^>]*>`, "gi");
@@ -247,7 +257,7 @@ export function mapSource(html: string, fileRel: string, el: { tag: string; id?:
   return hits.length === 1 ? { file: fileRel, line: lineAt(markup, hits[0]) } : "unmapped";
 }
 
-async function mapSourceFromUrl(root: string, url: string, el: { tag: string; id?: string; text?: string }): Promise<SourceMapping> {
+async function mapSourceFromUrl(root: string, url: string, el: { tag: string; id?: string; text?: string; twins?: number }): Promise<SourceMapping> {
   let pathname: string;
   try {
     const u = new URL(url);

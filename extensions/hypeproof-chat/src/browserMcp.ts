@@ -188,6 +188,27 @@ export interface BrowserMcpHost {
    * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
    */
   inspect?(name: string, input: Record<string, unknown>): Promise<McpToolResult | null>;
+  /**
+   * CR-02/CR-11 — is the Curriculum Runtime switch on for the served profile? With it on,
+   * agent browser actions stay on the student's own preview origin (`crScope`), and the
+   * CR executor's refusals are final: no tool falls back to a path that ignores scope.
+   */
+  crEnabled?(): boolean;
+  /** CR-11 — may an agent open `url`? Asked only while `crEnabled()` is true. */
+  crScope?(url: string): { ok: true } | { ok: false; reason: string };
+}
+
+/**
+ * CR-11 — the reason `browser_open` must refuse `url` with the switch on, or null. A
+ * loopback address while no live server runs is left to #507, which starts the student's
+ * own live server instead of opening the guessed port. Shared by canUseTool (so no
+ * approval modal is raised for a request that will be refused) and the handler.
+ */
+export async function crBrowserOpenRefusal(host: BrowserMcpHost, url: string): Promise<string | null> {
+  if (!host.crEnabled?.() || !host.crScope) return null;
+  if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) return null;
+  const v = host.crScope(url);
+  return v.ok ? null : v.reason;
 }
 
 /**
@@ -348,7 +369,7 @@ export interface ZodLike {
   string(): unknown;
   /** #457 — browser_type 의 submit 플래그용. */
   boolean?(): unknown;
-  /** CR-06 — browser_scroll 의 dy 용. */
+  /** CR-06 — for browser_scroll's dy. */
   number?(): unknown;
 }
 
@@ -409,6 +430,9 @@ export function buildHypeproofMcpServer(
           isError: true,
         };
       }
+      // CR-11 — with the switch on, only the student's own preview is opened, before any tab action.
+      const crRefused = await crBrowserOpenRefusal(host, url);
+      if (crRefused) return { content: [{ type: "text", text: crRefused }], isError: true };
       // #415 — 이미 그 페이지가 떠 있으면 열지 않는다. 다시 열면 탭이 중복으로
       // 생기고, 보고 있던 페이지가 리로드돼 스크롤·상태가 날아가고, 턴 예산이
       // 깎인다. (승인 모달은 canUseTool 이 같은 판정으로 이미 건너뛴다.)
@@ -454,7 +478,20 @@ export function buildHypeproofMcpServer(
         // 시작 실패(작업 폴더 없음 등)는 아래 일반 경로로 떨어진다 — 여기서
         // 멈추면 정상적인 루프백 요청까지 막힌다.
       }
-      const outcome = await host.openBrowser(url);
+      // CR-11 — re-checked here: the #507 branch above can fall through with the live
+      // server still down, and nothing past this line may open an out-of-scope page.
+      if (host.crEnabled?.() && host.crScope) {
+        const v = host.crScope(url);
+        if (!v.ok) return { content: [{ type: "text", text: v.reason }], isError: true };
+      }
+      let outcome: BrowserOpenOutcome | void;
+      try {
+        outcome = await host.openBrowser(url);
+      } catch (err) {
+        // With the switch on the host refuses instead of falling back to a scope-blind path.
+        if (!host.crEnabled?.()) throw err;
+        return { content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }], isError: true };
+      }
       // #526 — "열었어요"가 사실이 아닐 때가 있다. 슬롯당 탭 하나(#519)라서, 같은
       // 슬롯에 탭이 있으면 그 탭이 **이 주소로 이동**한다 — 즉 보고 있던 페이지가
       // 화면에서 사라진다. 결과가 그걸 말하지 않으면 코치는 참고 사이트 두 개가
@@ -500,6 +537,9 @@ export function buildHypeproofMcpServer(
       if (host.inspect) {
         const viaCdp = await host.inspect("browser_screenshot", {});
         if (viaCdp && !viaCdp.isError) return withPageState(viaCdp, await readCurrentPage(host));
+        // CR-11 — with the switch on the CR executor's refusal (out of scope, no version,
+        // a dialog open) is the answer; the fallback below would capture the tab anyway.
+        if (viaCdp && host.crEnabled?.()) return withPageState(viaCdp, await readCurrentPage(host));
       }
       const shot = await host.screenshot();
       if (!shot || !shot.imageBase64) {

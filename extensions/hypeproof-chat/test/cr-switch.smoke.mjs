@@ -33,6 +33,8 @@ const vscode = await import(stub);
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const protocolSrc = readFileSync(new URL("../src/protocol.ts", import.meta.url), "utf8");
 const providerSrc = readFileSync(new URL("../src/chatPanelProvider.ts", import.meta.url), "utf8");
+const sdkCoachSrc = readFileSync(new URL("../src/sdkCoach.ts", import.meta.url), "utf8");
+const { crContextKeyValue, crMcpRegistration } = await import("../src/crHostWiring.ts");
 let passed = 0;
 const ok = (name) => { passed++; console.log(`✓ ${name}`); };
 
@@ -82,6 +84,21 @@ assert.deepEqual(registered({ curriculumRuntime: false }).filter((n) => short.in
 assert.deepEqual(registered({ curriculumRuntime: true }).filter((n) => short.includes(n)).sort(), [...short].sort());
 ok("MCP tools: absent from the grant and the server with the switch off; all present with it on");
 
+// ── the glue that feeds the parts above ─────────────────────────────────────
+// The registration decision: what the grant says, nothing else (a grant without CR tools registers none).
+assert.deepEqual(crMcpRegistration(off), { curriculumRuntime: false });
+assert.deepEqual(crMcpRegistration(on), { curriculumRuntime: true });
+assert.deepEqual(crMcpRegistration([]), { curriculumRuntime: false });
+assert.deepEqual(registered(crMcpRegistration(off)).filter((n) => short.includes(n)), [], "end to end: the off grant registers no CR tool");
+// …and it is what sdkCoach passes to the server, not a constant.
+assert.match(sdkCoachSrc, /buildHypeproofMcpServer\([\s\S]{0,400}?crMcpRegistration\(opts\.permittedMcpTools\),?\s*\)/);
+// The context-key mirror: false for every off profile, true only for an explicit true.
+for (const p of [undefined, {}, { curriculum_runtime: { enabled: "true" } }, { curriculum_runtime: { enabled: false } }]) assert.equal(crContextKeyValue(p), false);
+assert.equal(crContextKeyValue({ curriculum_runtime: { enabled: true } }), true);
+// …and the provider mirrors exactly that value (a constant `true` would show pickElement with the switch off).
+assert.match(providerSrc, /executeCommand\("setContext", CR_CONTEXT_KEY, crContextKeyValue\(p\)\)/);
+ok("glue: the context key mirrors the switch and the SDK server registers CR tools only from the grant");
+
 // ── proxy tools: executed only with the switch on ───────────────────────────
 {
   vscode.window.browserTabs = [];
@@ -97,7 +114,7 @@ ok("MCP tools: absent from the grant and the server with the switch off; all pre
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, new RegExp(`알 수 없는 도구: ${name}`), `${name} is unknown with the switch off`);
   }
-  await assert.rejects(control.pickElement({ root: null }), /꺼져 있어요/);
+  await assert.rejects(control.pickElement({ root: null }), /요소 고르기를 쓸 수 없어요/);
   const legacy = await control.execute({ id: "t", name: "browser_navigate", input: { url: "https://example.com/" } });
   assert.doesNotMatch(legacy.content[0].text, /범위 밖/, "switch off: the pre-CR navigate path, no origin scope");
   enabled = true;
@@ -115,9 +132,10 @@ for (const t of CR_SURFACES.webviewMessages) {
   const handler = new RegExp(`case "${t}":[\\s\\S]{0,200}?this\\.clearElementContext\\(\\)`);
   assert.match(providerSrc, handler, `${t} only removes CR state; it has nothing to reach with the switch off`);
 }
-// The element preview the host posts is built only from pendingElement, which only pickElement sets.
-assert.equal((providerSrc.match(/this\.pendingElement = \{/g) ?? []).length, 1, "one writer of pendingElement");
-assert.match(providerSrc, /const element = this\.isCurriculumRuntimeEnabled\(\) \? this\.pendingElement : null;/, "a queued element is not sent after the switch turns off");
+// The queue's behaviour is test/cr-host.smoke.mjs; here, that the provider uses it: one
+// writer (attachElementContext), and the turn takes it through the switch.
+assert.equal((providerSrc.match(/this\.elementQueue\.attach\(/g) ?? []).length, 1, "one writer of the element queue");
+assert.match(providerSrc, /const element = this\.elementQueue\.take\(this\.isCurriculumRuntimeEnabled\(\)\);/, "a queued element is not sent after the switch turns off");
 ok("webview: CR messages are declared, handled, and nothing CR is sent with the switch off");
 
 console.log(`\n${passed} cr-switch checks passed`);

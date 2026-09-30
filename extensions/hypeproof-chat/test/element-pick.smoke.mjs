@@ -42,6 +42,12 @@ const KIOSK = `<!doctype html>
   assert.equal(mapSource(KIOSK, "index.html", { tag: "button", text: "추천 메뉴" }), "unmapped", "markup inside a script string is not where the element is defined");
   assert.equal(mapSource(KIOSK, "index.html", { tag: "p", text: "같은 글자" }), "unmapped", "two candidates are a guess");
   assert.equal(mapSource(KIOSK, "index.html", { tag: "div", text: "주문하기" }), "unmapped", "another tag's text is not this element");
+  // A script-made clone: an id no markup defines, text equal to a static element's. The id
+  // miss is final; it never falls back to the static element's line.
+  assert.equal(mapSource(KIOSK, "index.html", { tag: "button", id: "clone", text: "주문하기" }), "unmapped", "an undefined id is never text-matched onto another element");
+  // The same text on two live elements (one static, one generated, no ids): a text match cannot tell them apart.
+  assert.equal(mapSource(KIOSK, "index.html", { tag: "button", text: "취소", twins: 2 }), "unmapped", "live-DOM twins make a text match a guess");
+  assert.deepEqual(mapSource(KIOSK, "index.html", { tag: "button", text: "취소", twins: 1 }), { file: "index.html", line: 6 }, "control: one live element with that text still maps");
   ok("CR-T09 negative: a script-generated or ambiguous element is \"unmapped\", never a guessed file");
 }
 
