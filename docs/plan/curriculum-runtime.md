@@ -67,6 +67,17 @@ The provisional matrix written from the 2026-09-29 reading of `origin/main` (b95
 - P0-7: the loader is the Worker skill registry extended with contracts, not `.hypeproof/skills/` in the workspace (R7).
 - CR switch: the profile field `curriculum_runtime.enabled`, mirrored to the context key `hypeproof-chat.curriculumRuntimeEnabled` (R3).
 
+### Deviations recorded by `cr-browser`
+
+Run records: [curriculum-runtime-2026-09-30-evidence.md](../testing/curriculum-runtime-2026-09-30-evidence.md).
+
+- CR-10 persistence. The recon's gap-matrix note says "extend `ARTIFACT_REF_KEYS`". No `hps-observation/2` key was added: a new stored key is a stored-schema change listed above as Jay's decision, and an `artifact` event per version would change what `observableAssets` counts as a revision. A browser result is the `text` of the `tool_result` event of its call, tagged `hps-browser-result/1` (`extensions/hypeproof-chat/src/browserResult.ts`), on the same measurement-core record. The version id is recon R4's digest (`artifactVersion.ts`).
+- CR-09 lives in `elementPick.ts`, not in `nativeBrowser.ts` `capturePageContext` (the matrix row's anchor); `nativeBrowser.ts` and `previewProvider.ts` are unchanged and left the item's `implementation_paths`.
+- With the switch on, `browser_read` and `browser_screenshot` return the full observation, like `browser_observe`. While a native JS dialog is open the page outline is not drawn (drawing evaluates JS, which the dialog blocks); the dialog and the chat-panel tool line are the indicator for that step.
+- The kiosk-practice fixture is `e2e/curriculum-runtime/fixtures/kiosk-practice/`; `cr-verify` and `cr-e2e` reuse it.
+- F8 (recon §7 "first task") is not resolved. The screen was locked for every app run, so the composited checks cannot run (F7). CR-T09, CR-T56 and CR-T63 ran on real Chromium only (synthetic), not in the Studio app.
+- The switch-off baseline `09-preview.spec.ts` was re-baselined on the pre-change tree: REQ-D1/D3/D6 and REQ-D4 fail on both the `origin/main` build and this branch's build (3 of 3 runs each), REQ-D5 is flaky on the pre-change build and green on this branch. F1 is pre-existing, so the CR-T02 in-app positive control is red and that half is BLOCKED, not PASS.
+
 ## Existing work that CR items build on
 
 CR rows reference these requirements instead of restating them. Their work items keep ownership; a CR PR that also satisfies part of them says so in its body and leaves their completion to their own items. Owners below are read from the ledger, not assumed.
