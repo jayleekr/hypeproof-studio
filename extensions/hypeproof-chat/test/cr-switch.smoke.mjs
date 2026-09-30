@@ -42,8 +42,13 @@ const ok = (name) => { passed++; console.log(`✓ ${name}`); };
 assert.equal(isCurriculumRuntimeEnabled(undefined), false);
 assert.equal(isCurriculumRuntimeEnabled({}), false);
 assert.equal(isCurriculumRuntimeEnabled({ curriculum_runtime: { enabled: "true" } }), false, "only an explicit true");
-assert.equal(isCurriculumRuntimeEnabled({ curriculum_runtime: { enabled: true } }), true);
-ok("flag: absent or anything but true is off");
+const ADULT_ON = { curriculum_runtime: { enabled: true }, minor_cohort: false, game: { template_tier: "website" } };
+assert.equal(isCurriculumRuntimeEnabled(ADULT_ON), true);
+// One fail-closed minor test for every CR surface (the Worker serves the switch through the same one).
+assert.equal(isCurriculumRuntimeEnabled({ ...ADULT_ON, minor_cohort: true }), false, "a served minor (flag or age < 18) is off");
+assert.equal(isCurriculumRuntimeEnabled({ ...ADULT_ON, game: { template_tier: "kids-quest" } }), false, "a minor tier is off");
+assert.equal(isCurriculumRuntimeEnabled({ curriculum_runtime: { enabled: true } }), false, "an unknown tier is off (fail-closed)");
+ok("flag: absent or anything but true is off; minors (served flag or tier) and unknown tiers are off");
 
 // ── commands: gated in the manifest ────────────────────────────────────────
 assert.deepEqual(manifestSwitchProblems(manifest), [], "every CR command is hidden and disabled with the switch off");
@@ -68,6 +73,9 @@ assert.deepEqual(off.filter((t) => CR_SURFACES.mcpTools.includes(t)), []);
 assert.deepEqual(on.filter((t) => CR_SURFACES.mcpTools.includes(t)).sort(), [...CR_SURFACES.mcpTools].sort());
 const minor = permittedMcpToolsFor({ ...adult, game: { template_tier: "kids-quest" }, curriculum_runtime: { enabled: true } });
 assert.deepEqual(minor, [], "the switch never grants browser tools the minor rule strips");
+// A 14-17 workshop-tier cohort: the tier says adult, the served minor flag says minor. No CR tool.
+const teen = permittedMcpToolsFor({ ...adult, minor_cohort: true, curriculum_runtime: { enabled: true } });
+assert.deepEqual(teen.filter((t) => CR_SURFACES.mcpTools.includes(t)), [], "no CR tool for a 13-17 cohort");
 function registered(opts) {
   const names = [];
   buildHypeproofMcpServer(
@@ -94,7 +102,8 @@ assert.deepEqual(registered(crMcpRegistration(off)).filter((n) => short.includes
 assert.match(sdkCoachSrc, /buildHypeproofMcpServer\([\s\S]{0,400}?crMcpRegistration\(opts\.permittedMcpTools\),?\s*\)/);
 // The context-key mirror: false for every off profile, true only for an explicit true.
 for (const p of [undefined, {}, { curriculum_runtime: { enabled: "true" } }, { curriculum_runtime: { enabled: false } }]) assert.equal(crContextKeyValue(p), false);
-assert.equal(crContextKeyValue({ curriculum_runtime: { enabled: true } }), true);
+assert.equal(crContextKeyValue(ADULT_ON), true);
+assert.equal(crContextKeyValue({ ...ADULT_ON, minor_cohort: true }), false, "the context key is off for a minor too");
 // …and the provider mirrors exactly that value (a constant `true` would show pickElement with the switch off).
 assert.match(providerSrc, /executeCommand\("setContext", CR_CONTEXT_KEY, crContextKeyValue\(p\)\)/);
 ok("glue: the context key mirrors the switch and the SDK server registers CR tools only from the grant");
@@ -124,6 +133,12 @@ ok("glue: the context key mirrors the switch and the SDK server registers CR too
     assert.match(r.content[0].text, /열린 브라우저 탭이 없어요/, "and answered by the CR executor");
   }
   ok("proxy tools: unknown with the switch off, routed to the CR executor with it on (read per call)");
+  // pickElement on its own refuses a tab that is not the student's preview, before any CDP.
+  vscode.window.activeBrowserTab = { url: "https://example.com/", startCDPSession: async () => { throw new Error("no CDP may be opened"); } };
+  await assert.rejects(control.pickElement({ root: null }), /범위 밖이라 거절/);
+  vscode.window.activeBrowserTab = undefined;
+  await assert.rejects(control.pickElement({ root: null }), /열린 미리보기 탭이 없어요/);
+  ok("pickElement: refused with a reason for an out-of-scope tab and for no tab, before any CDP session");
 }
 
 // ── webview messages ───────────────────────────────────────────────────────

@@ -82,6 +82,26 @@ await test("switch ON for a minor cohort WITH browser_control: still no CR tool 
   for (const runtime of ["proxy", "sdk"]) assert.ok(!buildAnthropicSystemBlocks(kidsBrowsing, {}, runtime)[0].text.includes(CR_CONTRACT), `${runtime}: no CR contract for a minor`);
 });
 
+await test("switch ON for a 14-17 workshop-tier cohort: no CR tool, no contract, served off (one minor test)", async () => {
+  const teen = { ...withSwitch(COPYCLONE, true), audience: { ...COPYCLONE.audience, age_range: [14, 17] } };
+  assert.equal(teen.game.template_tier, "website", "control: a workshop tier, above the child threshold");
+  assert.ok(toolNames(teen).includes("browser_navigate"), "control: its base browser tools are injected");
+  assert.deepEqual(toolNames(teen).filter((n) => CR_NAMES.includes(n)), [], "no CR tool for a teen");
+  for (const runtime of ["proxy", "sdk"]) assert.ok(!buildAnthropicSystemBlocks(teen, {}, runtime)[0].text.includes(CR_CONTRACT), `${runtime}: no CR contract for a teen`);
+  const original = { cr: COPYCLONE.curriculum_runtime, audience: COPYCLONE.audience };
+  COPYCLONE.curriculum_runtime = { enabled: true };
+  COPYCLONE.audience = teen.audience;
+  try {
+    const served = await profileJson(COPYCLONE.id);
+    assert.equal(served.json.minor_cohort, true);
+    assert.deepEqual(served.json.curriculum_runtime, { enabled: false }, "the served switch is off for a minor, so the App's SDK grant, pick and executor stay off");
+  } finally {
+    COPYCLONE.audience = original.audience;
+    if (original.cr === undefined) delete COPYCLONE.curriculum_runtime;
+    else COPYCLONE.curriculum_runtime = original.cr;
+  }
+});
+
 await test("registry: no shipped cohort turns the switch on", () => {
   const on = listProfiles().filter((p) => p.curriculum_runtime?.enabled === true).map((p) => p.id);
   assert.deepEqual(on, [], "default off; turning a cohort on is a deliberate, reviewed change");

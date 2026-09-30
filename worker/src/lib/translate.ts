@@ -24,7 +24,7 @@ import curriculumRuntimeBrowserContractMd from "../prompts/_curriculum-runtime-b
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import runtimeDegradedNoticeMd from "../prompts/_runtime-degraded-notice.md";
 import { BROWSER_TOOLS, CR_BROWSER_TOOLS } from "./browser-tools.ts";
-import { isMinorCohort } from "./moderation.ts";
+import { curriculumRuntimeAllowed, isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -381,7 +381,7 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
   // CR-02 — the Experiment Browser tools exist only behind the CR switch, and only
   // where the runtime already grants browser tools at all.
   // Never for minors, on either runtime (fail-closed like the SDK grant).
-  if (!base || profile.curriculum_runtime?.enabled !== true || isMinorCohort(profile)) return base;
+  if (!base || !curriculumRuntimeAllowed(profile)) return base;
   return `${base}\n\n${curriculumRuntimeBrowserContractMd as unknown as string}`;
 }
 
@@ -610,7 +610,7 @@ export function translate(
   if (profile.browser_control?.enabled === true) {
     // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
     // Never for minors: the SDK grant checks the tier, and so does this one.
-    const crTools = profile.curriculum_runtime?.enabled === true && !isMinorCohort(profile) ? CR_BROWSER_TOOLS : [];
+    const crTools = curriculumRuntimeAllowed(profile) ? CR_BROWSER_TOOLS : [];
     for (const t of [...BROWSER_TOOLS, ...crTools]) {
       tools.push({ name: t.name, description: t.description, input_schema: t.input_schema });
     }

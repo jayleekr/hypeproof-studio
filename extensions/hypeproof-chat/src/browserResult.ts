@@ -21,6 +21,15 @@ import type { ArtifactFileRef, Observation, PageRecordKind } from "./experimentB
 export const BROWSER_RESULT_FORMAT = "hps-browser-result/1";
 const MAX_FILES = 40;
 const MAX_RECORDS = 20;
+const MAX_URL = 1_000;
+const MAX_PATH = 200;
+/**
+ * The recorder keeps the first 20,000 characters of an event's text
+ * (nativeObservationRecorder.ts). A record over that would be cut mid-JSON and read back
+ * as nothing, so the serialized record is held under this bound: fields are capped, and
+ * listed files, then records, are dropped until it fits (`file_count` keeps the real count).
+ */
+export const MAX_RECORD_TEXT = 18_000;
 
 export type BrowserResultKind = "observation" | "action" | "capture";
 
@@ -69,24 +78,29 @@ export async function browserResultRecord(input: {
   const artifact = o?.artifact;
   if (!artifact || typeof artifact.id !== "string" || !VERSION.test(artifact.id)) throw new Error("missing_artifact_version");
   const trace = { tool: input.tool, input: input.input ?? {}, outcome: input.outcome, step: o.step, document_generation: o.documentGeneration };
-  return {
+  const record: BrowserResultRecord = {
     format: BROWSER_RESULT_FORMAT,
     kind: input.kind,
-    tool: input.tool,
+    tool: input.tool.slice(0, 64),
     at: input.at ?? Date.now(),
     outcome: input.outcome,
-    url: o.url,
-    route: o.route,
-    document_generation: o.documentGeneration,
+    url: o.url.slice(0, MAX_URL),
+    route: o.route.slice(0, MAX_URL),
+    document_generation: o.documentGeneration.slice(0, 100),
     step: o.step,
     artifact_version: artifact.id,
-    artifact_entry: artifact.entry,
+    artifact_entry: artifact.entry.slice(0, MAX_PATH),
     file_count: artifact.files.length,
-    files: artifact.files.slice(0, MAX_FILES),
+    files: artifact.files.slice(0, MAX_FILES).map((f) => ({ ...f, path: f.path.slice(0, MAX_PATH) })),
     screenshot_digest: o.screenshot?.data ? imageDigest(o.screenshot.data) : null,
     trace_digest: await digestOf(trace),
-    records: o.records.slice(0, MAX_RECORDS).map((r) => ({ kind: r.kind, level: r.level, message: r.message.slice(0, 200), step: r.step })),
+    records: o.records.slice(0, MAX_RECORDS).map((r) => ({ kind: r.kind, level: r.level.slice(0, 20), message: r.message.slice(0, 200), step: r.step })),
   };
+  while (browserResultEventText(record).length > MAX_RECORD_TEXT && (record.files.length || record.records.length)) {
+    if (record.files.length) record.files.pop();
+    else record.records.pop();
+  }
+  return record;
 }
 
 /** The `tool_result` event text that carries a record: format tag, newline, canonical JSON. */

@@ -127,6 +127,20 @@ export function isMinorCohort(profile: Profile): boolean {
 }
 
 /**
+ * Is the Curriculum Runtime (Experiment Browser) usable for this cohort? The ONE minor
+ * test every CR surface uses (cr-browser #1391): the served switch, the proxy CR tools
+ * and the CR contract here, and on the App side the SDK grant, element pick and the CR
+ * executor, which all read the served switch. Fail-closed: the switch must be exactly
+ * `true`, the cohort must not be a minor by `isMinorCohort`, and the tier must be a
+ * workshop tier (an unknown tier counts as minor, like isMinorTier in sdkCoachHelpers.ts).
+ */
+export function curriculumRuntimeAllowed(profile: Profile): boolean {
+  if (profile.curriculum_runtime?.enabled !== true || isMinorCohort(profile)) return false;
+  const tier = profile.game?.template_tier;
+  return tier === "search-webapp" || tier === "website";
+}
+
+/**
  * Screen a piece of text against the rule list. Returns the first hit or
  * null. Deterministic, synchronous, no state.
  */

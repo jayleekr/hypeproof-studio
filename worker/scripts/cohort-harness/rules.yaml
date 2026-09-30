@@ -172,6 +172,7 @@ severity:
   # cr-browser (#1391) — the CR switch and proxy browser tools stay adult-only;
   # the switch needs an observation recorder so browser results are stored (CR-10).
   child_curriculum_runtime: fail
+  minor_curriculum_runtime: fail
   child_browser_control: fail
   cr_without_observation_format: fail
   # 오독 방지용 — 진짜 권한이 아니라 죽은 필드라 warn. 값 정리는 별건(프로필 4종 일괄).

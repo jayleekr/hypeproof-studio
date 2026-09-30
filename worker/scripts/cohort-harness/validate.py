@@ -289,6 +289,18 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         add(findings, rules, pid, "cr_without_observation_format",
             "HARD FAIL: curriculum_runtime.enabled=true requires observation.format "
             "(hps-observation/1 or /2) — without the recorder, browser results are not stored (CR-10)")
+    # The Experiment Browser is adult-only by the same test the Worker and the App use
+    # (isMinorCohort: minor_cohort=true OR age_range max < 18), not just the child
+    # threshold below: a 13-17 cohort must not switch it on either.
+    cr_ar = (p.get("audience") or {}).get("age_range")
+    cr_teen = (
+        isinstance(cr_ar, list) and len(cr_ar) == 2
+        and isinstance(cr_ar[1], (int, float)) and not isinstance(cr_ar[1], bool) and cr_ar[1] < 18
+    )
+    if cr_on and (p.get("minor_cohort") is True or cr_teen):
+        add(findings, rules, pid, "minor_curriculum_runtime",
+            "HARD FAIL: curriculum_runtime.enabled=true on a minor cohort "
+            "(minor_cohort=true or age_range max < 18) — the Experiment Browser is adult-only")
 
     # --- child cohort guardrails ---
     # A cohort is "child" when audience.parent_coaching is true OR its age_range

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { artifactVersionFor, staticReferences } = await import("../src/artifactVersion.ts");
-const { browserResultRecord, browserResultEventText, readBrowserResultEvent, labelByVersion } = await import("../src/browserResult.ts");
+const { browserResultRecord, browserResultEventText, readBrowserResultEvent, labelByVersion, MAX_RECORD_TEXT } = await import("../src/browserResult.ts");
 const { observationProblems } = await import("../src/experimentBrowser.ts");
 const { LocalRecord, canonicalJson } = await import("../../../worker/src/lib/measurement-core/local-record.ts");
 
@@ -99,15 +99,46 @@ try {
   assert.equal(readBrowserResultEvent({ kind: "tool_result", text: "도구 실행 완료" }), null, "an ordinary tool result is not mistaken for one");
   ok("CR-T10 negative: a result without an artifact version is refused");
 
+  // ── bound: a record never crosses the recorder's 20,000-character text cut ─
+  const longPath = (i) => `${"dir/".repeat(80)}file-${i}.png`;
+  const wide = { ...v0, files: Array.from({ length: 200 }, (_, i) => ({ path: longPath(i), sha256: sha(String(i)), bytes: i })) };
+  const noisy = Array.from({ length: 50 }, (_, i) => ({ kind: "console", level: "error", message: "m".repeat(5000), step: i, time: i, documentGeneration: "L0" }));
+  const rw = await browserResultRecord({ kind: "observation", tool: "browser_observe", outcome: "success", observation: { ...observation, url: `http://127.0.0.1:5173/${"q".repeat(50_000)}`, route: "/" + "q".repeat(50_000), artifact: wide, records: noisy }, at: 3 });
+  const text = browserResultEventText(rw);
+  assert.ok(text.length <= MAX_RECORD_TEXT && MAX_RECORD_TEXT < 20_000, `bounded: ${text.length}`);
+  assert.equal(rw.file_count, 200, "the real file count is kept");
+  assert.equal(readBrowserResultEvent({ kind: "tool_result", text: text.slice(0, 20_000) })?.artifact_version, v0.id, "reads back after the recorder's cut");
+  ok("CR-T10 bound: an oversized result stays under the recorder's text cap and reads back");
+
   // ── negative: the set never follows a symlink or leaves the root ────────
   symlinkSync(join(outside, "secret.js"), join(root, "js/link.js"));
   writeFileSync(join(outside, "secret.js"), "outside");
   write("index.html", `<script src="js/link.js"></script>`);
-  await assert.rejects(artifactVersionFor(root, "/"), (e) => e.code === "symlink" && e.file === "js/link.js");
+  const linked = await artifactVersionFor(root, "/");
+  assert.deepEqual(linked.files.find((f) => f.path === "js/link.js"), { path: "js/link.js", sha256: null, bytes: 0, skipped: "symlink" }, "a referenced symlink is listed, never read");
+  symlinkSync(join(outside, "secret.js"), join(root, "entry-link.html"));
+  await assert.rejects(artifactVersionFor(root, "/entry-link.html"), (e) => e.code === "symlink" && e.file === "entry-link.html", "the entry itself may not be a symlink");
   await assert.rejects(artifactVersionFor(root, "/../outside.html"), (e) => e.code === "outside_root" || e.code === "not_found");
   await assert.rejects(artifactVersionFor(root, "/.env"), (e) => e.code === "excluded_path");
   await assert.rejects(artifactVersionFor(root, "/nope.html"), (e) => e.code === "not_found");
-  ok("CR-T10 negative: symlinks, dot-files, paths outside the root and missing entries refuse the version");
+  ok("CR-T10 negative: a symlinked entry, dot-files, paths outside the root and missing entries refuse the version");
+
+  // ── a large referenced file or a long file list does not refuse the page ─
+  const limits = { maxFiles: 3, maxFileBytes: 90 };
+  write("index.html", `<img src="photo.jpg"><img src="a.png"><img src="b.png"><img src="c.png">`);
+  write("photo.jpg", "x".repeat(100));
+  for (const n of ["a", "b", "c"]) write(`${n}.png`, n);
+  const big = await artifactVersionFor(root, "/", limits);
+  assert.deepEqual(big.files.find((f) => f.path === "photo.jpg"), { path: "photo.jpg", sha256: null, bytes: 100, skipped: "too_large" });
+  assert.equal(big.partial, "too_many_files", "the walk stopped at the file cap and says so");
+  assert.equal(big.files.length, 3);
+  write("photo.jpg", "x".repeat(101));
+  assert.notEqual((await artifactVersionFor(root, "/", limits)).id, big.id, "a skipped file still moves the version when its size changes");
+  const complete = await artifactVersionFor(root, "/", { maxFiles: 10, maxFileBytes: 90 });
+  assert.equal(complete.partial, undefined, "control: under the cap the set is complete");
+  write("huge.html", "y".repeat(100));
+  await assert.rejects(artifactVersionFor(root, "/huge.html", limits), (e) => e.code === "file_too_large", "only the entry refuses on size");
+  ok("CR-T10: a referenced file over the size cap is listed unread, a set over the file cap is partial, only the entry refuses");
 } finally {
   rmSync(root, { recursive: true, force: true });
   rmSync(outside, { recursive: true, force: true });

@@ -346,8 +346,11 @@ export class PageEventLog {
 
 export interface ArtifactFileRef {
   path: string;
-  sha256: string;
+  /** null when the file was listed but not read (`skipped` says why). */
+  sha256: string | null;
   bytes: number;
+  /** A referenced file that could not be hashed; only the entry can refuse the version. */
+  skipped?: "too_large" | "symlink" | "realpath_outside_root";
 }
 
 /** The artifact version a browser result was taken against. */
@@ -357,6 +360,8 @@ export interface ArtifactVersionRef {
   /** Entry HTML path relative to the served root. */
   entry: string;
   files: ArtifactFileRef[];
+  /** Set when the walk stopped at the file cap: later references are not in the set. */
+  partial?: "too_many_files";
 }
 
 // ── Observation (CR-04) ─────────────────────────────────────────────────────
@@ -657,7 +662,7 @@ export function observationText(o: Observation): string {
     `제목: ${o.title}`,
     `뷰포트: ${o.viewport.width}x${o.viewport.height}`,
     `문서 세대: ${o.documentGeneration}`,
-    `산출물 버전: ${o.artifact ? `${o.artifact.id} (${o.artifact.entry}, 파일 ${o.artifact.files.length}개)` : "없음"}`,
+    `산출물 버전: ${o.artifact ? `${o.artifact.id} (${o.artifact.entry}, 파일 ${o.artifact.files.length}개${o.artifact.partial ? ", 파일이 많아 일부만 셈" : ""})` : "없음"}`,
   ];
   if (o.records.length === 0) {
     lines.push(
@@ -719,6 +724,8 @@ export interface CrHooks {
   /** Wait after an action before observing, so its console/network events arrive. */
   settleMs?: number;
   sleep?(ms: number): Promise<void>;
+  /** Clock for the scope guard's after-step window (tests move it). */
+  now?(): number;
 }
 
 /** Tools the executor runs with the switch on: the existing eight plus the CR five. */
@@ -755,9 +762,198 @@ function crFail(text: string): CrToolResult {
   return { content: [{ type: "text", text }], isError: true };
 }
 
+/** How long after a step returns the guard still stops and undoes an escape it set off (CR-11). */
+export const ESCAPE_TAIL_MS = 5_000;
+
+/** An off-scope navigation or new window the guard saw, and what it did about it. */
+export interface ScopeEscape {
+  kind: "navigation" | "popup";
+  url: string;
+  outcome: string;
+}
+
+/**
+ * Keeps the driven tab in scope for as long as the executor holds its session (CR-11).
+ *
+ * During an agent step, and for `ESCAPE_TAIL_MS` after it returns (a click handler's
+ * timer, a redirect after load), an off-scope main-frame navigation is stopped before it
+ * commits where it can, one that committed anyway is taken back to the last in-scope page,
+ * and a new window the page opens off scope is closed. What happened is kept for the
+ * step's own result, or, when it happened after the step returned, for the agent's next
+ * call. Outside those windows the tab is the student's: their own navigations are left
+ * alone, and the ordinary scope check refuses the next agent call if the tab is off scope.
+ */
+export class ScopeGuard {
+  private readonly cdp: CdpLike;
+  private readonly log: PageEventLog;
+  private readonly allowed: () => readonly string[];
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly now: () => number;
+  private readonly indicator?: AutomationIndicator;
+  private sub: { dispose(): void } | undefined;
+  private inStep = false;
+  private enforceUntil = 0;
+  private restoresLeft = 0;
+  private selfTargetId: string | null | undefined;
+  private work: Promise<unknown> = Promise.resolve();
+  private escapes: ScopeEscape[] = [];
+  /** The last page the tab committed inside scope: where a committed escape is taken back to. */
+  lastInScope: string | null = null;
+
+  constructor(
+    cdp: CdpLike,
+    log: PageEventLog,
+    allowed: () => readonly string[],
+    opts: { sleep?: (ms: number) => Promise<void>; now?: () => number; indicator?: AutomationIndicator } = {},
+  ) {
+    this.cdp = cdp;
+    this.log = log;
+    this.allowed = allowed;
+    this.sleep = opts.sleep ?? defaultSleep;
+    this.now = opts.now ?? Date.now;
+    this.indicator = opts.indicator;
+  }
+
+  async install(): Promise<void> {
+    this.sub ??= this.cdp.onEvent((e) => this.handle(e));
+    const href = await currentHref(this.cdp).catch(() => "");
+    if (href && checkAgentOrigin(href, this.allowed()).ok) this.lastInScope = href;
+  }
+
+  dispose(): void {
+    this.sub?.dispose();
+    this.sub = undefined;
+  }
+
+  beginStep(): void {
+    this.inStep = true;
+    this.restoresLeft = 1;
+  }
+
+  endStep(): void {
+    if (!this.inStep) return;
+    this.inStep = false;
+    this.enforceUntil = this.now() + ESCAPE_TAIL_MS;
+  }
+
+  get enforcing(): boolean {
+    return this.inStep || this.now() <= this.enforceUntil;
+  }
+
+  /** The first escape not yet reported, if any. */
+  get pending(): ScopeEscape | null {
+    return this.escapes[0] ?? null;
+  }
+
+  /** Wait until the guard's own stop / take-back / close work is done. */
+  async settled(): Promise<void> {
+    for (let w = this.work; ; w = this.work) {
+      await w.catch(() => {});
+      if (w === this.work) return;
+    }
+  }
+
+  /** Hand over the escapes seen so far; they are reported once. */
+  takeEscapes(): ScopeEscape[] {
+    const out = this.escapes;
+    this.escapes = [];
+    return out;
+  }
+
+  /** Visible for tests: feed one CDP event. */
+  handle(e: { method: string; params: Record<string, any> }): void {
+    if (e.method === "Page.windowOpen") {
+      if (!this.enforcing) return;
+      const url = String(e.params?.url ?? "");
+      if (url && url !== "about:blank" && checkAgentOrigin(url, this.allowed()).ok) return;
+      const esc: ScopeEscape = { kind: "popup", url: url || "about:blank", outcome: "새 창을 닫는 중이었어요" };
+      this.escapes.push(esc);
+      this.queue(async () => {
+        esc.outcome = await this.closePopups();
+      });
+      return;
+    }
+    const url = mainFrameNavigationUrl(e, this.log.mainFrame);
+    if (!url) return;
+    if (checkAgentOrigin(url, this.allowed()).ok) {
+      if (e.method === "Page.frameNavigated") this.lastInScope = url;
+      return;
+    }
+    if (!this.enforcing) return;
+    let esc = this.escapes.find((x) => x.kind === "navigation" && x.url === url);
+    if (!esc) {
+      esc = { kind: "navigation", url, outcome: "불러오기를 멈췄어요" };
+      this.escapes.push(esc);
+    }
+    // Stop it before it commits where we can.
+    void this.cdp.send("Page.stopLoading", {}).catch(() => {});
+    // Committed anyway: inside a step the executor takes the tab back with its refusal;
+    // after the step returned, the guard does it here.
+    if (e.method === "Page.frameNavigated" && !this.inStep) {
+      const target = esc;
+      this.queue(async () => {
+        target.outcome = await this.restore();
+      });
+    }
+  }
+
+  private queue(fn: () => Promise<void>): void {
+    this.work = this.work.then(fn).catch(() => {});
+  }
+
+  private async restore(): Promise<string> {
+    const to = this.lastInScope;
+    if (!to) return "되돌릴 주소가 없어 그대로 두었어요";
+    if (this.restoresLeft <= 0) return "이미 한 번 되돌린 뒤라 더 되돌리지 않았어요";
+    this.restoresLeft--;
+    const before = this.log.documentGeneration;
+    // The take-back is automation too: it runs with the page outline drawn (CR-68).
+    await this.indicator?.show().catch(() => {});
+    try {
+      await this.cdp.send("Page.navigate", { url: to });
+      await waitForDocument(this.cdp, this.log, before, this.sleep);
+      return `탭을 ${to} (으)로 되돌렸어요`;
+    } catch {
+      return `탭을 ${to} (으)로 되돌리지 못했어요 — 미리보기를 다시 여세요`;
+    } finally {
+      await this.indicator?.hide().catch(() => {});
+    }
+  }
+
+  /** Close the windows this tab opened that are not in scope (their URL may still be empty). */
+  private async closePopups(): Promise<string> {
+    try {
+      this.selfTargetId ??= (await this.cdp.send("Target.getTargetInfo", {}))?.targetInfo?.targetId ?? null;
+      if (!this.selfTargetId) return "새 창을 닫지 못했어요";
+      for (let i = 0; i < 20; i++) {
+        const t = await this.cdp.send("Target.getTargets", {});
+        const infos: Array<{ targetId?: string; type?: string; url?: string; openerId?: string }> = t?.targetInfos ?? [];
+        const popups = infos.filter(
+          (x) => x.openerId === this.selfTargetId && x.type === "page" && typeof x.targetId === "string" && !checkAgentOrigin(String(x.url ?? ""), this.allowed()).ok,
+        );
+        if (popups.length) {
+          for (const p of popups) await this.cdp.send("Target.closeTarget", { targetId: p.targetId });
+          return "새 창을 닫았어요";
+        }
+        await this.sleep(50);
+      }
+      return "새 창을 찾지 못해 닫지 못했어요";
+    } catch {
+      return "새 창을 닫지 못했어요";
+    }
+  }
+}
+
+function escapeReason(e: ScopeEscape, allowed: readonly string[]): string {
+  const v = checkAgentOrigin(e.url, allowed);
+  return v.ok ? "" : v.reason;
+}
+
 export class CrExecutor {
   private readonly logs = new WeakMap<CdpLike, PageEventLog>();
+  private readonly guards = new WeakMap<CdpLike, ScopeGuard>();
   private readonly indicators = new WeakMap<CdpLike, AutomationIndicator>();
+  private lastGuard: ScopeGuard | null = null;
   private refs = new Map<string, number>();
   private refsGeneration: string | null = null;
   private step = 0;
@@ -781,6 +977,23 @@ export class CrExecutor {
     return log;
   }
 
+  /** The scope guard of the tab's session, installed on first use and kept with it (CR-11). */
+  async guardFor(cdp: CdpLike): Promise<ScopeGuard> {
+    let guard = this.guards.get(cdp);
+    if (!guard) {
+      const log = await this.logFor(cdp);
+      guard = new ScopeGuard(cdp, log, () => this.hooks.allowedOrigins(), {
+        sleep: this.hooks.sleep,
+        now: this.hooks.now,
+        indicator: this.indicatorFor(cdp),
+      });
+      this.guards.set(cdp, guard);
+      await guard.install();
+    }
+    this.lastGuard = guard;
+    return guard;
+  }
+
   /** Remember the ref table of an observation (also used by element capture, CR-09). */
   adoptRefs(refs: Map<string, number>, generation: string): void {
     this.refs = refs;
@@ -794,8 +1007,19 @@ export class CrExecutor {
 
   async execute(name: string, input: Record<string, unknown> = {}): Promise<CrToolResult> {
     if (!(CR_EXECUTOR_TOOLS as readonly string[]).includes(name)) return crFail(`알 수 없는 도구: ${name}`);
-    // Scope first, before any CDP call (CR-11).
     const allowed = this.hooks.allowedOrigins();
+    // An escape the guard stopped after the previous step returned is this call's result (CR-11).
+    if (this.lastGuard) {
+      await this.lastGuard.settled();
+      const late = this.lastGuard.takeEscapes();
+      if (late.length) {
+        this.refs = new Map();
+        this.refsGeneration = null;
+        const what = late.map((e) => `${e.kind === "popup" ? "새 창이" : "페이지가"} 범위 밖(${e.url})으로 가려 해서 막았어요 — ${e.outcome}.`).join(" ");
+        return crFail(`지난 단계가 끝난 뒤 ${what} ${escapeReason(late[0], allowed)} 이번 ${name}은(는) 실행하지 않았어요. browser_observe로 다시 읽어 최신 ref를 받아주세요.`);
+      }
+    }
+    // Scope first, before any CDP call (CR-11).
     let target: string | null = null;
     if (name === "browser_navigate") {
       target = safeNavigateUrl(String(input.url ?? ""));
@@ -809,81 +1033,100 @@ export class CrExecutor {
       if (!v.ok) return crFail(v.reason);
     }
     const observeOnly = OBSERVE_ONLY.has(name);
-    const step = observeOnly ? (this.step || null) : ++this.step;
-    const startUrl = name === "browser_navigate" ? null : this.port.tabUrl() ?? null;
-    let cdp: CdpLike | null = null;
-    let log: PageEventLog | null = null;
-    let indicator: AutomationIndicator | null = null;
-    /** The first out-of-scope main-frame navigation the step caused, if any (CR-11). */
-    const escape: { to: string | null } = { to: null };
-    let watch: { dispose(): void } | undefined;
-    const watchNavigations = (c: CdpLike, l: PageEventLog) => {
-      watch = c.onEvent((e) => {
-        if (escape.to) return;
-        const url = mainFrameNavigationUrl(e, l.mainFrame);
-        if (url && !checkAgentOrigin(url, allowed).ok) {
-          escape.to = url;
-          // Stop it before it commits where we can; the post-step check restores otherwise.
-          void c.send("Page.stopLoading", {}).catch(() => {});
-        }
-      });
+    if (!observeOnly) this.step++;
+    // Records captured during an observation belong to no step (CR-08); the observation
+    // itself still names the last action as its context.
+    const recordStep = observeOnly ? null : this.step;
+    const obsStep = this.step || null;
+    let startUrl: string | null = name === "browser_navigate" ? null : this.port.tabUrl() ?? null;
+    const st: { cdp: CdpLike | null; log: PageEventLog | null; guard: ScopeGuard | null; indicator: AutomationIndicator | null } = {
+      cdp: null,
+      log: null,
+      guard: null,
+      indicator: null,
+    };
+    const begin = async (c: CdpLike): Promise<{ cdp: CdpLike; log: PageEventLog }> => {
+      st.guard?.endStep();
+      await st.indicator?.hide().catch(() => {});
+      st.cdp = c;
+      const log = await this.logFor(c);
+      st.log = log;
+      st.guard = await this.guardFor(c);
+      st.guard.beginStep();
+      log.setStep(recordStep);
+      st.indicator = this.indicatorFor(c);
+      return { cdp: c, log };
     };
     const showIndicator = async () => {
-      if (!cdp) return;
-      indicator ??= this.indicatorFor(cdp, name);
-      await indicator.show().catch(() => {});
+      await st.indicator?.show().catch(() => {});
     };
     try {
+      this.hooks.onIndicator?.(true, name);
+      let message: string | null;
+      let s: { cdp: CdpLike; log: PageEventLog } | null = null;
       if (name === "browser_navigate") {
-        // The tab may not exist yet; the indicator starts once there is a page to draw on.
-        this.hooks.onIndicator?.(true, name);
+        // Guard the tab from before the navigation when there is one, so a redirect during
+        // its load is caught; the tab may not exist yet, then the guard starts right after.
+        const prior = this.port.tabUrl();
+        if (prior) {
+          s = await begin(await this.port.session());
+          if (checkAgentOrigin(prior, allowed).ok) startUrl = prior;
+          await showIndicator();
+        }
         await this.port.navigate(target!);
-        cdp = await this.port.session();
-        log = await this.logFor(cdp);
-        log.setStep(step);
+        const after = await this.port.session();
+        if (!s || after !== s.cdp) s = await begin(after);
+        startUrl ??= target;
+        // A navigation can clear the overlay: draw it again for the rest of the step.
         await showIndicator();
+        message = `이동 완료 — ${target}`;
       } else {
-        cdp = await this.port.session();
-        log = await this.logFor(cdp);
-        log.setStep(step);
-        watchNavigations(cdp, log);
-        this.hooks.onIndicator?.(true, name);
+        s = await begin(await this.port.session());
         // A native JS dialog blocks page evaluation, so the page outline cannot be drawn
         // while one is open; the dialog itself and the chat-panel line are what show.
-        if (!log.openDialog) await showIndicator();
-        const message = await this.act(cdp, log, name, input);
+        if (!s.log.openDialog) await showIndicator();
+        message = await this.act(s.cdp, s.log, name, input);
         if (message === null) return crFail(`알 수 없는 도구: ${name}`);
-        if (!observeOnly) await (this.hooks.sleep ?? defaultSleep)(this.hooks.settleMs ?? 250);
-        if (escape.to) {
-          const v = checkAgentOrigin(escape.to, allowed);
-          throw new ScopeEscapeError(escape.to, v.ok ? "" : v.reason);
-        }
-        return await this.finish(cdp, name, input, message, step, indicator);
       }
-      return await this.finish(cdp, name, input, `이동 완료 — ${target}`, step, indicator);
+      // Let the action's console/network events and any redirect right after it arrive.
+      if (!observeOnly) await (this.hooks.sleep ?? defaultSleep)(this.hooks.settleMs ?? 250);
+      this.throwIfEscaped(st.guard);
+      return await this.finish(s.cdp, name, input, message, obsStep, st.indicator, st.guard);
     } catch (err) {
-      if (err instanceof ScopeEscapeError && cdp && log) return crFail(await this.refuseEscape(cdp, log, name, err, startUrl));
+      if (err instanceof ScopeEscapeError && st.cdp && st.log) return crFail(await this.refuseEscape(st.cdp, st.log, st.guard, name, err, startUrl));
       return crFail(err instanceof Error ? err.message : String(err));
     } finally {
-      watch?.dispose();
-      if (indicator) await (indicator as AutomationIndicator).hide().catch(() => {});
+      st.guard?.endStep();
+      await st.indicator?.hide().catch(() => {});
       this.hooks.onIndicator?.(false, name);
       // Records captured after this step belong to no step (CR-08): not carried over.
-      log?.setStep(null);
+      st.log?.setStep(null);
     }
+  }
+
+  private throwIfEscaped(guard: ScopeGuard | null): void {
+    const e = guard?.pending;
+    if (!e) return;
+    const reason = escapeReason(e, this.hooks.allowedOrigins());
+    throw new ScopeEscapeError(e.url, reason);
   }
 
   /**
    * An action navigated the tab off scope (a link, a script setting location, a form
-   * submit, a redirect). Nothing of that page is observed or returned: the load is
-   * stopped, the tab is taken back to where the step started, and the result is a
-   * refusal with the reason (CR-11). The refs are dropped, since they were the old page's.
+   * submit, a redirect) or opened a window off scope. Nothing of that page is observed or
+   * returned: the load is stopped, the tab is taken back to where the step started, a new
+   * window is closed, and the result is a refusal with the reason (CR-11). The refs are
+   * dropped, since they were the old page's.
    */
-  private async refuseEscape(cdp: CdpLike, log: PageEventLog, name: string, err: ScopeEscapeError, startUrl: string | null): Promise<string> {
+  private async refuseEscape(cdp: CdpLike, log: PageEventLog, guard: ScopeGuard | null, name: string, err: ScopeEscapeError, startUrl: string | null): Promise<string> {
     this.refs = new Map();
     this.refsGeneration = null;
     const allowed = this.hooks.allowedOrigins();
     await cdp.send("Page.stopLoading", {}).catch(() => {});
+    await guard?.settled();
+    const seen = guard?.takeEscapes() ?? [];
+    const popups = seen.filter((e) => e.kind === "popup").map((e) => `새 창(${e.url}): ${e.outcome}.`);
+    const byPopup = seen.some((e) => e.kind === "popup" && e.url === err.url);
     let where = "";
     const now = await currentHref(cdp).catch(() => null);
     if (now && checkAgentOrigin(now, allowed).ok) where = `탭은 그대로 ${now} 에 있어요.`;
@@ -897,10 +1140,10 @@ export class CrExecutor {
         where = `탭을 ${startUrl} (으)로 되돌리지 못했어요 — 미리보기를 다시 여세요.`;
       }
     } else where = "탭을 되돌릴 주소가 없어요 — 미리보기를 다시 여세요.";
-    return `${name} 때문에 페이지가 범위 밖(${err.url})으로 가려 해서 멈췄어요. ${err.message} ${where} 그 페이지는 관찰하지 않았어요. browser_observe로 다시 읽어 최신 ref를 받아주세요.`;
+    return [`${name} 때문에 ${byPopup ? "새 창이" : "페이지가"} 범위 밖(${err.url})으로 가려 해서 멈췄어요. ${err.message}`, where, ...popups, "그 페이지는 관찰하지 않았어요. browser_observe로 다시 읽어 최신 ref를 받아주세요."].join(" ");
   }
 
-  private indicatorFor(cdp: CdpLike, _tool: string): AutomationIndicator {
+  private indicatorFor(cdp: CdpLike): AutomationIndicator {
     let ind = this.indicators.get(cdp);
     if (!ind) {
       ind = new AutomationIndicator(cdp);
@@ -1004,6 +1247,7 @@ export class CrExecutor {
     message: string,
     step: number | null,
     indicator: AutomationIndicator | null,
+    guard: ScopeGuard | null = null,
   ): Promise<CrToolResult> {
     const log = await this.logFor(cdp);
     if (log.openDialog) {
@@ -1016,6 +1260,8 @@ export class CrExecutor {
       scope: (url) => checkAgentOrigin(url, this.hooks.allowedOrigins()),
       artifactVersion: (url) => this.hooks.artifactVersion(url),
     });
+    // Anything the guard saw while observing refuses the result before it is recorded (CR-11).
+    this.throwIfEscaped(guard);
     this.adoptRefs(observation.refMap, observation.documentGeneration);
     const { refMap: _refs, ...obs } = observation;
     const missing = observationProblems(obs);
@@ -1078,45 +1324,58 @@ export async function observePage(
     artifactVersion(url: string): Promise<ArtifactVersionRef>;
   },
 ): Promise<Observation & { refMap: Map<string, number> }> {
-  const loc = await cdp.send("Runtime.evaluate", {
-    expression: "JSON.stringify({h: location.href, t: document.title})",
+  const check = (url: string) => {
+    const v = opts.scope?.(url);
+    if (v && !v.ok) throw new ScopeEscapeError(url, v.reason);
+  };
+  // Every part of one observation must come from ONE document, and that document must be
+  // in scope (CR-04, CR-11). The document is read before and after the snapshot and the
+  // screenshot; if it changed in between (a redirect, a reload), the whole observation is
+  // taken again rather than mixing two documents.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const generation = log.documentGeneration;
+    const first = await readDocument(cdp);
+    check(first.url);
+    const ax = await cdp.send("Accessibility.getFullAXTree", {});
+    const viewport = await readViewport(cdp);
+    const capture = () => cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 70 });
+    const shot = opts.indicator ? await opts.indicator.withHidden(capture) : await capture();
+    const last = await readDocument(cdp);
+    check(last.url);
+    if (log.documentGeneration !== generation || last.url !== first.url || last.timeOrigin !== first.timeOrigin) continue;
+    const { text, refs } = buildAxSnapshot(Array.isArray(ax?.nodes) ? ax.nodes : []);
+    let artifact: ArtifactVersionRef;
+    try {
+      artifact = await opts.artifactVersion(first.url);
+    } catch (err) {
+      throw new Error(`이 페이지의 산출물 버전을 정하지 못해 결과로 쓰지 않았어요 (${err instanceof Error ? err.message : String(err)}).`);
+    }
+    return {
+      url: first.url,
+      route: routeOf(first.url),
+      title: first.title,
+      snapshot: text,
+      refs: [...refs.keys()],
+      refMap: refs,
+      screenshot: { mimeType: "image/jpeg", data: String(shot?.data ?? "") },
+      viewport,
+      documentGeneration: generation ?? "",
+      records: log.records(generation),
+      droppedRecords: log.dropped(generation),
+      ...(log.attachedLate(generation) ? { recordsPartial: true } : {}),
+      step: opts.step,
+      artifact,
+    };
+  }
+  throw new Error("관찰하는 동안 페이지가 계속 바뀌어 한 문서로 관찰하지 못했어요. 잠시 뒤 browser_observe로 다시 읽어주세요.");
+}
+
+/** The document the page holds now: URL, title and its time origin (new for every document). */
+async function readDocument(cdp: CdpLike): Promise<{ url: string; title: string; timeOrigin: string }> {
+  const r = await cdp.send("Runtime.evaluate", {
+    expression: "JSON.stringify({h: location.href, t: document.title, o: performance.timeOrigin})",
     returnByValue: true,
   });
-  const page = JSON.parse(String(loc?.result?.value ?? "{}"));
-  const url = String(page.h ?? "");
-  const inScope = opts.scope?.(url);
-  if (inScope && !inScope.ok) throw new ScopeEscapeError(url, inScope.reason);
-  let generation = log.documentGeneration;
-  let ax = await cdp.send("Accessibility.getFullAXTree", {});
-  if (log.documentGeneration !== generation) {
-    // A new document committed while the tree was read: read again, once.
-    generation = log.documentGeneration;
-    ax = await cdp.send("Accessibility.getFullAXTree", {});
-  }
-  const { text, refs } = buildAxSnapshot(Array.isArray(ax?.nodes) ? ax.nodes : []);
-  const viewport = await readViewport(cdp);
-  const capture = () => cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 70 });
-  const shot = opts.indicator ? await opts.indicator.withHidden(capture) : await capture();
-  let artifact: ArtifactVersionRef;
-  try {
-    artifact = await opts.artifactVersion(url);
-  } catch (err) {
-    throw new Error(`이 페이지의 산출물 버전을 정하지 못해 결과로 쓰지 않았어요 (${err instanceof Error ? err.message : String(err)}).`);
-  }
-  return {
-    url,
-    route: routeOf(url),
-    title: String(page.t ?? ""),
-    snapshot: text,
-    refs: [...refs.keys()],
-    refMap: refs,
-    screenshot: { mimeType: "image/jpeg", data: String(shot?.data ?? "") },
-    viewport,
-    documentGeneration: generation ?? "",
-    records: log.records(generation),
-    droppedRecords: log.dropped(generation),
-    ...(log.attachedLate(generation) ? { recordsPartial: true } : {}),
-    step: opts.step,
-    artifact,
-  };
+  const page = JSON.parse(String(r?.result?.value ?? "{}"));
+  return { url: String(page.h ?? ""), title: String(page.t ?? ""), timeOrigin: String(page.o ?? "") };
 }

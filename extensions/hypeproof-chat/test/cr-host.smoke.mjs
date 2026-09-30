@@ -17,7 +17,7 @@ import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.m
 const w = await import("../src/crHostWiring.ts");
 const { readBrowserResultEvent } = await import("../src/browserResult.ts");
 const { CrExecutor, checkAgentOrigin } = await import("../src/experimentBrowser.ts");
-const { buildHypeproofMcpServer, crBrowserOpenRefusal } = await import("../src/browserMcp.ts");
+const { buildHypeproofMcpServer, crBrowserOpenRefusal, MCP_CR_BROWSER_TOOLS } = await import("../src/browserMcp.ts");
 const providerSrc = readFileSync(new URL("../src/chatPanelProvider.ts", import.meta.url), "utf8");
 
 const ORIGIN = "http://127.0.0.1:5173";
@@ -134,6 +134,24 @@ await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put
   assert.match(providerSrc, /this\.crSdkResults\.onToolUse\(a\.id, a\.name, this\.isCurriculumRuntimeEnabled\(\)\)/);
   assert.match(providerSrc, /void recordProxyCrResult\(p\.recordObservation, call\.id, /);
   assert.match(providerSrc, /if \(element\) void recordElementCapture\(recordObservation, /);
+});
+
+await test("CR-10: SDK results pair with their tool_results oldest first; browser_select asks, observe is allowed", async () => {
+  const ex = observationOf(makeFakePage());
+  const first = (await ex.execute("browser_observe")).observation;
+  const second = (await ex.execute("browser_hover", { ref: "e1" })).observation;
+  const sdk = new w.SdkCrResults();
+  sdk.onToolUse("tu-a", "mcp__hypeproof__browser_observe", true);
+  sdk.onToolUse("tu-b", "mcp__hypeproof__browser_hover", true);
+  sdk.onInspect("browser_observe", {}, first);
+  sdk.onInspect("browser_hover", { ref: "e1" }, second);
+  const a = readBrowserResultEvent({ kind: "tool_result", text: await sdk.onToolResult("tu-a", false) });
+  const b = readBrowserResultEvent({ kind: "tool_result", text: await sdk.onToolResult("tu-b", false) });
+  assert.deepEqual([a?.tool, b?.tool], ["browser_observe", "browser_hover"], "the first tool_result gets the first result");
+  const { evaluateSdkToolUse } = await import("../src/sdkCoachHelpers.ts");
+  const grant = [...MCP_CR_BROWSER_TOOLS];
+  assert.equal(evaluateSdkToolUse({ toolName: "mcp__hypeproof__browser_select", input: { ref: "e1", value: "s" }, permittedTools: grant }).decision, "ask", "select acts on the page: it asks");
+  assert.equal(evaluateSdkToolUse({ toolName: "mcp__hypeproof__browser_observe", input: {}, permittedTools: grant }).decision, "allow", "control: observing is allowed");
 });
 
 await test("CR-10 negative: switch off, errors and non-browser tools record no browser result; no version is an error event", async () => {

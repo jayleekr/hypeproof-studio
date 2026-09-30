@@ -9,9 +9,14 @@
 // The set is NOT the workspace (R4): the entry HTML plus every file it reaches through
 // static references (`src`, `href`, CSS `url()` / `@import`, JS `import`), resolved
 // inside the served root. It never includes a dot-file, a dot-directory, `node_modules`
-// or anything outside the root; a symlink, or a file whose real path leaves the root's
-// real path, refuses the version. cr-publish adds the explicit manifest, the secret scan
-// and the size caps on top of this; nothing here uploads anything.
+// or anything outside the root. Only the ENTRY can refuse the version (a symlink, a real
+// path outside the root, too large). A referenced file that cannot be hashed is still
+// listed, never read: a symlink or out-of-root real path as `{sha256: null, skipped}`,
+// a file over the size cap as `{bytes, sha256: null, skipped: "too_large"}` so the version
+// still moves when its size does. Past the file cap the walk stops and the version is
+// marked `partial`. One large photo in a student's page must not make every browser
+// result unusable. cr-publish adds the explicit manifest, the secret scan and the size
+// caps on top of this; nothing here uploads anything.
 //
 // vscode-free (Node fs only) so the smokes run it on a temporary directory.
 
@@ -102,6 +107,7 @@ export async function artifactVersionFor(
   const files = new Map<string, ArtifactFileRef>();
   const queue: Array<{ urlPath: string; required: boolean }> = [{ urlPath: entryUrlPath, required: true }];
   let entry: string | null = null;
+  let partial = false;
   while (queue.length) {
     const { urlPath, required } = queue.shift()!;
     let abs = resolveWithinRoot(root, urlPath);
@@ -124,18 +130,36 @@ export async function artifactVersionFor(
       if (required) throw new ArtifactSetError("excluded_path", rel);
       continue;
     }
-    if (st.isSymbolicLink()) throw new ArtifactSetError("symlink", rel);
+    if (files.has(rel)) continue;
+    if (st.isSymbolicLink()) {
+      if (required) throw new ArtifactSetError("symlink", rel);
+      files.set(rel, { path: rel, sha256: null, bytes: 0, skipped: "symlink" });
+      continue;
+    }
     if (!st.isFile()) continue;
     const real = await fsp.realpath(abs);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new ArtifactSetError("realpath_outside_root", rel);
-    if (files.has(rel)) continue;
-    if (st.size > limits.maxFileBytes) throw new ArtifactSetError("file_too_large", rel);
-    if (files.size >= limits.maxFiles) throw new ArtifactSetError("too_many_files", rel);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      if (required) throw new ArtifactSetError("realpath_outside_root", rel);
+      files.set(rel, { path: rel, sha256: null, bytes: 0, skipped: "realpath_outside_root" });
+      continue;
+    }
+    if (files.size >= limits.maxFiles) {
+      // Stop following references; the set is marked partial instead of refused.
+      partial = true;
+      break;
+    }
+    if (st.size > limits.maxFileBytes) {
+      if (required) throw new ArtifactSetError("file_too_large", rel);
+      files.set(rel, { path: rel, sha256: null, bytes: st.size, skipped: "too_large" });
+      continue;
+    }
     const bytes = await fsp.readFile(abs);
     files.set(rel, { path: rel, sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length });
     if (entry === null) entry = rel;
     for (const ref of staticReferences(bytes.toString("utf8"), rel)) queue.push({ urlPath: ref, required: false });
   }
   const list = [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { id: await digestOf(list), entry: entry ?? "", files: list };
+  // `partial` is part of the digest: a capped set never shares an id with a complete one.
+  const id = await digestOf(partial ? { files: list, partial: "too_many_files" } : list);
+  return { id, entry: entry ?? "", files: list, ...(partial ? { partial: "too_many_files" as const } : {}) };
 }

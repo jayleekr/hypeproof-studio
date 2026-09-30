@@ -16,6 +16,7 @@ import { MCP_CR_BROWSER_TOOLS } from "./browserMcp.ts";
 import { elementContextText, type ElementContext } from "./elementPick.ts";
 import { browserResultRecord, browserResultEventText } from "./browserResult.ts";
 import type { Observation } from "./experimentBrowser.ts";
+import type { ElementPreview } from "./protocol.ts";
 
 // ── CR-02 glue ──────────────────────────────────────────────────────────────
 
@@ -39,15 +40,8 @@ export interface QueuedElement {
   image: string | null;
 }
 
-/** What the webview previews: `sentText` and `imageDataUrl` are what the turn will carry. */
-export interface ElementPreview {
-  ref: string;
-  tag: string;
-  text: string;
-  source: string;
-  sentText: string;
-  imageDataUrl: string | null;
-}
+/** What the webview previews: one declaration, the host-to-webview protocol's. */
+export type { ElementPreview };
 
 export class ElementQueue {
   private pending: QueuedElement | null = null;

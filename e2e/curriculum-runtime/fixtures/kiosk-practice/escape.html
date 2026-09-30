@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
-  Scope-escape fixture (cr-browser #1391, CR-T11). Three ways an agent action can take the
-  tab to another origin without browser_navigate: a link, a script setting location, and
-  a form submit. The other origin comes from ?ext=<origin>; its paths collide with this
+  Scope-escape fixture (cr-browser #1391, CR-T11). Ways an agent action can take the tab,
+  or a new window, to another origin without browser_navigate: a link, a script setting
+  location, a form submit, a target=_blank link, window.open, and a location change that
+  lands after the step's settle wait. The other origin comes from ?ext=<origin>; its paths collide with this
   project's own files on purpose (index.html), so a version lookup by path alone would
   wrongly succeed there.
 -->
@@ -16,11 +17,17 @@
   <button id="js" type="button">스크립트로 이동</button>
   <form id="send" method="get"><button type="submit">보내기</button></form>
   <a id="inside" href="index.html">키오스크로</a>
+  <a id="blank" href="#" target="_blank">새 탭 링크</a>
+  <button id="wopen" type="button">창 열기</button>
+  <button id="late" type="button">늦게 이동</button>
   <script>
     var ext = new URLSearchParams(location.search).get("ext") || "";
     document.getElementById("out").href = ext + "/index.html";
     document.getElementById("js").addEventListener("click", function () { location.href = ext + "/js.html"; });
     document.getElementById("send").action = ext + "/index.html";
+    document.getElementById("blank").href = ext + "/index.html?blank=1";
+    document.getElementById("wopen").addEventListener("click", function () { window.open(ext + "/index.html?wopen=1"); });
+    document.getElementById("late").addEventListener("click", function () { setTimeout(function () { location.href = ext + "/index.html?late=1"; }, 600); });
   </script>
 </body>
 </html>

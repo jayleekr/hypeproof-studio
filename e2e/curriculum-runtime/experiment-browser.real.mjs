@@ -8,7 +8,8 @@
 // way the mock-channel smokes assume.
 //
 // CR-T04 observation · CR-T05 records · CR-T06 actions · CR-T07 five-step flow ·
-// CR-T08 step of a failure · CR-T09 element → AI · CR-T11 origin scope (direct and indirect) ·
+// CR-T08 step of a failure · CR-T09 element → AI · CR-T11 origin scope (direct, indirect, new
+// windows, after-step and mid-observation redirects) ·
 // CR-T63 indicator · CR-T56 capture timing (30 samples). Each with its controls.
 //
 // Run (from e2e/): node --experimental-strip-types curriculum-runtime/experiment-browser.real.mjs [--out result.json]
@@ -73,7 +74,7 @@ async function openTab(path) {
   const page = await context.newPage();
   const session = await context.newCDPSession(page);
   const EVENTS = [
-    "Page.frameNavigated", "Page.frameRequestedNavigation", "Page.frameStartedNavigating", "Page.javascriptDialogOpening", "Page.javascriptDialogClosed",
+    "Page.frameNavigated", "Page.frameRequestedNavigation", "Page.frameStartedNavigating", "Page.javascriptDialogOpening", "Page.javascriptDialogClosed", "Page.windowOpen",
     "Runtime.executionContextCreated", "Runtime.executionContextDestroyed", "Runtime.consoleAPICalled", "Runtime.exceptionThrown",
     "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed", "Log.entryAdded", "Overlay.inspectNodeRequested",
   ];
@@ -346,6 +347,84 @@ async function runFlow(query) {
       `${r.content[0].text.replace(/\s+/g, " ").slice(0, 140)} → tab ${back}`);
     await page.close();
   }
+  // New windows: a target=_blank link and window.open to the other origin.
+  for (const [label, target] of [["a target=_blank link", ["link", "새 탭 링크"]], ["window.open", ["button", "창 열기"]]]) {
+    const before = context.pages().length;
+    const { port, page } = await openTab(`/escape.html?ext=${encodeURIComponent(EXT)}`);
+    const results = [];
+    const ex = executor(port, { onResult: (tool) => results.push(tool) });
+    const o = (await ex.execute("browser_observe")).observation;
+    const r = await ex.execute("browser_click", { ref: refOf(o.snapshot, ...target) });
+    await page.waitForTimeout(300);
+    const extra = context.pages().filter((p) => p !== page).map((p) => p.url());
+    record("CR-T11", `negative: ${label} to another origin is refused, the new window closed, nothing recorded`,
+      r.isError && /새 창/.test(r.content[0].text) && !r.observation && results.length === 1 && context.pages().length === before + 1 && page.url().startsWith(ORIGIN),
+      `${r.content[0].text.replace(/\s+/g, " ").slice(0, 160)} · other windows ${JSON.stringify(extra)}`);
+    await page.close();
+  }
+  // A location change that lands after the step returned (600 ms, the settle is 250 ms).
+  {
+    const { port, page } = await openTab(`/escape.html?ext=${encodeURIComponent(EXT)}`);
+    const results = [];
+    const ex = executor(port, { onResult: (tool) => results.push(tool) });
+    const o = (await ex.execute("browser_observe")).observation;
+    const r = await ex.execute("browser_click", { ref: refOf(o.snapshot, "button", "늦게 이동") });
+    await page.waitForTimeout(1500);
+    const tabThen = page.url();
+    const next = await ex.execute("browser_observe");
+    record("CR-T11", "negative: a location change after the step returned is stopped, the tab kept on the preview, and the next call carries the refusal",
+      !r.isError && tabThen.startsWith(ORIGIN) && next.isError && /지난 단계가 끝난 뒤/.test(next.content[0].text) && results.length === 2,
+      `click isError=${r.isError} · tab ${tabThen} · next: ${next.content[0].text.replace(/\s+/g, " ").slice(0, 140)}`);
+    const again = await ex.execute("browser_observe");
+    record("CR-T11", "control: after that one refusal the preview observes normally", !again.isError && again.observation.url.startsWith(ORIGIN));
+    await page.close();
+  }
+  // browser_navigate to an in-scope page that redirects out: inside the settle, after the step,
+  // and in the middle of the observation (every result must be one in-scope document).
+  const redir = (ms, to = `${EXT}/index.html?redir=1`) => `${ORIGIN}/redir.html?ms=${ms}&to=${encodeURIComponent(to)}`;
+  {
+    const { port, page } = await openTab("/index.html");
+    const results = [];
+    const r = await executor(port, { onResult: (tool) => results.push(tool) }).execute("browser_navigate", { url: redir(20) });
+    await page.waitForTimeout(400);
+    record("CR-T11", "negative: browser_navigate to a page that redirects out 20 ms after load is refused, tab on the preview, nothing recorded",
+      r.isError && /범위 밖/.test(r.content[0].text) && results.length === 0 && page.url().startsWith(ORIGIN),
+      `${r.content[0].text.replace(/\s+/g, " ").slice(0, 140)} → tab ${page.url()}`);
+    await page.close();
+  }
+  {
+    const { port, page } = await openTab("/index.html");
+    const ex = executor(port);
+    const r = await ex.execute("browser_navigate", { url: redir(600) });
+    await page.waitForTimeout(1500);
+    const tabThen = page.url();
+    const next = await ex.execute("browser_observe");
+    record("CR-T11", "negative: a redirect 600 ms after browser_navigate returned is stopped, tab on the preview, next call refused",
+      !r.isError && tabThen.startsWith(ORIGIN) && next.isError && /지난 단계가 끝난 뒤/.test(next.content[0].text),
+      `navigate isError=${r.isError} · tab ${tabThen} · next isError=${next.isError}`);
+    await page.close();
+  }
+  {
+    const mixed = [];
+    let runs = 0;
+    for (const ms of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 3, 5, 7, 9]) {
+      for (const to of [`${EXT}/index.html?mid=1`, `${ORIGIN}/index.html?mid=1`]) {
+        const { port, page } = await openTab("/index.html");
+        const recorded = [];
+        const r = await executor(port, { onResult: (_t, _i, o) => recorded.push(o) }).execute("browser_navigate", { url: redir(ms, to) });
+        runs++;
+        const o = r.observation;
+        const bad = [];
+        if (o && !o.url.startsWith(ORIGIN)) bad.push(`result url ${o.url}`);
+        if (o && /redir\.html/.test(o.url) && /주문 시작/.test(o.snapshot)) bad.push("redir.html URL with index.html's snapshot");
+        if (o && /index\.html/.test(o.url) && /곧 다른 곳으로/.test(o.snapshot)) bad.push("index.html URL with redir.html's snapshot");
+        for (const x of recorded) if (!x.url.startsWith(ORIGIN)) bad.push(`recorded ${x.url}`);
+        if (bad.length) mixed.push(`${ms}ms→${to.startsWith(EXT) ? "ext" : "in"}: ${bad.join(", ")}`);
+        await page.close();
+      }
+    }
+    record("CR-T04/CR-T11", `negative: a redirect in the middle of the observation never yields a mixed or off-scope result (${runs} runs, 2–12 ms)`, mixed.length === 0, mixed.join(" | "));
+  }
   const { port, page } = await openTab(`/escape.html?ext=${encodeURIComponent(EXT)}`);
   const ex = executor(port);
   const o = (await ex.execute("browser_observe")).observation;
@@ -357,8 +436,8 @@ async function runFlow(query) {
 }
 
 // ── CR-T63: the page outline is on during a step and off for evidence ──────
-/** Run one hover step and capture the page mid-step (during the settle wait) and after it. */
-async function outlineRun(dropOutline) {
+/** Run one hover (or navigate) step and capture the page mid-step (during the settle wait) and after it. */
+async function outlineRun(dropOutline, tool = "browser_hover") {
   const { port, cdp, page } = await openTab("/index.html");
   const shot = async () => (await cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 70 })).data;
   // The planted variant drops every outline call: an automation step with no indicator.
@@ -368,7 +447,9 @@ async function outlineRun(dropOutline) {
   let during = null;
   const ex = executor(wrapped, { settleMs: 1, sleep: async () => { during = await shot(); } });
   const o = (await ex.execute("browser_observe")).observation;
-  const r = await ex.execute("browser_hover", { ref: refOf(o.snapshot, "button", "주문 시작") });
+  const r = tool === "browser_navigate"
+    ? await ex.execute("browser_navigate", { url: `${ORIGIN}/index.html?nav=1` })
+    : await ex.execute("browser_hover", { ref: refOf(o.snapshot, "button", "주문 시작") });
   const after = await shot();
   const calls = cdp.calls;
   await page.close();
@@ -381,6 +462,12 @@ async function outlineRun(dropOutline) {
   record("CR-T63", "the outline is gone after the step", run.cleared);
   const planted = await outlineRun(true);
   record("CR-T63", "negative: a step with no outline drawn is detected (mid-step page equals the page after)", !(!!planted.during && planted.during !== planted.after));
+}
+{
+  const run = await outlineRun(false, "browser_navigate");
+  record("CR-T63", "browser_navigate: the outline is visible during the step, cleared for the evidence and after it", !!run.during && run.during !== run.after && run.evidence === run.after && run.cleared);
+  const planted = await outlineRun(true, "browser_navigate");
+  record("CR-T63", "negative: a browser_navigate step with no outline drawn is detected", !(!!planted.during && planted.during !== planted.after));
 }
 
 // ── CR-T56: element capture to context, 30 samples ──────────────────────────

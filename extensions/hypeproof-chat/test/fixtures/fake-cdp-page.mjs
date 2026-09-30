@@ -31,6 +31,10 @@ export function makeFakePage(opts = {}) {
     // HTTP errors of the current document's resource loads, as Resource Timing reports them.
     loadFailures: opts.loadFailures ?? [],
     stopped: false,
+    // Windows this page opened (window.open / target=_blank), as Target.getTargets lists them.
+    popups: [],
+    // In-scope pages that send themselves elsewhere after load: route → { to, ms, commit }.
+    redirects: opts.redirects ?? {},
     // Planted behaviour: what a document does when it loads (console lines, throws, 404s).
     onLoad: opts.onLoad ?? (() => {}),
     onClick: opts.onClick ?? (() => {}),
@@ -87,6 +91,17 @@ export function makeFakePage(opts = {}) {
         page.newDocument(u.pathname);
       }, 5);
     },
+    /** A navigation that commits with no request event first (a server redirect): nothing can stop it. */
+    commitNavigation(url) {
+      const u = new URL(url);
+      state.origin = u.origin;
+      page.newDocument(u.pathname);
+    },
+    /** window.open / a target=_blank link: a new window, listed with this page as opener. */
+    openPopup(url) {
+      state.popups.push({ targetId: `P${state.popups.length + 1}`, type: "page", url, openerId: "SELF" });
+      emit("Page.windowOpen", { url, windowName: "_blank", windowFeatures: [], userGesture: true });
+    },
     /** A new document: new loader, new context, new node ids (a reload or navigation). */
     newDocument(route = state.route) {
       state.loader++;
@@ -97,6 +112,15 @@ export function makeFakePage(opts = {}) {
       emit("Page.frameNavigated", { frame: { id: "F1", loaderId: loaderId(), url: `${state.origin}${route}` } });
       emit("Runtime.executionContextCreated", { context: { id: state.ctx, auxData: { frameId: "F1", isDefault: true } } });
       state.onLoad(page);
+      const r = state.redirects[route];
+      if (r && state.origin === (r.from ?? state.origin)) {
+        const from = state.loader;
+        setTimeout(() => {
+          if (state.loader !== from) return;
+          if (r.commit) page.commitNavigation(r.to);
+          else page.requestNavigation(r.to);
+        }, r.ms ?? 0);
+      }
     },
     cdp: {
       onEvent(fn) {
@@ -133,7 +157,7 @@ export function makeFakePage(opts = {}) {
             const e = String(params.expression);
             if (state.dialog && !/readyState/.test(e)) return new Promise(() => {}); // a dialog blocks evaluation
             if (e.includes("location.href") && e.includes("document.title"))
-              return { result: { value: JSON.stringify({ h: `${state.origin}${state.route}`, t: state.title }) } };
+              return { result: { value: JSON.stringify({ h: `${state.origin}${state.route}`, t: state.title, o: state.loader }) } };
             if (e === "location.href") return { result: { value: `${state.origin}${state.route}` } };
             if (e.includes("innerWidth")) return { result: { value: JSON.stringify({ w: state.viewport.width, h: state.viewport.height }) } };
             if (e.includes("document.readyState")) return { result: { value: "complete" } };
@@ -146,9 +170,16 @@ export function makeFakePage(opts = {}) {
             return { result: { value: null } };
           }
           case "Accessibility.getFullAXTree":
+            // Planted: something that happens while the tree is read (a commit, a console line).
+            if (state.onAxRead) {
+              const fn = state.onAxRead;
+              state.onAxRead = null;
+              fn(page);
+            }
             return {
               nodes: [
                 { role: { value: "heading" }, name: { value: state.title } },
+                { role: { value: "StaticText" }, name: { value: `문서 ${state.origin}${state.route}` } },
                 ...state.elements.map((el) => ({ role: { value: el.role }, name: { value: el.name }, backendDOMNodeId: nodeId(el.key) })),
                 {
                   role: { value: "StaticText" },
@@ -201,6 +232,8 @@ export function makeFakePage(opts = {}) {
             if (params.type === "mouseReleased" && hit && !hit.disabled) {
               state.dom.clicked.push(hit.key);
               if (hit.href) page.requestNavigation(hit.href);
+              if (hit.popup) page.openPopup(hit.popup);
+              if (hit.lateHref) setTimeout(() => (hit.lateCommit ? page.commitNavigation(hit.lateHref) : page.requestNavigation(hit.lateHref)), hit.lateMs ?? 30);
               state.onClick(page, hit.key);
             }
             return {};
@@ -221,6 +254,13 @@ export function makeFakePage(opts = {}) {
           case "Page.navigateToHistoryEntry":
             setTimeout(() => page.newDocument("/prev.html"), 5);
             return {};
+          case "Target.getTargetInfo":
+            return { targetInfo: { targetId: "SELF", type: "page", url: `${state.origin}${state.route}` } };
+          case "Target.getTargets":
+            return { targetInfos: [{ targetId: "SELF", type: "page", url: `${state.origin}${state.route}` }, ...state.popups] };
+          case "Target.closeTarget":
+            state.popups = state.popups.filter((x) => x.targetId !== params.targetId);
+            return { success: true };
           case "Page.handleJavaScriptDialog":
             state.dialog = null;
             emit("Page.javascriptDialogClosed", {});

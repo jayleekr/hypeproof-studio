@@ -95,6 +95,14 @@ else
   bad "promise-deferred-adjacent wrongly flagged publishing_promise_contradiction"
 fi
 
+# T9 (cr-browser #1391): a 13-17 workshop cohort with the Curriculum Runtime switch
+# on fails, although it is above the child threshold; the adult twin in pass.json passes.
+rc="$(run_rc "$FIX/teen-cr.json")"
+[ "$rc" -eq 1 ] && ok "teen-cr.json → exit 1" || bad "teen-cr.json → exit $rc (want 1)"
+got_t="$("$PY" "$VALIDATE" --json "$FIX/teen-cr.json" 2>/dev/null \
+       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(sorted({f["check"] for f in d["findings"] if f["severity"]=="fail"})))')"
+[ "$got_t" = "minor_curriculum_runtime" ] && ok "teen-cr fires exactly minor_curriculum_runtime" || bad "teen-cr FAIL checks: '$got_t' (want minor_curriculum_runtime)"
+
 echo
 echo "Totals: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] && { echo "✓ cohort-harness fixtures pass"; exit 0; } || { echo "✗ cohort-harness fixtures failed"; exit 1; }

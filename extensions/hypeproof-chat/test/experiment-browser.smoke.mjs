@@ -127,9 +127,10 @@ await test("CR-T05 negative: a clean page has zero records; the previous documen
   // Late events of the OLD document arrive after L2 committed.
   page.emit("Runtime.consoleAPICalled", { type: "error", args: [{ type: "string", value: "late-from-L1" }], executionContextId: oldCtx, timestamp: Date.now() });
   page.emit("Network.responseReceived", { requestId: "late", response: { status: 500, statusText: "Server Error" } });
+  page.emit("Runtime.exceptionThrown", { timestamp: Date.now(), exceptionDetails: { text: "Uncaught", exception: { description: "Error: late-throw-from-L1" }, executionContextId: oldCtx } });
   assert.equal(log.documentGeneration, "L2");
   assert.equal(log.records().length, 0, `L2 must be clean: ${JSON.stringify(log.records())}`);
-  assert.equal(log.records("L1").length, 5, "the late ones stay with L1");
+  assert.equal(log.records("L1").length, 6, "the late ones (console, network, exception) stay with L1");
   // Instrument check: the attribution really keys on the context (a context-less record is dropped, not guessed).
   page.emit("Runtime.consoleAPICalled", { type: "error", args: [{ type: "string", value: "orphan" }], executionContextId: 9999 });
   assert.equal(log.records().length, 0);
@@ -392,11 +393,160 @@ await test("CR-T11 negative: the viewport wrapper is out of scope for the agent,
   assert.deepEqual(checkAgentOrigin(`${ORIGIN}/index.html`, [ORIGIN]), { ok: true }, "control");
 });
 
+await test("CR-T11 negative: an escape set off by a step after it returned is stopped, taken back, and refuses the next call", async () => {
+  const EXT = "https://example.com/next.html";
+  for (const [label, el] of [
+    ["delayed location change (stopped before commit)", { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: EXT, lateMs: 30 }],
+    ["delayed commit with no request event (taken back)", { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: EXT, lateMs: 30, lateCommit: true }],
+  ]) {
+    const page = makeFakePage({ elements: [el] });
+    const results = [];
+    const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+    await ex.execute("browser_observe");
+    const click = await ex.execute("browser_click", { ref: "e1" });
+    assert.equal(click.isError, false, `${label}: the step itself saw nothing yet`);
+    await tick(80);
+    assert.equal(page.state.origin, ORIGIN, `${label}: the tab is on the preview, not left on the other origin`);
+    const next = await ex.execute("browser_observe");
+    assert.equal(next.isError, true, `${label}: the next call carries the refusal`);
+    assert.match(next.content[0].text, /지난 단계가 끝난 뒤 .*범위 밖\(https:\/\/example\.com\/next\.html\)/, label);
+    if (el.lateCommit) assert.match(next.content[0].text, /되돌렸어요/, label);
+    assert.deepEqual(results, ["browser_observe", "browser_click"], `${label}: nothing of the other page recorded`);
+    const after = await ex.execute("browser_observe");
+    assert.equal(after.isError, false, `${label}: reported once, then the preview observes normally`);
+  }
+  // Control: outside the after-step window the tab is the student's; their navigation is not undone.
+  let t = 1_000_000;
+  const page = makeFakePage();
+  const { ex } = executorFor(page, { now: () => t });
+  await ex.execute("browser_hover", { ref: "e1" }).catch(() => {});
+  await ex.execute("browser_observe");
+  t += 60_000;
+  page.commitNavigation("https://example.com/student-went-here");
+  await tick(20);
+  assert.equal(page.state.origin, "https://example.com", "the student's own navigation stays");
+  const refused = await ex.execute("browser_observe");
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /범위 밖이라 거절/, "the ordinary scope check refuses the agent there");
+});
+
+await test("CR-T11 negative: a window opened off scope during a step is refused and closed; an in-scope one is not", async () => {
+  for (const [label, url] of [["target=_blank link to another origin", "https://example.com/"], ["window.open with no URL yet", "about:blank"]]) {
+    const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: url }] });
+    const results = [];
+    const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+    await ex.execute("browser_observe");
+    const r = await ex.execute("browser_click", { ref: "e1" });
+    assert.equal(r.isError, true, label);
+    assert.match(r.content[0].text, /새 창.*닫았어요/, label);
+    assert.equal(r.observation, undefined);
+    assert.deepEqual(page.state.popups, [], `${label}: the window is closed`);
+    assert.deepEqual(results, ["browser_observe"], `${label}: nothing recorded`);
+  }
+  const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: `${ORIGIN}/menu.html` }] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const ok = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(ok.isError, false, "control: an in-scope new tab is a normal result");
+  assert.equal(page.state.popups.length, 1, "control: and it is left open");
+});
+
+await test("CR-T11 negative: browser_navigate to an in-scope page that redirects off scope is refused and the tab taken back", async () => {
+  for (const [label, redirect] of [
+    ["renderer redirect right after load", { to: "https://example.com/", ms: 1 }],
+    ["committed redirect right after load", { to: "https://example.com/", ms: 1, commit: true }],
+  ]) {
+    const page = makeFakePage({ redirects: { "/redir.html": redirect } });
+    const results = [];
+    const { ex } = executorFor(page, { settleMs: 30, onResult: (tool) => results.push(tool) });
+    const r = await ex.execute("browser_navigate", { url: `${ORIGIN}/redir.html` });
+    assert.equal(r.isError, true, `${label}: ${JSON.stringify(r.content)}`);
+    assert.match(r.content[0].text, /범위 밖/);
+    assert.deepEqual(results, [], `${label}: nothing recorded`);
+    await tick(20);
+    assert.equal(page.state.origin, ORIGIN, `${label}: the tab is back on the preview`);
+    // Stopped before it committed, the tab simply stays on the in-scope page; committed, it
+    // is taken back to the page it was on before the navigation.
+    if (redirect.commit) assert.equal(page.state.route, "/index.html", `${label}: back where it was before the navigation`);
+  }
+});
+
+await test("CR-T04/CR-T11: every part of an observation comes from one document, and that document is in scope", async () => {
+  // A document commits off scope while the tree is read.
+  const out = makeFakePage();
+  const results = [];
+  const { ex: ox } = executorFor(out, { onResult: (tool) => results.push(tool) });
+  out.state.onAxRead = (p) => p.commitNavigation("https://example.com/secret.html");
+  const r = await ox.execute("browser_observe");
+  assert.equal(r.isError, true, JSON.stringify(r.content));
+  assert.match(r.content[0].text, /범위 밖/);
+  assert.deepEqual(results, [], "nothing of the other origin recorded");
+  // An in-scope document commits while the tree is read: re-observed whole, never mixed.
+  const inside = makeFakePage();
+  const { ex: ix } = executorFor(inside);
+  inside.state.onAxRead = (p) => p.commitNavigation(`${ORIGIN}/menu.html`);
+  const o = (await ix.execute("browser_observe")).observation;
+  assert.equal(o.route, "/menu.html");
+  assert.match(o.snapshot, new RegExp(`문서 ${ORIGIN}/menu\\.html`), "snapshot and URL are the same document");
+  assert.equal(o.documentGeneration, `L${inside.state.loader}`);
+});
+
+await test("CR-T11: observePage on its own refuses an out-of-scope page, and observes an in-scope one", async () => {
+  const scope = (url) => checkAgentOrigin(url, [ORIGIN]);
+  const outside = makeFakePage({ origin: "https://example.com" });
+  const olog = new PageEventLog();
+  await olog.attach(outside.cdp);
+  await assert.rejects(eb.observePage(outside.cdp, olog, { step: null, scope, artifactVersion: async () => FAKE_VERSION }), (e) => e instanceof eb.ScopeEscapeError);
+  assert.ok(!outside.calls.some((c) => c.method === "Page.captureScreenshot"), "nothing captured");
+  const inside = makeFakePage();
+  const ilog = new PageEventLog();
+  await ilog.attach(inside.cdp);
+  const o = await eb.observePage(inside.cdp, ilog, { step: null, scope, artifactVersion: async () => FAKE_VERSION });
+  assert.equal(o.route, "/index.html", "control");
+});
+
+await test("CR-T11: a window the page opens off scope while it is being observed refuses the result", async () => {
+  const page = makeFakePage();
+  const results = [];
+  const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+  await ex.execute("browser_observe");
+  page.state.onAxRead = (p) => p.openPopup("https://example.com/ad");
+  const r = await ex.execute("browser_observe");
+  assert.equal(r.isError, true, JSON.stringify(r.content));
+  assert.match(r.content[0].text, /새 창이 범위 밖/);
+  assert.deepEqual(results, ["browser_observe"], "the observation taken meanwhile is not recorded");
+  assert.deepEqual(page.state.popups, [], "and the window is closed");
+});
+
+await test("CR-T63 unit: browser_navigate that opens the first tab draws the outline once the page exists", async () => {
+  const page = makeFakePage();
+  let opened = false;
+  const port = { ...fakePort(page), tabUrl: () => (opened ? `${page.state.origin}${page.state.route}` : undefined), navigate: async (url) => { opened = true; await fakePort(page).navigate(url); } };
+  const ex = new CrExecutor(port, { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: (ms) => tick(Math.min(ms, 10)) });
+  const r = await ex.execute("browser_navigate", { url: `${ORIGIN}/index.html` });
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  const after = page.calls.slice(page.calls.findIndex((c) => c.method === "Page.navigate") + 1);
+  assert.ok(after.some((c) => c.method === "Overlay.highlightRect"), "the outline is drawn after the new tab loads");
+  assert.deepEqual(indicatorProblems(after), []);
+});
+
+await test("CR-T08: records captured during an observation carry step null; the observation names the last action", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_hover", { ref: "e1" }).catch(() => {});
+  await ex.execute("browser_observe");
+  await ex.execute("browser_hover", { ref: "e1" }); // step 2
+  page.state.onAxRead = (p) => p.consoleError("during-observe");
+  const r = await ex.execute("browser_observe");
+  assert.equal(r.observation.records.find((x) => x.message === "during-observe").step, null);
+  assert.equal(r.observation.step, 2);
+});
+
 // ── CR-T63 (unit half) — the page-level indicator ───────────────────────────
 
 /** The instrument: every page-changing CDP call must happen while the outline is drawn. */
 function indicatorProblems(calls) {
-  const ACT = new Set(["Input.dispatchMouseEvent", "Runtime.callFunctionOn", "Page.reload", "Input.insertText"]);
+  const ACT = new Set(["Input.dispatchMouseEvent", "Runtime.callFunctionOn", "Page.reload", "Input.insertText", "Page.navigate", "Page.navigateToHistoryEntry"]);
   let drawn = false;
   const problems = [];
   for (const c of calls) {
@@ -421,6 +571,42 @@ await test("CR-T63 unit positive: outline drawn during each step, cleared for th
   assert.ok(page.calls.some((c) => c.method === "Overlay.highlightRect"));
   // Chat-panel half: every step is bracketed true → false.
   assert.deepEqual(indicator.slice(-2), [{ visible: true, tool: "browser_reload" }, { visible: false, tool: "browser_reload" }]);
+});
+
+await test("CR-T63 unit: every CR executor tool draws the outline during its step and clears it (navigate included)", async () => {
+  const page = makeFakePage({ elements: WITH_SELECT });
+  const { ex } = executorFor(page);
+  const run = [
+    ["browser_navigate", { url: `${ORIGIN}/index.html` }],
+    ["browser_observe", {}], ["browser_read", {}], ["browser_screenshot", {}],
+    ["browser_click", { ref: "e1" }], ["browser_type", { ref: "e1", text: "a" }], ["browser_select", { ref: "e2", value: "s" }],
+    ["browser_scroll", { ref: "e3" }], ["browser_hover", { ref: "e1" }], ["browser_reload", {}],
+  ];
+  await ex.execute("browser_observe");
+  for (const [name, input] of run) {
+    if (name !== "browser_navigate") await ex.execute("browser_observe");
+    page.calls.length = 0;
+    const r = await ex.execute(name, input);
+    assert.equal(r.isError, false, `${name}: ${JSON.stringify(r.content)}`);
+    assert.ok(page.calls.some((c) => c.method === "Overlay.highlightRect"), `${name}: the outline was drawn`);
+    assert.deepEqual(indicatorProblems(page.calls), [], name);
+  }
+  for (const name of ["browser_back", "browser_forward"]) {
+    const hist = makeFakePage();
+    const { ex: hx } = executorFor(hist);
+    await hx.execute("browser_observe");
+    hist.calls.length = 0;
+    await hx.execute(name);
+    assert.ok(hist.calls.some((c) => c.method === "Page.navigateToHistoryEntry" || c.method === "Page.getNavigationHistory"), `${name} ran`);
+    assert.deepEqual(indicatorProblems(hist.calls), [], name);
+  }
+  // Negative: a navigate whose outline was never drawn is caught by the instrument.
+  const nav = makeFakePage();
+  const { ex: nx } = executorFor(nav);
+  await nx.execute("browser_observe");
+  nav.calls.length = 0;
+  await nx.execute("browser_navigate", { url: `${ORIGIN}/menu.html` });
+  assert.ok(indicatorProblems(nav.calls.filter((c) => c.method !== "Overlay.highlightRect")).includes("Page.navigate with no indicator"));
 });
 
 await test("CR-T63 unit negative: a step with no visible indicator is caught", async () => {

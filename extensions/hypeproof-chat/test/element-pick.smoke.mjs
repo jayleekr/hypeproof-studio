@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeFakePage, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
 
-const { buildElementContext, waitForPick, mapSource, elementContextProblems, elementContextText, STYLE_KEYS } = await import("../src/elementPick.ts");
+const { buildElementContext, waitForPick, mapSource, elementContextProblems, elementContextText, STYLE_KEYS, SNIPPET_MAX } = await import("../src/elementPick.ts");
 const { PageEventLog } = await import("../src/experimentBrowser.ts");
 const { browserTabCoverage } = await import("../src/browserControlHelpers.ts");
 
@@ -80,6 +80,7 @@ try {
   assert.deepEqual(modes, ["searchForNode", "none"], "inspect mode is left after the pick");
 
   const ctx = await buildElementContext(page.cdp, log, picked, deps);
+  const ctxShort = ctx;
   assert.equal(ctx.ref, "e1");
   assert.equal(table.get("e1"), orderId, "the payload's ref is the observation table's ref for that node");
   assert.equal(ctx.snippet, `<button id="order">주문하기</button>`);
@@ -121,6 +122,16 @@ try {
   assert.equal(hctx.ref, "e4");
   assert.equal(htable.get("e4"), heading.nodeId("h"));
   ok("a non-interactive element gets its own ref in the observation's table, so the agent can act on it");
+
+  // CR-09 bound: a large element's DOM snippet is cut to SNIPPET_MAX and says so.
+  const wall = makeFakePage({ elements: [{ key: "wall", role: "generic", name: "글".repeat(SNIPPET_MAX * 2), tag: "div", id: "wall" }] });
+  const wlog = new PageEventLog();
+  await wlog.attach(wall.cdp);
+  const wctx = await buildElementContext(wall.cdp, wlog, wall.nodeId("wall"), deps);
+  assert.equal(wctx.snippet.length, SNIPPET_MAX, "the snippet is bounded");
+  assert.equal(wctx.snippetTruncated, true);
+  assert.equal(ctxShort.snippetTruncated, false, "control: a short element is not marked truncated");
+  ok("CR-09 bound: a large element's snippet is cut to SNIPPET_MAX and marked truncated");
 
   // The student never picks: the wait ends with a reason, and inspect mode is switched off.
   const idle = makeFakePage();
