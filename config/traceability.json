@@ -2929,6 +2929,90 @@
       ]
     },
     {
+      "id": "ST-INT-CR",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-SX",
+        "ST-INT-MEASUREMENT-CORE",
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CR",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CR",
+        "ST-REQ-SX",
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE",
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-REQ-VOICE-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Curriculum runtime proposal — 2026-09-29"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CR",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR"
+      ],
+      "sources": [
+        {
+          "path": "docs/plan/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/plan/curriculum-runtime-recon.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CR",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR",
+        "ST-DES-CR"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/curriculum-runtime.md"
+        },
+        {
+          "path": "worker/test/cr-traceability.test.mjs"
+        },
+        {
+          "path": "worker/test/cr-recon.test.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/cdp-probe.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-MODULE-DISTRIBUTION",
       "stage": "requirement",
       "owner": "jayleekr",

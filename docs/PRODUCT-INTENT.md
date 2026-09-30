@@ -202,3 +202,13 @@ Orchestrate, Verify, Adapt, Ownership)이다. 기존 7개 기록을 보존하며
 별도 연결한다. 제품 채택을 연구 타당화 완료까지 미루지 않는다.
 [MC-01–48](requirements/measurement-core.md), [검증 계약](testing/measurement-core.md),
 [개발 순서](plan/measurement-core.md)로 연결한다. 문서는 구현·실사용 증거가 아니다.
+
+## Curriculum Runtime (AI for Good v5)
+
+[INT-CR-00–09](intents/curriculum-runtime.md) makes Studio the runtime of the AI for Good v5
+six-week loop (Problem → Hypothesis → Build → Test → Evidence → Decision → Product Change →
+Deck Change) under one HypeProof account. It extends the measurement core above instead of
+adding a second store or scorer (SX-48), and keeps MU-02: no automatic provider substitution.
+Linked: [CR-01–84](requirements/curriculum-runtime.md), [verification CR-T01–T80](testing/curriculum-runtime.md),
+[plan, DAG and gap matrix](plan/curriculum-runtime.md). These documents are a proposed contract,
+not evidence of implementation or classroom use.

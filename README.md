@@ -9,11 +9,9 @@
 </p>
 
 <p align="center">
-  <img alt="Phase" src="https://img.shields.io/badge/phase-4--5%20(UX%20iteration)-5B5BFF">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20arm64-black?logo=apple">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows%20x64-black">
   <img alt="Based on" src="https://img.shields.io/badge/based%20on-VSCodium-2F80ED">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Target" src="https://img.shields.io/badge/target-SK%EB%B0%94%EC%9D%B4%EC%98%A4%ED%8C%9C%201%ED%9A%8C%EC%B0%A8%20(2026--06)-FFD75B">
 </p>
 
 <p align="center">
@@ -79,7 +77,7 @@ injects the cohort's system prompt and enforces the session window.
 | Platform | Status | Notes |
 |---|---|---|
 | macOS arm64 | ✅ Primary | Built and tested locally |
-| Windows x64 | 🟡 Scaffolded | Build in GitHub Actions only (Phase 6) |
+| Windows x64 | ✅ Released | Built in GitHub Actions only (`build-windows.yml`); published with each `v*` release |
 | Linux | ⬜ Not targeted | VSCodium base supports it; not a goal for v0.1 |
 
 ## Install
@@ -140,8 +138,9 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 | Path | What |
 |---|---|
 | `vscodium-base/` | **Submodule** → [`jayleekr/vscodium`](https://github.com/jayleekr/vscodium) `@hps/main`. Pointer is pinned — bump deliberately only ([policy](.claude/rules/build-pipeline.md)). Never edit upstream files; add a patch under `vscodium-base/patches/`. |
-| `extensions/hypeproof-chat/` | The chat-panel extension (React webview). Bundled as a built-in at Phase 5. |
-| `worker/` | Cloudflare Worker — OpenAI-compatible proxy, per-cohort profiles, token auth. Production target. |
+| `extensions/hypeproof-chat/` | The chat-panel extension (React webview). Bundled as a built-in extension by `scripts/inject-builtin-extensions.sh`. |
+| `worker/` | Cloudflare Worker `api.hypeproof-ai.xyz` — model proxy, per-cohort profiles, token auth, classroom operations. Production. |
+| `chalk/` | Chalk instructor surface, a separate Cloudflare Worker at `chalk.hypeproof-ai.xyz` (registered in `products.yaml`, layer `c`). |
 | `proxy-poc/` | Python proxy from early iteration (superseded by `worker/`). |
 | `scripts/` | Build wrappers — `run-build.sh`, `dev-stack.sh`, `generate-platform-icons.sh`, `verify-branding.sh`. |
 | `skills/` | Public Agent Skills and [current measurement guidance](./skills/README.md); HAIN7 is retained for historical replay only. |
@@ -153,7 +152,7 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 
 `VSCodium/vscodium` → `jayleekr/vscodium` (fork; `hps/main` carries brand patches)
 → submodule pointer bump in this repo (deliberate, reviewed) → tagged release.
-Automation lands in Phase 6 (`.github/workflows/upstream-sync.yml`, `release.yml`).
+Releases are automated (`build-mac.yml`, `build-windows.yml`, `mirror-release.yml`). Upstream sync is still manual — `.github/workflows/upstream-sync.yml` is a placeholder.
 
 ## Contributing
 
