@@ -650,7 +650,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // The start surface owns connection and explicit course entry.
   // #1298 — if an issuer-shaped token is already stored, the user is likely an instructor; skip the
   // student start page automatically. If whoami later returns rejected the token is deleted and the
-  // start page is shown once (handled in postConfig/refresh via instructorMode.handleWhoamiRejected).
+  // start page is shown once (handled in postConfig/refresh via instructorMode.handleAutoReadResult).
   void (async () => {
     const storedIssuer = await context.secrets.get(ISSUER_TOKEN_KEY);
     if (!storedIssuer || !looksLikeIssuerTokenUnverified(storedIssuer)) {

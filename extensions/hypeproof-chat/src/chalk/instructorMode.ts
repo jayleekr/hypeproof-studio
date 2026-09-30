@@ -67,7 +67,9 @@ export class InstructorModeManager {
 
   // Checks GET /admin/chalk/whoami with the current token.
   // Caches result per token so we don't hammer the server on every postConfig.
-  // Sets lastWhoamiStatus: "ok" (2xx), "rejected" (401/403), or "unreachable" (network/timeout).
+  // Sets lastWhoamiStatus: "ok" (2xx), "rejected" (401/403 only), or "unreachable" (network/timeout/other).
+  // Unreachable results are NOT cached: the next refresh retries so a transient failure does not
+  // permanently lock out instructor mode until the app restarts.
   async checkInstructorMode(token: string | undefined, proxyUrl: string): Promise<boolean> {
     if (!token) {
       this._isInstructor = false;
@@ -82,11 +84,21 @@ export class InstructorModeManager {
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(5000),
       });
-      this._isInstructor = res.ok;
-      this._lastWhoamiStatus = res.ok ? "ok" : "rejected";
+      if (res.ok) {
+        this._isInstructor = true;
+        this._lastWhoamiStatus = "ok";
+      } else if (res.status === 401 || res.status === 403) {
+        this._isInstructor = false;
+        this._lastWhoamiStatus = "rejected";
+      } else {
+        // 500, 429, 404, etc. — treat as unreachable; keep token, do not cache
+        this._lastWhoamiStatus = "unreachable";
+        return this._isInstructor === true;
+      }
     } catch {
-      this._isInstructor = false;
+      // network/timeout failure — keep token, do not cache
       this._lastWhoamiStatus = "unreachable";
+      return this._isInstructor === true;
     }
     this._isInstructorToken = token;
     return this._isInstructor;
