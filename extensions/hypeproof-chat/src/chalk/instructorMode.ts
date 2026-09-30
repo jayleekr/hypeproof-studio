@@ -1,6 +1,8 @@
 // #1298 — instructor-mode state and server communication.
 // Isolated from chatPanelProvider.ts so instructor logic has a single home.
 
+import { adminBaseFrom } from "./serverBase.ts";
+
 export type WhoamiStatus = "ok" | "rejected" | "unreachable" | null;
 
 export class InstructorModeManager {
@@ -79,7 +81,7 @@ export class InstructorModeManager {
     }
     if (this._isInstructor !== null && this._isInstructorToken === token) return this._isInstructor;
     try {
-      const base = proxyUrl.replace(/\/v1\/?$/, '');
+      const base = adminBaseFrom(proxyUrl);
       const res = await fetch(`${base}/admin/chalk/whoami`, {
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(5000),
@@ -108,7 +110,7 @@ export class InstructorModeManager {
   // Caches by version: if the server returns up_to_date:true the cached text is reused.
   // Falls back to undefined on network error (instructor chat still works, just no system prompt).
   async fetchInstructorBrief(token: string, proxyUrl: string): Promise<string | undefined> {
-    const base = proxyUrl.replace(/\/v1\/?$/, '');
+    const base = adminBaseFrom(proxyUrl);
     const versionParam = this._instructorBriefVersion !== undefined
       ? `?version=${this._instructorBriefVersion}` : '';
     try {

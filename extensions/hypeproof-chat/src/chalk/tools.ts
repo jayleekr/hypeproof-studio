@@ -37,6 +37,7 @@ export interface ChalkToolDefinition {
 // Final gate is server-verified whoami in chatPanelProvider (#1298, E4-3).
 import { ISSUER_TOKEN_KEY } from "../mintStudentTokenHelpers.ts";
 import { looksLikeIssuerTokenUnverified } from "../chatPanelHelpers.ts";
+import { adminBaseFrom } from "./serverBase.ts";
 
 export async function chalkToolsEnabled(
   secrets: vscode.SecretStorage,
@@ -67,7 +68,7 @@ async function issuerFetch(
   const token = await ctx.secrets.get(ISSUER_TOKEN_KEY);
   if (!token) throw new Error("강사 토큰이 없습니다. 먼저 로그인하세요.");
 
-  const base = ctx.serverUrl.replace(/\/$/, "");
+  const base = adminBaseFrom(ctx.serverUrl);
   const headers: Record<string, string> = {
     authorization: `Bearer ${token}`,
     accept: "application/json",
