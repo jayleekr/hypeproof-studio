@@ -24,10 +24,12 @@ const KIOSK = `<!doctype html>
   <button>취소</button>
   <button>도움말</button>
   <p>같은 글자</p><p>같은 글자</p>
+  <div id="rec"></div>
   <script>
     const b = document.createElement("button");
     b.textContent = "추가 주문";
     document.body.append(b);
+    document.getElementById("rec").innerHTML = '<button>추천 메뉴</button>';
   </script>
 </body></html>`;
 
@@ -37,6 +39,7 @@ const KIOSK = `<!doctype html>
   assert.deepEqual(mapSource(KIOSK, "index.html", { tag: "button", text: "취소" }), { file: "index.html", line: 6 });
   ok("CR-T09 positive: an element defined in markup maps to its file and line (by id, else by exact text)");
   assert.equal(mapSource(KIOSK, "index.html", { tag: "button", text: "추가 주문" }), "unmapped", "script-generated: never a guessed line");
+  assert.equal(mapSource(KIOSK, "index.html", { tag: "button", text: "추천 메뉴" }), "unmapped", "markup inside a script string is not where the element is defined");
   assert.equal(mapSource(KIOSK, "index.html", { tag: "p", text: "같은 글자" }), "unmapped", "two candidates are a guess");
   assert.equal(mapSource(KIOSK, "index.html", { tag: "div", text: "주문하기" }), "unmapped", "another tag's text is not this element");
   ok("CR-T09 negative: a script-generated or ambiguous element is \"unmapped\", never a guessed file");

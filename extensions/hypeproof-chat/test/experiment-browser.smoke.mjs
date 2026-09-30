@@ -66,6 +66,16 @@ await test("CR-T04 negative: an observation missing viewport or document generat
   assert.deepEqual(observationProblems(noViewport), ["viewport"]);
   assert.deepEqual(observationProblems({ ...good, documentGeneration: "" }), ["documentGeneration"]);
   assert.deepEqual(observationProblems({ ...good, viewport: { width: 0, height: 600 } }), ["viewport"]);
+  // Every required part, removed one at a time, is named (CR-04's full list plus CR-10's version).
+  for (const field of ["url", "route", "snapshot", "screenshot", "viewport", "documentGeneration", "artifact"]) {
+    const { [field]: _gone, ...planted } = good;
+    assert.deepEqual(observationProblems(planted), [field], `missing ${field}`);
+  }
+  assert.deepEqual(observationProblems({ ...good, screenshot: { mimeType: "image/jpeg", data: "" } }), ["screenshot"]);
+  // End to end: a capture that comes back empty is refused, not passed on without an image.
+  const blank = await executorFor(makeFakePage({ screenshot: "" })).ex.execute("browser_observe");
+  assert.equal(blank.isError, true);
+  assert.match(blank.content[0].text, /빠진 것: screenshot/);
   // End to end: a page whose screenshot fails yields an error result, never a partial one.
   const broken = makeFakePage({ screenshotFails: true });
   const r = await executorFor(broken).ex.execute("browser_observe");
