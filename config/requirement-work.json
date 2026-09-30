@@ -2837,7 +2837,29 @@
         "e2e/curriculum-runtime/cdp-probe.mjs",
         "e2e/curriculum-runtime/cdp-probe-extension/extension.js",
         "e2e/curriculum-runtime/cdp-probe-extension/package.json"
-      ]
+      ],
+      "completion": {
+        "verdict": "PASS",
+        "reviewed_by": "cr-recon:review:regression-conventions:r3",
+        "report": "docs/evidence/cr-recon.md",
+        "scope_sha256": "c50cd5fc0d1e063dff2f1d9f9127dc30917d0fba11395547c1e1ab4c29047ef2",
+        "inputs": {
+          "docs/evidence/cr-recon.md": "1ff04653ada22f6ba92a67415e19adae7a12b0019ef7283c27233cda18fc332b",
+          "docs/plan/curriculum-runtime-recon.md": "43da31d03b3973edfeb38f3dd47530eca85363e46b6e7039c38dfe09dfcc4998",
+          "docs/requirements/curriculum-runtime.md": "e8938d83a629d97654f03f7330968dc18895613d6fb9ff7cad91b7a8b27a6b72",
+          "e2e/curriculum-runtime/cdp-probe-extension/extension.js": "d7a073461def6e68ddd73847e93a27c7580f9f3ea7ff3149b325d40ebacebd3f",
+          "e2e/curriculum-runtime/cdp-probe-extension/package.json": "283d4ca9d210e5d5ed6eff580071d8a6d5577a7de4835ad5397cadbc2f1cd8fe",
+          "e2e/curriculum-runtime/cdp-probe.mjs": "4e3633f8b5bb49087cb8a7e85e0bafcb0689489908aa732dc85eb4726658f346",
+          "worker/test/cr-recon.test.mjs": "2352ce3b318a249fb2c5c24617d857e9f13240ee5a82471a2b69ad84b5cd0bda",
+          "worker/test/fixtures/cr-recon/frozen-inputs.json": "84a9c6cbf1eafee5ec7d162250468bc33e2596b020fb39a8f69bc3e693d68416"
+        },
+        "commit": "5e82f590c8200b45b26a97809cf8e289c9df0ac7",
+        "test_ids": [
+          "CR-T01"
+        ],
+        "recorded_at": "2026-09-29T09:02:32Z",
+        "pr": 1420
+      }
     },
     {
       "id": "cr-browser",
