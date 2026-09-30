@@ -91,6 +91,32 @@ else
   echo "Building: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
 fi
 
+# ── Step 1.5: clear previous conversation ────────────────────────────────────
+# Clears persisted chat history (chatPanelProvider.ts workspaceState key hypeproofChat.history*)
+# from the Dev state folder so each review starts with a clean slate.
+# The state path mirrors studio-dev.py:19+222 (resolve().parents[1] + sha256[:12]).
+echo ""
+echo "=== [1.5/6] Clear previous conversation ==="
+STATE_HASH="$(python3 - "$WORKTREE_DIR/scripts/studio-dev.py" <<'PY'
+import sys, hashlib, pathlib
+repo = pathlib.Path(sys.argv[1]).resolve().parents[1]
+print(hashlib.sha256(str(repo).encode()).hexdigest()[:12])
+PY
+)"
+STATE_DIR="$HOME/Library/Application Support/HypeProof Studio Development/$STATE_HASH"
+TOTAL_DELETED=0
+if [[ -d "$STATE_DIR/user-data/User/workspaceStorage" ]]; then
+  while IFS= read -r -d '' db; do
+    COUNT_BEFORE=0
+    COUNT_BEFORE="$(sqlite3 "$db" "SELECT COUNT(*) FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null || echo 0)"
+    if [[ "$COUNT_BEFORE" -gt 0 ]]; then
+      sqlite3 "$db" "DELETE FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null || true
+      TOTAL_DELETED=$((TOTAL_DELETED + COUNT_BEFORE))
+    fi
+  done < <(find "$STATE_DIR/user-data/User/workspaceStorage" -name "state.vscdb" -print0 2>/dev/null)
+fi
+[[ $TOTAL_DELETED -gt 0 ]] && echo "이전 대화 비움 (${TOTAL_DELETED}행)" || echo "지울 대화 없음"
+
 # ── Step 2: extension deps ────────────────────────────────────────────────────
 echo ""
 echo "=== [2/6] npm ci ==="
@@ -255,15 +281,38 @@ if [[ -z "$TOKEN" ]]; then
   echo "$TOKEN_JSON" >&2
 else
   echo "Token issued."
-  # Copy to clipboard if pbcopy available
-  if command -v pbcopy >/dev/null 2>&1; then
-    echo "$TOKEN" | pbcopy
-    echo "Token copied to clipboard."
+fi
+
+# ── Step 4.5: authoring draft ─────────────────────────────────────────────────
+# Creates a minimal authoring draft so chalk_set_inputs (which requires an existing draft)
+# does not return 404 during review. Writes only to 127.0.0.1 (local D1).
+echo ""
+echo "=== [4.5/6] Authoring draft ==="
+DRAFT_COURSE=""
+if [[ "$PROFILE_ID" == "unknown-profile" || "$COHORT_ID" == "unknown-cohort" ]]; then
+  echo "WARNING: 초안 없음 — set_inputs 404 예상 (profile/cohort 미확인)" >&2
+elif [[ -z "${TOKEN:-}" ]]; then
+  echo "WARNING: 초안 없음 — set_inputs 404 예상 (토큰 없음)" >&2
+else
+  DRAFT_COURSE="review-$(python3 -c 'import time; print(int(time.time()))')"
+  DRAFT_REQUEST_ID="$(openssl rand -hex 16)"
+  DRAFT_BODY_FILE="$(mktemp "$WORKTREE_DIR/.draft-body-XXXXXX.json")"
+  chmod 600 "$DRAFT_BODY_FILE"
+  DRAFT_CONTENT='{"schema":"hps-session-design/1","title":"review draft","audience":"","duration_minutes":60,"objective":"","prerequisites":"","starter":"","steps":[]}'
+  printf '{"expected_revision":0,"request_id":"%s","profile_id":"%s","content":%s}' \
+    "$DRAFT_REQUEST_ID" "$PROFILE_ID" "$DRAFT_CONTENT" > "$DRAFT_BODY_FILE"
+  DRAFT_RC=0
+  printf 'Authorization: Bearer %s\n' "$TOKEN" | \
+    curl -sf -X PUT -H @- -H 'Content-Type: application/json' \
+    --data-binary @"$DRAFT_BODY_FILE" \
+    "http://127.0.0.1:${WRANGLER_PORT}/admin/cohorts/${COHORT_ID}/authoring/${DRAFT_COURSE}" \
+    >/dev/null 2>&1 || DRAFT_RC=$?
+  rm -f "$DRAFT_BODY_FILE"
+  if [[ $DRAFT_RC -ne 0 ]]; then
+    echo "WARNING: 초안 없음 — set_inputs 404 예상" >&2
+    DRAFT_COURSE=""
   else
-    echo ""
-    echo "── TOKEN (paste into the app) ──────────────────────"
-    echo "$TOKEN"
-    echo "────────────────────────────────────────────────────"
+    echo "Draft created: cohort=${COHORT_ID} course=${DRAFT_COURSE}"
   fi
 fi
 
@@ -284,11 +333,9 @@ echo "HypeProof Studio Dev is running."
 echo ""
 echo "In the app:"
 echo "  1. Click the HypeProof chat icon in the sidebar"
-echo "  2. Select '수업 참여'"
-if [[ -n "${TOKEN:-}" ]] && command -v pbcopy >/dev/null 2>&1; then
-  echo "  3. Paste the token (already in clipboard)"
-else
-  echo "  3. Paste the token shown above"
+echo "  2. 강사 모드 띠(Instructor 배너)가 표시되는지 확인 — 토큰 붙여 넣기 불필요"
+if [[ -n "${DRAFT_COURSE:-}" ]]; then
+  echo "  3. chalk_set_inputs 호출 시 로그에 찍힌 강의 ID(${DRAFT_COURSE})를 course 인자로 사용"
 fi
 echo ""
 echo "When done reviewing, press Ctrl+C to clean up."
