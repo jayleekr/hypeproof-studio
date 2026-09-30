@@ -795,6 +795,8 @@ export class ScopeGuard {
   private enforceUntil = 0;
   private restoresLeft = 0;
   private selfTargetId: string | null | undefined;
+  /** Windows that already existed when the step began: the student's, never closed by the guard. */
+  private knownTargets: Promise<Set<string> | null> = Promise.resolve(null);
   private work: Promise<unknown> = Promise.resolve();
   private escapes: ScopeEscape[] = [];
   /** The last page the tab committed inside scope: where a committed escape is taken back to. */
@@ -828,6 +830,12 @@ export class ScopeGuard {
   beginStep(): void {
     this.inStep = true;
     this.restoresLeft = 1;
+    // Sent before the step's own CDP calls, so the answer lists only windows that were
+    // open before the agent acted (a student's popup among them).
+    this.knownTargets = this.cdp
+      .send("Target.getTargets", {})
+      .then((t) => new Set<string>((t?.targetInfos ?? []).map((x: { targetId?: string }) => String(x.targetId ?? ""))))
+      .catch(() => null);
   }
 
   endStep(): void {
@@ -920,16 +928,25 @@ export class ScopeGuard {
     }
   }
 
-  /** Close the windows this tab opened that are not in scope (their URL may still be empty). */
+  /**
+   * Close the off-scope window this tab opened after the step began (its URL may still be
+   * empty). Windows that were already open then are the student's and are left alone.
+   */
   private async closePopups(): Promise<string> {
     try {
       this.selfTargetId ??= (await this.cdp.send("Target.getTargetInfo", {}))?.targetInfo?.targetId ?? null;
       if (!this.selfTargetId) return "새 창을 닫지 못했어요";
+      const known = (await this.knownTargets) ?? new Set<string>();
       for (let i = 0; i < 20; i++) {
         const t = await this.cdp.send("Target.getTargets", {});
         const infos: Array<{ targetId?: string; type?: string; url?: string; openerId?: string }> = t?.targetInfos ?? [];
         const popups = infos.filter(
-          (x) => x.openerId === this.selfTargetId && x.type === "page" && typeof x.targetId === "string" && !checkAgentOrigin(String(x.url ?? ""), this.allowed()).ok,
+          (x) =>
+            x.openerId === this.selfTargetId &&
+            x.type === "page" &&
+            typeof x.targetId === "string" &&
+            !known.has(x.targetId) &&
+            !checkAgentOrigin(String(x.url ?? ""), this.allowed()).ok,
         );
         if (popups.length) {
           for (const p of popups) await this.cdp.send("Target.closeTarget", { targetId: p.targetId });

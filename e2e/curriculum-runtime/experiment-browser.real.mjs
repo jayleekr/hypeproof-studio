@@ -10,7 +10,9 @@
 // CR-T04 observation · CR-T05 records · CR-T06 actions · CR-T07 five-step flow ·
 // CR-T08 step of a failure · CR-T09 element → AI · CR-T11 origin scope (direct, indirect, new
 // windows, after-step and mid-observation redirects) ·
-// CR-T63 indicator · CR-T56 capture timing (30 samples). Each with its controls.
+// CR-T63 indicator · CR-T55 preview refresh timing (30 saves) · CR-T56 capture timing
+// (30 samples). Each with its controls. CR-T04/T05/T08 verdicts about what the agent can
+// report read the text the model receives (the SDK and proxy adapters), not the side field.
 //
 // Run (from e2e/): node --experimental-strip-types curriculum-runtime/experiment-browser.real.mjs [--out result.json]
 // Exit: 0 every check and control held · 1 a check or a control failed · 2 could not run.
@@ -28,7 +30,32 @@ const { serveStatic, LIVERELOAD_PATH } = await import(join(ext, "liveServerHelpe
 const eb = await import(join(ext, "experimentBrowser.ts"));
 const { buildElementContext, waitForPick, elementContextProblems, cropElement } = await import(join(ext, "elementPick.ts"));
 const { artifactVersionFor } = await import(join(ext, "artifactVersion.ts"));
-const { CrExecutor, PageEventLog, observationProblems, actionResultProblems, failuresOf } = eb;
+const { CrExecutor, PageEventLog, observationProblems, actionResultProblems } = eb;
+const { toMcpToolResult } = await import(join(ext, "browserMcp.ts"));
+const { toProxyToolResult } = await import(join(ext, "browserControlHelpers.ts"));
+
+/**
+ * The text the model reads for a result on either runtime (the SDK and proxy adapters must
+ * agree); verdicts about what the agent can report are read from here, not from the
+ * `observation` side field no runtime passes to the model.
+ */
+const modelText = (r) => {
+  const texts = (blocks) => blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const sdk = texts(toMcpToolResult(r).content);
+  const proxy = texts(toProxyToolResult("t", r).content);
+  if (sdk !== proxy) throw new Error("the SDK and proxy runtimes hand the model different text");
+  return sdk;
+};
+/** Failures (CR-08) as the model reads them: error record lines with their step. */
+const failuresInText = (text) => {
+  const out = [];
+  for (const line of text.split("\n")) {
+    const m = /^- \[(console|exception|network|log)\/([a-z]+)\](?: 단계 (\d+))? (.*?)(?: @ \S+)?$/.exec(line);
+    if (!m || !(m[1] === "exception" || m[1] === "network" || m[2] === "error" || m[2] === "assert")) continue;
+    out.push({ step: m[3] ? Number(m[3]) : null, kind: m[1], message: m[4] });
+  }
+  return out;
+};
 
 const ROOT = join(here, "fixtures/kiosk-practice");
 const outArg = process.argv.indexOf("--out");
@@ -121,6 +148,10 @@ const refOf = (snapshot, role, name) => {
   const refsOk = !!o && ["주문 시작", "큰 글씨로 보기", "도움말 보기"].every((n) => refOf(o.snapshot, "button", n));
   record("CR-T04", "observation: URL, route, snapshot refs, screenshot, viewport, document generation, version", !r.isError && probs.length === 0 && o.route === "/index.html" && o.title === "키오스크 연습" && o.viewport.width === 390 && o.viewport.height === 844 && refsOk && /^[A-F0-9]{32}$/.test(o.documentGeneration),
     o ? `route ${o.route} · viewport ${o.viewport.width}x${o.viewport.height} · generation ${o.documentGeneration} · version ${o.artifact.id.slice(0, 19)}… (${o.artifact.files.length} files)` : JSON.stringify(r.content));
+  const text = r.isError ? "" : modelText(r).split("\n");
+  const wants = o ? [`URL: ${o.url}`, `경로: ${o.route}`, `뷰포트: 390x844`, `문서 세대: ${o.documentGeneration}`, `산출물 버전: ${o.artifact.id}`] : [];
+  const missing = wants.filter((w) => !text.some((l) => l.startsWith(w)));
+  record("CR-T04", "what the model reads carries URL, route, viewport, document generation and artifact version", !!o && missing.length === 0, missing.join(" | "));
   const { viewport: _v, ...planted } = o ?? {};
   record("CR-T04", "negative control: an observation with the viewport removed is an error", observationProblems(planted).includes("viewport"));
   await page.close();
@@ -154,8 +185,8 @@ const refOf = (snapshot, role, name) => {
 {
   const { port, page } = await openTab("/typo.html");
   const r = await executor(port).execute("browser_observe");
-  const recs = r.observation?.records ?? [];
-  record("CR-T05", "late attach: a script 404 during load, before the log attached, is still reported", !r.isError && recs.some((x) => x.kind === "network" && /app-typo\.js/.test(x.message)) && r.observation.recordsPartial === true, JSON.stringify(recs.map((x) => x.message)));
+  const seen = r.isError ? [] : failuresInText(modelText(r));
+  record("CR-T05", "late attach: a script 404 during load, before the log attached, still reaches the model", seen.some((x) => x.kind === "network" && /app-typo\.js/.test(x.message)) && r.observation.recordsPartial === true, JSON.stringify(seen));
   await page.close();
   const clean = await openTab("/index.html");
   const c = await executor(clean.port).execute("browser_observe");
@@ -221,7 +252,7 @@ async function runFlow(query) {
     const ref = refOf(obs.snapshot, ...step.target);
     const r = ref ? await ex.execute(step.name, { ref, ...(step.value ? { value: step.value } : {}) }) : null;
     if (r?.observation) {
-      for (const f of failuresOf(r.observation.records)) if (!failures.some((g) => g.message === f.message)) failures.push(f);
+      for (const f of failuresInText(modelText(r))) if (!failures.some((g) => g.message === f.message)) failures.push(f);
       obs = r.observation;
     }
     if (!r || r.isError || !step.expect.test(obs.snapshot)) {
@@ -253,8 +284,8 @@ async function runFlow(query) {
   await page.evaluate(() => console.error("student-made-error-between-steps"));
   await page.waitForTimeout(100);
   const r = await ex.execute("browser_observe");
-  const rec = r.observation?.records.find((x) => x.message === "student-made-error-between-steps");
-  record("CR-T08", "an error outside any agent step carries step null, not the last step", !!rec && rec.step === null, JSON.stringify(rec ?? null));
+  const rec = r.isError ? null : failuresInText(modelText(r)).find((x) => /student-made-error-between-steps/.test(x.message));
+  record("CR-T08", "an error outside any agent step reaches the model with no step, not the last step", !!rec && rec.step === null, JSON.stringify(rec ?? null));
   await page.close();
 }
 
@@ -496,6 +527,70 @@ async function outlineRun(dropOutline, tool = "browser_hover") {
   const crop = await cropElement(cdp, id);
   record("CR-T56", "the crop is the element's box", !!crop && crop.clip.width < 390 && crop.clip.height < 200, crop ? `${Math.round(crop.clip.width)}x${Math.round(crop.clip.height)}` : "none");
   await page.close();
+}
+
+// ── CR-T55 (synthetic): save → the new document ready in the preview, 30 saves ──
+// A copy of the fixture served the way LiveServer serves it: serveStatic with the
+// live-reload client, a file watcher, the same 150 ms debounce, then the SSE push. Timed
+// from the file write to the new document at readyState "complete" in the tab. Not the
+// Studio app: the Electron watcher and the integrated browser are not in this path.
+{
+  const { mkdtempSync, cpSync, readFileSync, rmSync, watch } = await import("node:fs");
+  const dir = mkdtempSync(join(os.tmpdir(), "cr-t55-"));
+  cpSync(ROOT, dir, { recursive: true });
+  const clients = new Set();
+  let delayMs = 0;
+  let timer;
+  const watcher = watch(dir, { recursive: true }, () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => setTimeout(() => { for (const res of clients) res.write("data: reload\n\n"); }, delayMs), 150);
+  });
+  const srv = createServer((req, res) => {
+    if ((req.url ?? "/").split("?")[0] === LIVERELOAD_PATH) {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+      res.write(": connected\n\n");
+      clients.add(res);
+      res.on("close", () => clients.delete(res));
+      return;
+    }
+    const r = serveStatic(dir, req.url ?? "/");
+    res.writeHead(r.status, { "content-type": r.contentType, "cache-control": "no-store" });
+    res.end(r.body);
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const page = await context.newPage();
+  await page.goto(`${base}/index.html`, { waitUntil: "load" });
+  const original = readFileSync(join(dir, "index.html"), "utf8");
+  let n = 0;
+  const save = async () => {
+    n++;
+    await page.waitForTimeout(250); // the previous reload's SSE connection is open again
+    const t0 = performance.now();
+    writeFileSync(join(dir, "index.html"), original.replace("<head>", `<head><meta name="hp-save" content="${n}">`));
+    await page.waitForFunction((k) => document.readyState === "complete" && document.querySelector('meta[name="hp-save"]')?.content === String(k), n, { polling: 5, timeout: 15_000 });
+    return Math.round(performance.now() - t0);
+  };
+  const p50 = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+  try {
+    const samples = [];
+    for (let i = 0; i < 30; i++) samples.push(await save());
+    const sorted = [...samples].sort((a, b) => a - b);
+    record("CR-T55", "save → new document ready in the preview: p50 under 2 s (n=30, synthetic)", p50(samples) < 2000,
+      `p50 ${p50(samples)} ms · min ${sorted[0]} · max ${sorted[29]} · ${os.cpus()[0]?.model ?? "?"} · headless Chromium + Studio serveStatic/SSE, not the Studio app`);
+    delayMs = 3000;
+    const slow = [];
+    for (let i = 0; i < 3; i++) slow.push(await save());
+    record("CR-T55", "negative: a planted 3 s delay before the reload push is reported as a miss", !(p50(slow) < 2000), `p50 ${p50(slow)} ms (n=3)`);
+  } catch (err) {
+    record("CR-T55", "save → new document ready in the preview", false, err.message);
+  } finally {
+    watcher.close();
+    await page.close();
+    srv.close();
+    for (const res of clients) res.destroy();
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 await browser.close();

@@ -102,6 +102,27 @@ await test("switch ON for a 14-17 workshop-tier cohort: no CR tool, no contract,
   }
 });
 
+await test("switch ON for a mixed-age [15, 40] or unknown-age workshop cohort: no CR tool or contract (adult lower bound)", async () => {
+  for (const [label, audience] of [["mixed-age 15-40", { ...COPYCLONE.audience, age_range: [15, 40] }], ["no age_range", (({ age_range: _a, ...rest }) => rest)(COPYCLONE.audience)]]) {
+    const p = { ...withSwitch(COPYCLONE, true), audience };
+    assert.ok(toolNames(p).includes("browser_navigate"), `${label}: control, its base browser tools are injected`);
+    assert.deepEqual(toolNames(p).filter((n) => CR_NAMES.includes(n)), [], `${label}: no CR tool`);
+    for (const runtime of ["proxy", "sdk"]) assert.ok(!buildAnthropicSystemBlocks(p, {}, runtime)[0].text.includes(CR_CONTRACT), `${label} ${runtime}: no CR contract`);
+  }
+  const original = { cr: COPYCLONE.curriculum_runtime, audience: COPYCLONE.audience };
+  COPYCLONE.curriculum_runtime = { enabled: true };
+  COPYCLONE.audience = { ...COPYCLONE.audience, age_range: [15, 40] };
+  try {
+    const served = await profileJson(COPYCLONE.id);
+    assert.equal(served.json.minor_cohort, false, "control: the upper-bound minor test alone would let it through");
+    assert.deepEqual(served.json.curriculum_runtime, { enabled: false }, "served off, so the App's CR surfaces stay off");
+  } finally {
+    COPYCLONE.audience = original.audience;
+    if (original.cr === undefined) delete COPYCLONE.curriculum_runtime;
+    else COPYCLONE.curriculum_runtime = original.cr;
+  }
+});
+
 await test("registry: no shipped cohort turns the switch on", () => {
   const on = listProfiles().filter((p) => p.curriculum_runtime?.enabled === true).map((p) => p.id);
   assert.deepEqual(on, [], "default off; turning a cohort on is a deliberate, reviewed change");

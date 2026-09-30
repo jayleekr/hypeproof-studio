@@ -102,6 +102,10 @@ export function makeFakePage(opts = {}) {
       state.popups.push({ targetId: `P${state.popups.length + 1}`, type: "page", url, openerId: "SELF" });
       emit("Page.windowOpen", { url, windowName: "_blank", windowFeatures: [], userGesture: true });
     },
+    /** The session closed, as CdpSession.close() does: every event listener is dropped. */
+    closeSession() {
+      listeners.clear();
+    },
     /** A new document: new loader, new context, new node ids (a reload or navigation). */
     newDocument(route = state.route) {
       state.loader++;

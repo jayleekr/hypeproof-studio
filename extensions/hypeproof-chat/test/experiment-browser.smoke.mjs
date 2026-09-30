@@ -12,7 +12,30 @@ import assert from "node:assert/strict";
 import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
 
 const eb = await import("../src/experimentBrowser.ts");
-const { PageEventLog, CrExecutor, observationProblems, actionResultProblems, checkAgentOrigin, failuresOf } = eb;
+const { PageEventLog, CrExecutor, observationProblems, actionResultProblems, checkAgentOrigin } = eb;
+const { toMcpToolResult } = await import("../src/browserMcp.ts");
+const { toProxyToolResult } = await import("../src/browserControlHelpers.ts");
+
+/**
+ * The text the model reads for a result: what both runtimes hand it (`toMcpToolResult` on
+ * the SDK path, `toProxyToolResult` on the proxy path), never the `observation` side field.
+ */
+function modelText(r) {
+  const texts = (blocks) => blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const sdk = texts(toMcpToolResult(r).content);
+  assert.equal(texts(toProxyToolResult("t", r).content), sdk, "both runtimes hand the model the same text");
+  return sdk;
+}
+/** The failures (CR-08) the model can read off a result: error records with their step. */
+function failuresInText(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    const m = /^- \[(console|exception|network|log)\/([a-z]+)\](?: 단계 (\d+))? (.*?)(?: @ \S+)?$/.exec(line);
+    if (!m || !(m[1] === "exception" || m[1] === "network" || m[2] === "error" || m[2] === "assert")) continue;
+    out.push({ step: m[3] ? Number(m[3]) : null, kind: m[1], message: m[4] });
+  }
+  return out;
+}
 
 const ORIGIN = "http://127.0.0.1:5173";
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
@@ -56,6 +79,13 @@ await test("CR-T04 positive: known title, route, three buttons and viewport, tag
   assert.equal(o.screenshot.data, page.state.screenshot);
   assert.equal(o.artifact.id, FAKE_VERSION.id);
   assert.equal(r.content[1].type, "image_url", "the screenshot rides as an image block");
+  // What the model reads carries every part, not just the side field.
+  const lines = modelText(r).split("\n");
+  for (const want of [`URL: ${ORIGIN}/index.html`, "경로: /index.html", "뷰포트: 390x844", "문서 세대: L0", `산출물 버전: ${FAKE_VERSION.id}`]) {
+    assert.ok(lines.some((l) => l.startsWith(want)), `the model reads "${want}"`);
+  }
+  assert.ok(lines.some((l) => /\[ref=e1\] button "주문하기"/.test(l)), "the model reads the snapshot refs");
+  assert.equal(toMcpToolResult(r).content[1].type, "image", "the SDK path hands the screenshot on as an image");
 });
 
 await test("CR-T04 negative: an observation missing viewport or document generation is an explicit error", async () => {
@@ -134,6 +164,23 @@ await test("CR-T05 negative: a clean page has zero records; the previous documen
   // Instrument check: the attribution really keys on the context (a context-less record is dropped, not guessed).
   page.emit("Runtime.consoleAPICalled", { type: "error", args: [{ type: "string", value: "orphan" }], executionContextId: 9999 });
   assert.equal(log.records().length, 0);
+});
+
+await test("CR-T05 agent-visible: the model reads the planted document's three records, and \"없음\" on a clean one", async () => {
+  const page = makeFakePage({ onLoad: PLANTED });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const r = await ex.execute("browser_reload");
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  const text = modelText(r);
+  assert.match(text, /콘솔·오류·실패한 요청 3건:/);
+  for (const m of ["planted-console-error", "planted-throw", "/missing.png"]) assert.ok(text.split("\n").some((l) => l.startsWith("- [") && l.includes(m)), `the model reads ${m}`);
+  const clean = makeFakePage();
+  const { ex: cx } = executorFor(clean);
+  await cx.execute("browser_observe");
+  const c = await cx.execute("browser_reload");
+  assert.match(modelText(c), /이 문서의 콘솔·오류·실패한 요청: 없음/);
+  assert.deepEqual(failuresInText(modelText(c)), []);
 });
 
 await test("CR-T05 network rules: a 404 counts once; cancelled and pre-enable requests are dropped", async () => {
@@ -240,7 +287,8 @@ await test("CR-T08 unit: a console error raised by step 3 is reported once, at s
     for (const [name, input] of flow) {
       const r = await ex.execute(name, input);
       assert.equal(r.isError, false);
-      for (const f of failuresOf(r.observation.records)) if (!failures.some((g) => g.message === f.message)) failures.push(f);
+      // The verdict is what the model reads, not the observation side field.
+      for (const f of failuresInText(modelText(r))) if (!failures.some((g) => g.message === f.message)) failures.push(f);
     }
     if (planted) assert.deepEqual(failures, [{ step: 3, kind: "console", message: "step-3-error" }]);
     else assert.deepEqual(failures, [], "no false positive on the unmodified flow");
@@ -258,6 +306,7 @@ await test("CR-T08 step attribution: a record captured outside any agent step ca
   const r = await ex.execute("browser_observe");
   const rec = r.observation.records.find((x) => x.message === "student-made-error-between-steps");
   assert.equal(rec.step, null, `outside any step: ${JSON.stringify(rec)}`);
+  assert.deepEqual(failuresInText(modelText(r)).find((f) => f.message === "student-made-error-between-steps"), { step: null, kind: "console", message: "student-made-error-between-steps" }, "the model reads it with no step");
   // Control: an error raised during a step still carries that step.
   const during = makeFakePage({ onClick: (p) => p.consoleError("during-step") });
   const { ex: dx } = executorFor(during);
@@ -449,6 +498,41 @@ await test("CR-T11 negative: a window opened off scope during a step is refused 
   const ok = await ex.execute("browser_click", { ref: "e1" });
   assert.equal(ok.isError, false, "control: an in-scope new tab is a normal result");
   assert.equal(page.state.popups.length, 1, "control: and it is left open");
+});
+
+await test("CR-T11: a window the student opened before the step is left open; only the agent's new window is closed", async () => {
+  const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: "https://example.com/agent" }] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  // The student's own off-scope popup, opened outside any agent step and still listed.
+  page.state.popups.push({ targetId: "STUDENT", type: "page", url: "https://example.com/student", openerId: "SELF" });
+  const r = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /새 창.*닫았어요/);
+  assert.deepEqual(page.state.popups.map((x) => x.targetId), ["STUDENT"], "the agent's window is closed, the student's is not");
+});
+
+await test("CR-T11: a committed escape is taken back to the latest in-scope page, not the one the guard started on", async () => {
+  const late = { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: "https://example.com/x", lateMs: 30, lateCommit: true };
+  const page = makeFakePage({ elements: [late] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe"); // the guard installs on /index.html
+  const nav = await ex.execute("browser_navigate", { url: `${ORIGIN}/b.html` });
+  assert.equal(nav.isError, false, JSON.stringify(nav.content));
+  await ex.execute("browser_click", { ref: "e1" });
+  await tick(80);
+  assert.equal(page.state.origin, ORIGIN);
+  assert.equal(page.state.route, "/b.html", "taken back to page B, where the student's preview was");
+});
+
+await test("CR-T08: an executor built without settleMs still waits after an action before observing", async () => {
+  const waits = [];
+  const page = makeFakePage();
+  const ex = new CrExecutor(fakePort(page), { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, sleep: async (ms) => { waits.push(ms); } });
+  await ex.execute("browser_observe");
+  assert.deepEqual(waits, [], "control: an observation alone does not wait");
+  await ex.execute("browser_hover", { ref: "e1" });
+  assert.ok(waits.some((ms) => ms >= 200), `the product default settle wait is used: ${JSON.stringify(waits)}`);
 });
 
 await test("CR-T11 negative: browser_navigate to an in-scope page that redirects off scope is refused and the tab taken back", async () => {

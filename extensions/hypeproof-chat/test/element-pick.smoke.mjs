@@ -7,10 +7,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeFakePage, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
+import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
 
 const { buildElementContext, waitForPick, mapSource, elementContextProblems, elementContextText, STYLE_KEYS, SNIPPET_MAX } = await import("../src/elementPick.ts");
-const { PageEventLog } = await import("../src/experimentBrowser.ts");
+const { PageEventLog, CrExecutor } = await import("../src/experimentBrowser.ts");
 const { browserTabCoverage } = await import("../src/browserControlHelpers.ts");
 
 let passed = 0;
@@ -48,6 +48,10 @@ const KIOSK = `<!doctype html>
   // The same text on two live elements (one static, one generated, no ids): a text match cannot tell them apart.
   assert.equal(mapSource(KIOSK, "index.html", { tag: "button", text: "취소", twins: 2 }), "unmapped", "live-DOM twins make a text match a guess");
   assert.deepEqual(mapSource(KIOSK, "index.html", { tag: "button", text: "취소", twins: 1 }), { file: "index.html", line: 6 }, "control: one live element with that text still maps");
+  // Two markup elements with the same id: which one was picked cannot be told from the id.
+  const DUP = `<body>\n<button id="x">가</button>\n<button id="x">나</button>\n<button id="y">다</button>\n</body>`;
+  assert.equal(mapSource(DUP, "index.html", { tag: "button", id: "x", text: "가" }), "unmapped", "a duplicated id is a guess");
+  assert.deepEqual(mapSource(DUP, "index.html", { tag: "button", id: "y", text: "다" }), { file: "index.html", line: 4 }, "control: a unique id next to it maps");
   ok("CR-T09 negative: a script-generated or ambiguous element is \"unmapped\", never a guessed file");
 }
 
@@ -119,9 +123,26 @@ try {
   await hlog.attach(heading.cdp);
   let htable = new Map();
   const hctx = await buildElementContext(heading.cdp, hlog, heading.nodeId("h"), { ...deps, adopt: (r) => { htable = r; } });
-  assert.equal(hctx.ref, "e4");
-  assert.equal(htable.get("e4"), heading.nodeId("h"));
+  assert.equal(hctx.ref, `p${heading.nodeId("h")}`, "a pick-only label, never the next snapshot label");
+  assert.equal(htable.get(hctx.ref), heading.nodeId("h"));
   ok("a non-interactive element gets its own ref in the observation's table, so the agent can act on it");
+
+  // After a fresh observation whose tree has one more entry, the pick label is refused, not
+  // rebound to whatever node the new snapshot numbers next.
+  {
+    const pg = makeFakePage({ elements: [...ELEMENTS, { key: "h", role: "generic", name: "", tag: "h1", id: "" }] });
+    const ex = new CrExecutor(fakePort(pg), { allowedOrigins: () => ["http://127.0.0.1:5173"], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: async () => {} });
+    await ex.execute("browser_observe");
+    const pctx = await buildElementContext(pg.cdp, await ex.logFor(pg.cdp), pg.nodeId("h"), { ...deps, refFor: (id) => ex.refFor(id), adopt: (r, g) => ex.adoptRefs(r, g) });
+    const hover = await ex.execute("browser_hover", { ref: pctx.ref });
+    assert.equal(hover.isError, false, "control: the pick label acts on the picked node until the next observation");
+    pg.state.elements.push({ key: "late", role: "button", name: "나중 버튼", tag: "button", id: "late" });
+    await ex.execute("browser_observe"); // now four snapshot refs: e4 is the new button
+    const stale = await ex.execute("browser_click", { ref: pctx.ref });
+    assert.equal(stale.isError, true, "the pick label is refused after a fresh observation");
+    assert.ok(!pg.state.dom.clicked.includes("late"), "and never lands on the node the new snapshot numbered next");
+    ok("CR-09: a pick-only ref is refused after a fresh observation, never rebound to another node");
+  }
 
   // CR-09 bound: a large element's DOM snippet is cut to SNIPPET_MAX and says so.
   const wall = makeFakePage({ elements: [{ key: "wall", role: "generic", name: "글".repeat(SNIPPET_MAX * 2), tag: "div", id: "wall" }] });

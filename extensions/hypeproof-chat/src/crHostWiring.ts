@@ -8,7 +8,9 @@
 //   - the picked element queued for the next turn: removed means nothing of it is sent,
 //     and what is sent equals what was previewed (CR-09);
 //   - every browser result, from either runtime and from a pick, written as a
-//     `hps-browser-result/1` tool_result on the turn's record (CR-10).
+//     `hps-browser-result/1` tool_result on the turn's record (CR-10);
+//   - which browser control a proxy turn drives, so the scope guard and the picked
+//     element's refs outlive the turn (CR-11, CR-09).
 // The provider keeps only the calls into these functions.
 
 import { isCurriculumRuntimeEnabled } from "./curriculumRuntime.ts";
@@ -198,4 +200,22 @@ export class SdkCrResults {
     this.ids.delete(id);
     return this.pending.shift();
   }
+}
+
+/**
+ * CR-11, CR-09 — the BrowserControl one proxy turn drives, and what the turn does with it
+ * at the end. With the switch on the turn drives the provider's long-lived control (the
+ * one element pick and the SDK path use) and leaves it open: closing its CDP session would
+ * drop the scope guard's listener, so an escape a step set off would complete after the
+ * turn, and the picked element's ref table would be lost to the next turn. With the switch
+ * off a turn keeps its own control and closes it, as before CR.
+ */
+export function proxyTurnBrowser<B extends { dispose(): Promise<void> }>(
+  crOn: boolean,
+  shared: () => B,
+  fresh: () => B,
+): { browser: B; release(): Promise<void> } {
+  if (crOn) return { browser: shared(), release: async () => {} };
+  const browser = fresh();
+  return { browser, release: () => browser.dispose() };
 }

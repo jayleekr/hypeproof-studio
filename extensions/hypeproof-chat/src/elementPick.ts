@@ -129,13 +129,15 @@ export async function buildElementContext(
   const now = deps.now ?? (() => performance.now());
   const started = now();
   const generation = log.documentGeneration ?? "";
-  // The ref: the observation's own label for this node, else a new one in the same table.
+  // The ref: the observation's own label for this node, else a pick-only label in the same
+  // table. It is `p<node>`, never `e<N+1>`: a later snapshot with N+1 entries hands out
+  // `e<N+1>` for another node, and a stale pick label must be refused, not rebound.
   const ax = await cdp.send("Accessibility.getFullAXTree", {});
   const { refs } = buildAxSnapshot(Array.isArray(ax?.nodes) ? ax.nodes : []);
   let ref: string | null = null;
   for (const [r, id] of refs) if (id === backendNodeId) ref = r;
   if (!ref) {
-    ref = `e${refs.size + 1}`;
+    ref = `p${backendNodeId}`;
     refs.set(ref, backendNodeId);
   }
   deps.adopt(refs, generation);

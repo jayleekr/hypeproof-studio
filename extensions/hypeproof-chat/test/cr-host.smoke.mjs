@@ -251,4 +251,62 @@ await test("CR-11 SDK negative: browser_screenshot returns the CR refusal instea
   assert.deepEqual(off.calls.filter((c) => c[0] === "screenshot"), [["screenshot"]]);
 });
 
+// ── CR-11 / CR-09 across the proxy turn boundary ────────────────────────────
+
+await test("CR-11 proxy: with the switch on the guard outlives the turn; an escape set off by its last step is taken back and reported next turn", async () => {
+  const EXT = "https://example.com/late.html";
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+  const run = async (crOn) => {
+    const page = makeFakePage({ elements: [{ key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: EXT, lateMs: 30, lateCommit: true }] });
+    // A control whose dispose closes the session the way CdpSession.close() does.
+    const make = () => ({
+      ex: new CrExecutor(fakePort(page), { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: (ms) => tick(Math.min(ms, 10)) }),
+      dispose: async () => page.closeSession(),
+    });
+    let shared;
+    const turn = () => w.proxyTurnBrowser(crOn, () => (shared ??= make()), make);
+    const t1 = turn();
+    await t1.browser.ex.execute("browser_observe");
+    const click = await t1.browser.ex.execute("browser_click", { ref: "e1" });
+    assert.equal(click.isError, false, "the step itself saw nothing yet");
+    await t1.release(); // the turn ends right after its last step (final reply, or Stop)
+    await tick(100);
+    const origin = page.state.origin;
+    const t2 = turn();
+    const next = await t2.browser.ex.execute("browser_observe");
+    await t2.release();
+    return { origin, next, sameControl: t1.browser === t2.browser };
+  };
+  const on = await run(true);
+  assert.equal(on.sameControl, true, "switch on: both turns drive one control");
+  assert.equal(on.origin, ORIGIN, "switch on: the tab was taken back to the preview after the turn ended");
+  assert.equal(on.next.isError, true);
+  assert.match(on.next.content[0].text, /지난 단계가 끝난 뒤 .*범위 밖\(https:\/\/example\.com\/late\.html\)/, "the next turn's first call carries the late escape");
+  // Control: a control closed at the end of the turn loses its guard, and the escape stands.
+  const off = await run(false);
+  assert.equal(off.sameControl, false);
+  assert.equal(off.origin, "https://example.com", "instrument: without the shared control the late escape really completes");
+  // The provider's proxy loop is this call, and does not close the shared control itself.
+  assert.match(providerSrc, /proxyTurnBrowser\(\s*this\.isCurriculumRuntimeEnabled\(\),\s*\(\) => \(this\.mcpBrowser \?\?= new BrowserControl\(this\.crBrowserOptions\(\)\)\),/);
+  const loop = providerSrc.slice(providerSrc.indexOf("private async runBrowserLoop("), providerSrc.indexOf("private async runBrowserLoop(") + 8000);
+  assert.match(loop, /finally \{\s*await turnBrowser\.release\(\);/);
+  assert.doesNotMatch(loop, /browser\.dispose\(\)/);
+});
+
+await test("CR-09 proxy: a picked element's ref is known to the executor the next proxy turn drives", async () => {
+  const page = makeFakePage();
+  const make = () => ({ ex: new CrExecutor(fakePort(page), { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: async () => {} }), dispose: async () => {} });
+  let shared;
+  const pickSide = (shared ??= make()); // pickElement adopts its table into the shared control
+  pickSide.ex.adoptRefs(new Map([["p777", page.nodeId("cancel")]]), (await pickSide.ex.logFor(page.cdp)).documentGeneration);
+  const t = w.proxyTurnBrowser(true, () => (shared ??= make()), make);
+  const r = await t.browser.ex.execute("browser_click", { ref: "p777" });
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  assert.deepEqual(page.state.dom.clicked, ["cancel"]);
+  // Control: a fresh per-turn control has no such ref.
+  const fresh = w.proxyTurnBrowser(false, () => (shared ??= make()), make);
+  const miss = await fresh.browser.ex.execute("browser_click", { ref: "p777" });
+  assert.equal(miss.isError, true);
+});
+
 console.log(`\n${passed} cr-host checks passed`);

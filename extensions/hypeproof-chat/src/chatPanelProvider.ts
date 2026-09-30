@@ -56,6 +56,7 @@ import {
   turnImages,
   recordProxyCrResult,
   recordElementCapture,
+  proxyTurnBrowser,
 } from "./crHostWiring";
 import { isMinorTier } from "./sdkCoachHelpers";
 import { toMcpToolResult } from "./browserMcp";
@@ -3645,7 +3646,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       extra?: Partial<import("./nativeObservationContract").ObservationEvent>,
     ) => void;
   }): Promise<void> {
-    const browser = new BrowserControl(this.crBrowserOptions());
+    // CR-11/CR-09 — with the switch on the turn drives the long-lived control, so the scope
+    // guard and the picked element's refs outlive the turn (proxyTurnBrowser).
+    const turnBrowser = proxyTurnBrowser(
+      this.isCurriculumRuntimeEnabled(),
+      () => (this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions())),
+      () => new BrowserControl(this.crBrowserOptions()),
+    );
+    const browser = turnBrowser.browser;
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
     const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
     try {
@@ -3736,7 +3744,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         scratch.push({ role: "user", content: toolResults });
       }
     } finally {
-      await browser.dispose();
+      await turnBrowser.release();
     }
   }
 

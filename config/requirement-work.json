@@ -2922,6 +2922,7 @@
         "worker/src/routes/chat.ts",
         "worker/src/lib/browser-tools.ts",
         "worker/src/lib/translate.ts",
+        "worker/src/lib/moderation.ts",
         "worker/src/prompts/_curriculum-runtime-browser-contract.md",
         "worker/scripts/cohort-harness/validate.py",
         "worker/scripts/cohort-harness/rules.yaml"
@@ -2941,6 +2942,7 @@
         "extensions/hypeproof-chat/test/fixtures/fake-cdp-page.mjs",
         "extensions/hypeproof-chat/test/fixtures/vscode-stub.mjs",
         "worker/scripts/cohort-harness/test/run.sh",
+        "worker/scripts/cohort-harness/test/fixtures/teen-cr.json",
         "worker/test/cr-switch.test.mjs",
         "e2e/curriculum-runtime/experiment-browser.real.mjs",
         "e2e/curriculum-runtime/fixtures/kiosk-practice"

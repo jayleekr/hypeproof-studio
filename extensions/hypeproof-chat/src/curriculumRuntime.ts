@@ -36,7 +36,9 @@ const CR_TIERS = new Set(["search-webapp", "website"]);
  * the CR executor, the context key): off for a served `minor_cohort` (explicit flag or
  * age_range max < 18, computed by the Worker's isMinorCohort) and off unless the tier is
  * a workshop tier, fail-closed on an unknown or missing tier. The Worker serves the switch
- * through the same test (curriculumRuntimeAllowed), so the two runtimes cannot disagree.
+ * through curriculumRuntimeAllowed, which also requires the audience's lower age bound to
+ * be at least 18 (a mixed-age cohort is served the switch off); the App has no age range
+ * on the served profile, so it relies on the served switch for that part.
  */
 export function isCurriculumRuntimeEnabled(
   profile: { curriculum_runtime?: { enabled?: unknown } | null; minor_cohort?: unknown; game?: { template_tier?: unknown } | null } | null | undefined,
