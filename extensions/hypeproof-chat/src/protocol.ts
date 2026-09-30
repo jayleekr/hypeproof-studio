@@ -244,6 +244,8 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
   browser_control?: { enabled: boolean; max_iterations?: number };
+  /** CR-02 — Curriculum Runtime switch (`curriculum_runtime.enabled`), off when absent. */
+  curriculum_runtime?: { enabled: boolean };
   /**
    * #306 — hardened native-browser session for minor cohorts. `mode: "safe"`
    * makes the host enable the locked-down `persist:hp-safe` integrated-browser
@@ -360,6 +362,8 @@ export type WebviewMessage = (
   | { type: 'observationCorrect'; scope: string; text: string }
   | StartRequest
   | { type: "ready" }
+  // CR-09 — the student removes the picked element before sending (CR switch only).
+  | { type: "removeElementContext" }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -500,6 +504,8 @@ export type HostMessage = (
   // behaviour), so this is announced on the chat panel's inline status line instead
   // of a toast.
   | { type: "pageAttached"; label: string }
+  // CR-09 — the picked element queued for the next turn (null = none): exactly what goes.
+  | { type: "elementAttached"; element: ElementPreview | null }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again
@@ -558,4 +564,17 @@ export interface ActionRequest {
   destructive?: boolean;
   description: string;
   payload: unknown;
+}
+
+/** CR-09 — what the chat panel shows of a picked element before it is sent. */
+export interface ElementPreview {
+  ref: string;
+  tag: string;
+  text: string;
+  /** `file:line`, or "unmapped" when the source could not be located without guessing. */
+  source: string;
+  /** The exact text block the coach will receive. */
+  sentText: string;
+  /** The element crop as it will be sent, or null when the cohort sends no images. */
+  imageDataUrl: string | null;
 }

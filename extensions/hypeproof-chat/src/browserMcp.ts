@@ -66,6 +66,24 @@ export const MCP_BROWSER_TOOLS = [
   MCP_BROWSER_TYPE,
 ] as const;
 
+/**
+ * Curriculum Runtime Experiment Browser tools (CR-04, CR-06). Granted only when the
+ * served profile has the CR switch on (CR-02; `permittedMcpToolsFor`), and registered
+ * only when granted. Short names match the proxy's CR_BROWSER_TOOLS one for one.
+ */
+export const MCP_BROWSER_OBSERVE = "mcp__hypeproof__browser_observe";
+export const MCP_BROWSER_SELECT = "mcp__hypeproof__browser_select";
+export const MCP_BROWSER_SCROLL = "mcp__hypeproof__browser_scroll";
+export const MCP_BROWSER_HOVER = "mcp__hypeproof__browser_hover";
+export const MCP_BROWSER_RELOAD = "mcp__hypeproof__browser_reload";
+export const MCP_CR_BROWSER_TOOLS = [
+  MCP_BROWSER_OBSERVE,
+  MCP_BROWSER_SELECT,
+  MCP_BROWSER_SCROLL,
+  MCP_BROWSER_HOVER,
+  MCP_BROWSER_RELOAD,
+] as const;
+
 /** MCP CallToolResult content we produce (structural subset of the MCP SDK type). */
 export type McpContentBlock =
   | { type: "text"; text: string }
@@ -330,6 +348,36 @@ export interface ZodLike {
   string(): unknown;
   /** #457 — browser_type 의 submit 플래그용. */
   boolean?(): unknown;
+  /** CR-06 — browser_scroll 의 dy 용. */
+  number?(): unknown;
+}
+
+/** `schema.optional()` when the injected zod schema has it (the real one); else as is. */
+function optionalSchema(schema: unknown): unknown {
+  const opt = (schema as { optional?: () => unknown } | null)?.optional;
+  return typeof opt === "function" ? opt.call(schema) : schema;
+}
+
+/**
+ * BrowserToolResult (text | image_url) → McpToolResult (text | image). One conversion for
+ * every delegated tool, so both coach runtimes see the same result (CR-03).
+ */
+export function toMcpToolResult(r: {
+  content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  isError: boolean;
+}): McpToolResult {
+  return {
+    content: r.content.map((b) =>
+      b.type === "text"
+        ? { type: "text" as const, text: b.text }
+        : {
+            type: "image" as const,
+            data: b.image_url.url.replace(/^data:[^,]*,/, ""),
+            mimeType: /^data:([^;,]+)/.exec(b.image_url.url)?.[1] ?? "image/jpeg",
+          },
+    ),
+    ...(r.isError ? { isError: true } : {}),
+  };
 }
 
 /**
@@ -342,6 +390,7 @@ export function buildHypeproofMcpServer(
   factory: SdkMcpFactory,
   z: ZodLike,
   host: BrowserMcpHost,
+  opts: { curriculumRuntime?: boolean } = {},
 ): unknown {
   const browserOpen = factory.tool(
     "browser_open",
@@ -576,9 +625,57 @@ export function buildHypeproofMcpServer(
       ),
   );
 
+  // ── CR-04/CR-06 Experiment Browser tools, only behind the CR switch (CR-02) ──
+  const crTools: unknown[] = [];
+  if (opts.curriculumRuntime === true) {
+    const absent = "실험 브라우저 도구를 쓸 수 없어요. browser_observe로 다시 읽어보세요.";
+    crTools.push(
+      factory.tool(
+        "browser_observe",
+        "지금 페이지를 관찰한다: URL·경로, [ref=eN] 스냅샷, 화면 캡쳐, 뷰포트, 문서 세대, 이 문서의 콘솔·오류·실패한 요청, 산출물 버전.",
+        {},
+        async () => inspectOrFail("browser_observe", {}, absent),
+      ),
+      factory.tool(
+        "browser_select",
+        "ref 선택 상자(select)의 값을 고른다. value는 option의 value 또는 보이는 글자. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string(), value: z.string() },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail("browser_select", { ref: String(args["ref"] ?? ""), value: String(args["value"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_scroll",
+        "ref 요소가 보이게 스크롤한다. ref 없이 dy(픽셀)만 주면 페이지를 스크롤한다. 결과에 조작 뒤의 관찰이 온다.",
+        {
+          // Either field alone is valid, so both are optional where zod offers it.
+          ...(typeof z.number === "function" ? { dy: optionalSchema(z.number()) } : {}),
+          ref: optionalSchema(z.string()),
+        },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail(
+            "browser_scroll",
+            { ...(args["ref"] ? { ref: String(args["ref"]) } : {}), ...(args["dy"] !== undefined ? { dy: Number(args["dy"]) } : {}) },
+            absent,
+          ),
+      ),
+      factory.tool(
+        "browser_hover",
+        "ref 요소 위에 마우스를 올린다. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string() },
+        async (args: Record<string, unknown>) => inspectOrFail("browser_hover", { ref: String(args["ref"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_reload",
+        "페이지를 새로 고친다. 새 문서가 되므로 이전 ref는 무효가 된다. 결과에 새로 고친 뒤의 관찰이 온다.",
+        {},
+        async () => inspectOrFail("browser_reload", {}, absent),
+      ),
+    );
+  }
+
   return factory.createSdkMcpServer({
     name: HYPEPROOF_MCP_SERVER_NAME,
     version: "1.0.0",
-    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType],
+    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType, ...crTools],
   });
 }

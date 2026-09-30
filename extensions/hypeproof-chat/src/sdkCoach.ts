@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   buildHypeproofMcpServer,
+  MCP_CR_BROWSER_TOOLS,
   HYPEPROOF_MCP_SERVER_NAME,
   MCP_BROWSER_OPEN,
   resolveAlreadyOpen,
@@ -545,6 +546,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<SdkTurnEnd> {
         { createSdkMcpServer: sdk.createSdkMcpServer!, tool: sdk.tool! },
         z,
         args.browserHost,
+        // CR-02 — register the Experiment Browser tools only where they were granted.
+        { curriculumRuntime: opts.permittedMcpTools.some((t) => (MCP_CR_BROWSER_TOOLS as readonly string[]).includes(t)) },
       );
       mcpServers = {
         [HYPEPROOF_MCP_SERVER_NAME]: server as NonNullable<Options["mcpServers"]>[string],

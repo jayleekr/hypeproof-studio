@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { CdpSession } from "./cdpSession";
 import { safeNavigateUrl, quadCenter, buildAxSnapshot } from "./browserControlHelpers";
+import { CrExecutor, checkAgentOrigin, type CrHooks, type Observation } from "./experimentBrowser";
+import { buildElementContext, waitForPick, type ElementContext } from "./elementPick";
 
 // #278 Phase 3 — the coach's browser control executor. Runs one tool call
 // (from the agentic loop) against the integrated browser via CDP and returns a
@@ -26,6 +28,17 @@ export interface BrowserToolResult {
     { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
   >;
   isError: boolean;
+  /** CR-04/CR-06 — the resulting observation; present only with the CR switch on. */
+  observation?: Observation;
+}
+
+/**
+ * Curriculum Runtime hooks (CR-02). `enabled()` is read on every call, so turning the
+ * served switch off takes effect at the next tool call; with it off, `execute` runs the
+ * pre-CR code path unchanged and the CR tool names are unknown tools.
+ */
+export interface CrBrowserOptions extends CrHooks {
+  enabled(): boolean;
 }
 
 function ok(text: string): BrowserToolResult {
@@ -41,6 +54,32 @@ export class BrowserControl {
   private tabForSession: vscode.BrowserTab | undefined;
   private targetTab: vscode.BrowserTab | undefined;
   private refs = new Map<string, number>();
+  private cr: CrExecutor | undefined;
+
+  private readonly crOptions: CrBrowserOptions | undefined;
+
+  constructor(crOptions?: CrBrowserOptions) {
+    this.crOptions = crOptions;
+  }
+
+  /** Is the Curriculum Runtime switch on for this executor right now? */
+  crEnabled(): boolean {
+    return this.crOptions?.enabled() === true;
+  }
+
+  /** The CR executor bound to the tab this control drives (created on first use). */
+  crExecutor(): CrExecutor | undefined {
+    if (!this.crOptions || !this.crEnabled()) return undefined;
+    this.cr ??= new CrExecutor(
+      {
+        session: () => this.cdp(),
+        tabUrl: () => this.currentTab()?.url,
+        navigate: (url) => this.openOrNavigate(url),
+      },
+      this.crOptions,
+    );
+    return this.cr;
+  }
 
   /**
    * 코치가 운전할 탭을 **고정**한다 (#519).
@@ -62,6 +101,7 @@ export class BrowserControl {
     this.session = undefined;
     this.tabForSession = undefined;
     this.refs.clear();
+    this.cr = undefined; // its refs and step count belonged to the previous tab
   }
 
   /**
@@ -77,8 +117,34 @@ export class BrowserControl {
     return vscode.window.activeBrowserTab;
   }
 
+  /**
+   * CR-09 — let the student pick an element on the driven tab and build its payload.
+   * The caller has already revealed the tab (recon R2). Refused with a reason when the
+   * switch is off, there is no tab, or the tab is not the student's own preview (CR-11).
+   */
+  async pickElement(opts: { root: string | null; timeoutMs?: number }): Promise<ElementContext> {
+    const cr = this.crExecutor();
+    if (!cr || !this.crOptions) throw new Error("이 코호트에서는 요소 고르기가 꺼져 있어요.");
+    const url = this.currentTab()?.url;
+    if (!url) throw new Error("열린 미리보기 탭이 없어요. 먼저 미리보기를 여세요.");
+    const scope = checkAgentOrigin(url, this.crOptions.allowedOrigins());
+    if (!scope.ok) throw new Error(scope.reason);
+    const s = await this.cdp();
+    const log = await cr.logFor(s);
+    const picked = await waitForPick(s, opts.timeoutMs);
+    const hooks = this.crOptions;
+    return buildElementContext(s, log, picked, {
+      root: opts.root,
+      artifactVersion: (u) => hooks.artifactVersion(u),
+      refFor: (id) => cr.refFor(id),
+      adopt: (refs, generation) => cr.adoptRefs(refs, generation),
+    });
+  }
+
   /** Route + run one tool call. Always resolves (errors become is_error results). */
   async execute(call: BrowserToolCall): Promise<BrowserToolResult> {
+    const cr = this.crExecutor();
+    if (cr) return cr.execute(call.name, call.input ?? {});
     try {
       const input = call.input ?? {};
       switch (call.name) {
@@ -160,6 +226,7 @@ export class BrowserControl {
     }
     this.targetTab = undefined;
     this.refs.clear();
+    this.cr = undefined;
   }
 
   // ---- tools ---------------------------------------------------------------
@@ -167,6 +234,14 @@ export class BrowserControl {
   private async navigate(rawUrl: string): Promise<BrowserToolResult> {
     const url = safeNavigateUrl(rawUrl);
     if (!url) return fail(`허용되지 않은 주소예요: ${rawUrl} (http/https/localhost/file만 가능)`);
+    await this.openOrNavigate(url);
+    this.refs.clear(); // navigation invalidates old refs
+    const active = this.currentTab();
+    return ok(`이동 완료 — ${active?.title || ""} (${active?.url || url})`);
+  }
+
+  /** Open a tab at `url`, or navigate the driven tab there, and wait for load. */
+  private async openOrNavigate(url: string): Promise<void> {
     const tab = this.currentTab();
     if (!tab) {
       // No tab yet — open one (this is the only tool that may create a tab).
@@ -182,9 +257,6 @@ export class BrowserControl {
       await s.send("Page.navigate", { url });
     }
     await this.waitLoad();
-    this.refs.clear(); // navigation invalidates old refs
-    const active = this.currentTab();
-    return ok(`이동 완료 — ${active?.title || ""} (${active?.url || url})`);
   }
 
   private async read(): Promise<BrowserToolResult> {
@@ -259,7 +331,7 @@ export class BrowserControl {
   // ---- internals -----------------------------------------------------------
 
   /** Get (or re-establish) the CDP session for the tab we're driving (#519). */
-  private async cdp(): Promise<CdpSession> {
+  async cdp(): Promise<CdpSession> {
     const tab = this.currentTab();
     if (!tab) throw new Error("열린 브라우저 탭이 없어요. 먼저 browser_navigate로 페이지를 여세요.");
     if (this.session && this.tabForSession === tab) return this.session;
