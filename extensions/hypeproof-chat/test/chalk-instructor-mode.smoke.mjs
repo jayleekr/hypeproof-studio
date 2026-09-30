@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { InstructorModeManager } from "../src/chalk/instructorMode.ts";
+import { adminBaseFrom } from "../src/chalk/serverBase.ts";
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log(`  ok   ${name}`); };
@@ -351,6 +352,56 @@ t("mergeChalkTools: no chalkCtx → no chalk_* in definitions", async () => {
   const names = merged.definitions.map((d) => d.name);
   assert.ok(!names.some((n) => n.startsWith("chalk_")),
     "no chalk_* must appear without chalkCtx");
+});
+
+// --- adminBaseFrom: URL stripping ---
+// Verifies the canonical base URL function that routes all three callers
+// (whoami, instructor-brief, chalk tools) to the server root, not /v1.
+console.log("\n=== adminBaseFrom — proxyUrl stripping ===");
+
+t("/v1 suffix removed", () => {
+  assert.strictEqual(adminBaseFrom("http://127.0.0.1:8787/v1"), "http://127.0.0.1:8787");
+});
+t("/v1/ suffix removed", () => {
+  assert.strictEqual(adminBaseFrom("http://127.0.0.1:8787/v1/"), "http://127.0.0.1:8787");
+});
+t("trailing slash removed (no /v1)", () => {
+  assert.strictEqual(adminBaseFrom("http://127.0.0.1:8787/"), "http://127.0.0.1:8787");
+});
+t("no suffix unchanged", () => {
+  assert.strictEqual(adminBaseFrom("http://127.0.0.1:8787"), "http://127.0.0.1:8787");
+});
+t("prod URL /v1 removed", () => {
+  assert.strictEqual(adminBaseFrom("https://api.hypeproof-ai.xyz/v1"), "https://api.hypeproof-ai.xyz");
+});
+t("assembled knowledge URL has no /v1/admin segment", () => {
+  const url = adminBaseFrom("http://127.0.0.1:8787/v1") + "/admin/chalk/knowledge/1/docs";
+  assert.ok(!url.includes("/v1/admin"), `URL must not contain /v1/admin — got: ${url}`);
+  assert.strictEqual(url, "http://127.0.0.1:8787/admin/chalk/knowledge/1/docs");
+});
+
+// Verify that execGetKnowledge with serverUrl ending in /v1 produces the
+// correct URL in a real fetch call (no /v1/admin prefix in the request).
+t("execGetKnowledge with serverUrl=/v1 fetches /admin/chalk/knowledge/versions", async () => {
+  const { execGetKnowledge } = await import("../src/chalk/tools.ts");
+  let capturedUrl = null;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    capturedUrl = url;
+    return { ok: true, text: async () => "[]" };
+  };
+  const fakeSecrets = { get: async () => "test-token" };
+  try {
+    await execGetKnowledge(
+      { serverUrl: "http://127.0.0.1:8787/v1", secrets: fakeSecrets },
+      {},
+    );
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+  assert.ok(capturedUrl !== null, "fetch must have been called");
+  assert.ok(!capturedUrl.includes("/v1/admin"), `URL must not contain /v1/admin — got: ${capturedUrl}`);
+  assert.ok(capturedUrl.startsWith("http://127.0.0.1:8787/admin/"), `URL must start with /admin/ — got: ${capturedUrl}`);
 });
 
 console.log(`\n${n} tests passed\n`);
