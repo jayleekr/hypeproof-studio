@@ -478,6 +478,8 @@ chat.get("/profile", async (c) => {
       enabled: served.browser_control?.enabled === true,
       max_iterations: served.browser_control?.max_iterations ?? 8,
     },
+    // CR-02 (recon R3) — the Curriculum Runtime switch, off unless the profile says so.
+    curriculum_runtime: { enabled: served.curriculum_runtime?.enabled === true },
     // #306 — per-cohort hardened native-browser session. Minor cohorts send
     // mode="safe"; the Studio host maps it to hypeproof.browser.safeSession so
     // the integrated browser uses the locked-down persist:hp-safe session.

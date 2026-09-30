@@ -284,6 +284,16 @@ export interface Profile {
     max_iterations?: number;   // client loop cap hint (default 8)
   };
   /**
+   * Curriculum Runtime switch (CR-02, recon R3; flag name `curriculum_runtime.enabled`).
+   * Absent = off. When off, no CR command, panel, tool or route is reachable and the
+   * existing preview, HTML and coach browser-tool flows behave exactly as before.
+   * Served by /v1/profile; the App mirrors it to the context key
+   * `hypeproof-chat.curriculumRuntimeEnabled`. No setting, env var or build flag.
+   */
+  curriculum_runtime?: {
+    enabled: boolean;
+  };
+  /**
    * #306 — hardened native-browser session for minor cohorts. When `mode` is
    * `"safe"`, the Studio core (patches/62-hp-safe-session.patch in the
    * vscodium-base fork) backs the integrated browser with the locked-down
