@@ -3009,6 +3009,9 @@
         },
         {
           "path": "e2e/curriculum-runtime/cdp-probe.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-09-30-evidence.md"
         }
       ]
     },
