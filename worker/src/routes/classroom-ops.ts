@@ -44,7 +44,8 @@ const audit = (db: Db, run: string, seat: string, actorKind: string, actorId: st
 
 // ── hooks called from routes/admin.ts ───────────────────────────────────────
 
-export async function recordTokenIssue(env: Env, t: { jti: string; cohort: string; student: string; profile: string; issuedBy: string; hours: number }): Promise<{ epoch_advanced: boolean } | null> {
+/** `advanceEpoch: false` records the issuance only (a rehearsal code); the learner's connection epoch is left as it is. */
+export async function recordTokenIssue(env: Env, t: { jti: string; cohort: string; student: string; profile: string; issuedBy: string; hours: number }, opts: { advanceEpoch?: boolean } = {}): Promise<{ epoch_advanced: boolean } | null> {
   if (!opsEnabled(env)) return null;
   const at = Date.now();
   // A re-issued learning token is a new login generation for that student:
@@ -53,7 +54,7 @@ export async function recordTokenIssue(env: Env, t: { jti: string; cohort: strin
   // batch) and its failure is REPORTED to the caller. It still must not fail the
   // mint: an operations outage may never block the existing class path (AT-32).
   let epoch_advanced = false;
-  for (let attempt = 0; attempt < 2 && !epoch_advanced; attempt++) {
+  for (let attempt = 0; attempt < 2 && !epoch_advanced && opts.advanceEpoch !== false; attempt++) {
     try {
       await env.HPS_DB.prepare("UPDATE ops_grants SET connection_epoch=connection_epoch+1,revision=revision+1 WHERE kind='connection' AND state='active' AND cohort_id=? AND student_id=?").bind(t.cohort, t.student).run();
       epoch_advanced = true;
