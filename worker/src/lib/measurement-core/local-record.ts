@@ -82,7 +82,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(out);
 }
 async function sha256Of(bytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  const hash = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
   return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 

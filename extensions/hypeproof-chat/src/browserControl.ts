@@ -70,15 +70,28 @@ export class BrowserControl {
   /** The CR executor bound to the tab this control drives (created on first use). */
   crExecutor(): CrExecutor | undefined {
     if (!this.crOptions || !this.crEnabled()) return undefined;
-    this.cr ??= new CrExecutor(
+    const cr = (this.cr ??= new CrExecutor(
       {
         session: () => this.cdp(),
         tabUrl: () => this.currentTab()?.url,
-        navigate: (url) => this.openOrNavigate(url),
+        // The executor's own navigation pins the tab it drives (openOrNavigate →
+        // setTargetTab), which drops the control's executor. That executor is the one
+        // still running this navigation: it adopts the new page's refs after it, so it
+        // stays. Dropping it lost every ref of the first browser_navigate in the app
+        // (in-app CR-T07, 2026-10-01: "e2를 찾을 수 없어요" on the step after it).
+        navigate: async (url) => {
+          await this.openOrNavigate(url);
+          this.cr = cr;
+        },
       },
       this.crOptions,
-    );
-    return this.cr;
+    ));
+    return cr;
+  }
+
+  /** CR-08 — a new agent turn: the executor numbers its steps from 1 again. */
+  crNewTurn(): void {
+    this.cr?.newTurn();
   }
 
   /**
@@ -242,7 +255,12 @@ export class BrowserControl {
 
   /** Open a tab at `url`, or navigate the driven tab there, and wait for load. */
   private async openOrNavigate(url: string): Promise<void> {
-    const tab = this.currentTab();
+    let tab = this.currentTab();
+    // CR-09/CR-11 — with the switch on, a navigation to an origin a browser tab already
+    // shows (the student's own preview) drives that tab instead of opening a second one.
+    // Two preview tabs with the same title made the element pick refuse as ambiguous
+    // (in-app CR-T09, 2026-10-01). Switch off: unchanged.
+    if (!tab && this.crEnabled()) tab = (vscode.window.browserTabs ?? []).find((t) => sameOrigin(t.url, url));
     if (!tab) {
       // No tab yet — open one (this is the only tool that may create a tab).
       // 열자마자 고정한다: 그래야 다음 호출부터 포커스와 무관하게 이 탭을 운전한다.
@@ -366,5 +384,13 @@ export class BrowserControl {
       if (r?.result?.value === "complete") return;
       await sleep(300);
     }
+  }
+}
+
+function sameOrigin(a: string | undefined, b: string): boolean {
+  try {
+    return !!a && new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
   }
 }

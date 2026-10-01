@@ -3176,6 +3176,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       };
       // CR-10 — SDK tool ids of the delegated browser tools whose results carry an observation.
       this.crSdkResults.reset();
+      this.mcpBrowser?.crNewTurn();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         if (a.kind==='tool_use') this.crSdkResults.onToolUse(a.id, a.name, this.isCurriculumRuntimeEnabled());
         if (observation && (a.kind==='tool_use' || a.kind==='approval')) {
@@ -3748,6 +3749,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       () => new BrowserControl(this.crBrowserOptions()),
     );
     const browser = turnBrowser.browser;
+    // CR-08 — step numbers in results count this request's actions, not the control's lifetime.
+    browser.crNewTurn();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
     const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
     try {

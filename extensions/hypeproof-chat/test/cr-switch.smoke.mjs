@@ -135,6 +135,43 @@ ok("glue: the context key mirrors the switch and the SDK server registers CR too
     assert.match(r.content[0].text, /열린 브라우저 탭이 없어요/, "and answered by the CR executor");
   }
   ok("proxy tools: unknown with the switch off, routed to the CR executor with it on (read per call)");
+  // The executor's own navigation pins the tab (setTargetTab), which drops the control's
+  // executor; the one that navigated keeps its place, so the refs it adopts after the
+  // navigation are there for the next step (in-app CR-T07, 2026-10-01).
+  {
+    const ex = control.crExecutor();
+    const tabB = { url: "http://127.0.0.1:5173/index.html" };
+    control.openOrNavigate = async () => control.setTargetTab(tabB);
+    await ex.port.navigate("http://127.0.0.1:5173/index.html");
+    assert.equal(control.crExecutor(), ex, "the navigating executor is still the control's");
+    control.setTargetTab(undefined);
+    assert.notEqual(control.crExecutor(), ex, "control: a tab change from anywhere else still drops it");
+    delete control.openOrNavigate;
+  }
+  ok("CR executor: its own navigation keeps it (and its refs); another tab change drops it");
+  // With the switch on, navigating to the origin an open tab already shows drives that tab
+  // (the student's preview) instead of opening a second, same-titled one (in-app CR-T09).
+  {
+    const sent = [];
+    const preview = { url: "http://127.0.0.1:5173/", title: "키오스크 연습" };
+    vscode.window.browserTabs = [preview];
+    vscode.window.activeBrowserTab = undefined;
+    control.setTargetTab(undefined);
+    control.cdp = async () => ({ send: async (m, p) => { sent.push([m, p?.url]); return {}; } });
+    control.waitLoad = async () => {};
+    await control.openOrNavigate("http://127.0.0.1:5173/index.html"); // the stub's openBrowserTab throws
+    assert.equal(control.currentTab(), preview, "the open preview tab is driven");
+    assert.deepEqual(sent, [["Page.navigate", "http://127.0.0.1:5173/index.html"]]);
+    enabled = false;
+    control.setTargetTab(undefined);
+    await assert.rejects(control.openOrNavigate("http://127.0.0.1:5173/index.html"), /openBrowserTab not scripted/, "control: switch off keeps the pre-CR behaviour (a new tab)");
+    enabled = true;
+    delete control.cdp;
+    delete control.waitLoad;
+    vscode.window.browserTabs = [];
+    control.setTargetTab(undefined);
+  }
+  ok("CR navigate: an open tab on the same origin is driven, not duplicated; switch off unchanged");
   // pickElement on its own refuses a tab that is not the student's preview, before any CDP.
   vscode.window.activeBrowserTab = { url: "https://example.com/", startCDPSession: async () => { throw new Error("no CDP may be opened"); } };
   await assert.rejects(control.pickElement({ root: null }), /범위 밖이라 거절/);

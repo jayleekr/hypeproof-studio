@@ -1011,6 +1011,16 @@ export class CrExecutor {
     return guard;
   }
 
+  /**
+   * A new agent turn: step numbers restart, so "단계 N" in a result is the Nth action the
+   * agent took for THIS request (CR-08). With the switch on one executor outlives turns
+   * (proxyTurnBrowser), and without this the third step of a second request read
+   * "단계 15" in the app (in-app CR-T08, 2026-10-01). Refs, guard and logs are kept.
+   */
+  newTurn(): void {
+    this.step = 0;
+  }
+
   /** Remember the ref table of an observation (also used by element capture, CR-09). */
   adoptRefs(refs: Map<string, number>, generation: string): void {
     this.refs = refs;

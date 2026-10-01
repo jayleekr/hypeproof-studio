@@ -422,4 +422,9 @@ await test("CR-09 proxy: a picked element's ref is known to the executor the nex
   assert.equal(miss.isError, true);
 });
 
+await test("CR-08: both runtimes start a new turn on the long-lived control, so step numbers count this request's actions", () => {
+  assert.match(providerSrc, /const browser = turnBrowser\.browser;\s*\/\/[^\n]*\n\s*browser\.crNewTurn\(\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.reset\(\);\s*this\.mcpBrowser\?\.crNewTurn\(\);/);
+});
+
 console.log(`\n${passed} cr-host checks passed`);

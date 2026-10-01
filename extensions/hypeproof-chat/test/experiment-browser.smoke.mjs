@@ -315,6 +315,26 @@ await test("CR-T08 step attribution: a record captured outside any agent step ca
   assert.equal(c.observation.records.find((x) => x.message === "during-step").step, 1);
 });
 
+await test("CR-T08: with one executor across turns, a new turn numbers its steps from 1 again", async () => {
+  let clicks = 0;
+  const page = makeFakePage({ onClick: (p) => { if (++clicks === 4) p.consoleError("third-step-of-second-turn"); } });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  for (let i = 0; i < 3; i++) await ex.execute("browser_hover", { ref: "e1" });
+  for (let i = 0; i < 3; i++) await ex.execute("browser_click", { ref: "e1" }); // the first turn: steps 1–6 (clicks 1–3)
+  ex.newTurn();
+  await ex.execute("browser_hover", { ref: "e1" });
+  await ex.execute("browser_hover", { ref: "e1" });
+  const r = await ex.execute("browser_click", { ref: "e1" }); // click 4 = this turn's step 3
+  assert.deepEqual(failuresInText(modelText(r)).find((f) => f.message === "third-step-of-second-turn")?.step, 3);
+  // Control (planted): without the new turn the same action reads as step 9.
+  const { ex: old } = executorFor(makeFakePage({ onClick: (p) => p.consoleError("no-new-turn") }));
+  await old.execute("browser_observe");
+  for (let i = 0; i < 8; i++) await old.execute("browser_hover", { ref: "e1" });
+  const o = await old.execute("browser_click", { ref: "e1" });
+  assert.equal(failuresInText(modelText(o)).find((f) => f.message === "no-new-turn")?.step, 9);
+});
+
 await test("CR-T05 late attach: load-time HTTP errors are recovered, and a late-attached clean page is not called clean", async () => {
   // The log attaches after the page loaded with a 404 script (the first CR call of a turn).
   const page = makeFakePage({ loadFailures: [{ u: `${ORIGIN}/app-typo.js`, s: 404 }] });
