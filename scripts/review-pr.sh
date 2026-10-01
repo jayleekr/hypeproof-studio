@@ -70,6 +70,12 @@ SAFE_BRANCH="${BRANCH//\//-}"
 TMP_BASE="${TMPDIR:-/tmp}"; TMP_BASE="${TMP_BASE%/}"
 WORKTREE_DIR="$TMP_BASE/studio-review-${SAFE_BRANCH}"
 
+# Persist stdout+stderr to a log file outside the worktree (survives cleanup).
+# Token values are never echoed to stdout — only "Token issued." / clipboard path.
+LOG_FILE="${TMP_BASE}/review-pr-${SAFE_BRANCH}-$(date +%Y%m%d-%H%M%S).log"
+echo "Log: $LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 # macOS BSD date does not support %N; use python3 for millisecond timestamps.
 ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
 
@@ -86,6 +92,7 @@ cleanup() {
   pkill -f "wrangler dev.*--port $WRANGLER_PORT" 2>/dev/null || true
   pkill -f "HypeProof Studio Dev.app/Contents/" 2>/dev/null || true
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
+  [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
     echo "Removing worktree $WORKTREE_DIR..."
     git -C "$REPO" worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
@@ -270,19 +277,20 @@ TOKEN_JSON="$(HPS_SIGNING_SECRET="$LOCAL_SECRET" \
 
 TOKEN="$(echo "$TOKEN_JSON" | python3 -c "import sys,re; m=re.search(r'\"token\":\s*\"([^\"]+)\"', sys.stdin.read()); print(m.group(1) if m else '')" 2>/dev/null)"
 if [[ -z "$TOKEN" ]]; then
-  echo "WARNING: Token extraction failed. Raw output:" >&2
-  echo "$TOKEN_JSON" >&2
+  echo "WARNING: Token extraction failed. Redacted output:" >&2
+  echo "$TOKEN_JSON" | sed -E 's/("token":[[:space:]]*")[^"]+/\1***/' >&2
 else
   echo "Token issued."
-  # Copy to clipboard if pbcopy available
+  # Write token to file for HPS_DEV_ISSUER_TOKEN_FILE auto-seed in Dev app.
+  # Cleanup trap removes the file. Never print the token value in logs.
+  ISSUER_TOKEN_FILE="$WORKTREE_DIR/issuer-token.txt"
+  (umask 077; printf '%s' "$TOKEN" > "$ISSUER_TOKEN_FILE")
+  export HPS_DEV_ISSUER_TOKEN_FILE="$ISSUER_TOKEN_FILE"
+  echo "Instructor token written to worktree (auto-injected into Dev app)."
+  # Also copy to clipboard as fallback for manual paste.
   if command -v pbcopy >/dev/null 2>&1; then
     echo "$TOKEN" | pbcopy
-    echo "Token copied to clipboard."
-  else
-    echo ""
-    echo "── TOKEN (paste into the app) ──────────────────────"
-    echo "$TOKEN"
-    echo "────────────────────────────────────────────────────"
+    echo "Token also copied to clipboard."
   fi
 fi
 
@@ -290,16 +298,8 @@ fi
 echo ""
 echo "=== [5/6] Dev app ==="
 
-# Auto-seed the token file so the extension loads it without manual paste.
-# studio-dev.py computes state = ~/Library/.../HypeProof Studio Development/<sha256[:12]>
-# where sha256 is over str(REPO) = WORKTREE_DIR (Path(__file__).parents[1]).
-if [[ -n "${TOKEN:-}" ]]; then
-  STATE_HASH="$(python3 -c "import hashlib; print(hashlib.sha256('$WORKTREE_DIR'.encode()).hexdigest()[:12])")"
-  STATE_DIR="$HOME/Library/Application Support/HypeProof Studio Development/$STATE_HASH"
-  mkdir -p "$STATE_DIR"
-  printf '%s' "$TOKEN" > "$STATE_DIR/local-participant-token.txt"
-  echo "Token seeded → $STATE_DIR/local-participant-token.txt"
-fi
+# Note: instructor (issuer) token is seeded only via HPS_DEV_ISSUER_TOKEN_FILE above.
+# Never write it to local-participant-token.txt (TOKEN_KEY student slot).
 
 T5=$(ms)
 python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \

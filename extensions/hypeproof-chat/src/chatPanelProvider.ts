@@ -1,6 +1,7 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
 import { chalkToolsEnabled } from './chalk/tools';
+import { runInstructorTurn } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -19,6 +20,7 @@ import {OBSERVATION_FORMATS, validateFindings, validateObservation, asCapability
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
 import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
+import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
@@ -171,6 +173,7 @@ import {
   lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
+  resolveInstructorTokenFromSecrets,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 import {
@@ -1205,7 +1208,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
   /** #751 native help — set by extension.ts. The provider only relays; the host adapter re-checks the learner on every call. */
   helpSource: import("./classroomHelpHost").ClassroomHelpHost | null = null;
-  postHelp(help: import("./classroomHelp").HelpView): void { void this.post({ type: "helpState", help }); }
+  // #1298 — called when the auto-read whoami path gets a rejected result (401/403).
+  // Extension sets this to delete the issuer token and show the student start page once.
+  onIssuerAutoRejected?: () => void;
+  postHelp(help: import("./classroomHelp").HelpView): void {
+    // #1298 — instructor has no student help-request surface; suppress even if ClassroomHelpHost pushes.
+    if (this._instructorMode.isInstructor) return;
+    void this.post({ type: "helpState", help });
+  }
   /** Shared with the start page: one rule for what a click on an instructor link may do. */
   async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
     const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
@@ -1299,11 +1309,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
   hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0 || !!this.worldOpening || !!this.observationAssessment || (this.pendingApprovals?.size ?? 0) > 0; }
 
-  refreshConfig() {
-    void (async () => {
+  refreshConfig(): Promise<void> {
+    return (async () => {
       await this.postConfig();
       await this.postHistory();
     })();
+  }
+
+  get isInstructor(): boolean | null {
+    return this._instructorMode.isInstructor;
+  }
+
+  get lastWhoamiStatus() {
+    return this._instructorMode.lastWhoamiStatus;
   }
 
   private clearingHistory = false;
@@ -3064,7 +3082,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let preflightComplete=false;
     try {
     const connections=activityConnections(this.context);
-    if (connections) {
+    // Instructor mode has no student activity connection — skip the acquire/verify gate.
+    if (connections && !this._instructorMode.isInstructor) {
       releaseActivity=connections.acquire();
       const token=await connections.token();
       await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
@@ -3634,26 +3653,45 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
       const local = localRuntimeConfig(vscode.env.appName, proxyUrl);
       if (local) {
-        if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
-        if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
-        const cwd=this.resolveCoachCwd();
-        if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
-        // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
-        // #1298 (E4-3): final gate is server-verified whoami (isInstructor === true).
-        const chalkCtx = (await chalkToolsEnabled(this.context.secrets) && this._instructorMode.isInstructor === true)
-          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
-          : undefined;
-        const result=await runLocalCoach({config:local,profile,cwd,
-          history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
-          signal:ctrl.signal,onDelta,onActivity,chalkCtx,
-          // #1298 — pass instructor brief as system prompt override when in instructor mode.
-          ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
-          requestApproval:async action=>{
-            let prompted=false;
-            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
-            return {approved,actor:prompted?'user':'policy'};
-          }});
-        sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        if (this._instructorMode.isInstructor === true) {
+          // Instructor path — bypasses student token, ensureProfile, lesson gates, spool
+          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write only).
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+          const chalkCtx = (await chalkToolsEnabled(this.context.secrets))
+            ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+            : undefined;
+          const result=await runInstructorTurn({
+            local,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            brief:this._instructorMode.brief,
+            chalkCtx,
+            signal:ctrl.signal,onDelta,onActivity,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        } else {
+          if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
+          if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          const chalkCtx = undefined; // student local path never has instructor chalkCtx
+          const result=await runLocalCoach({config:local,profile,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            signal:ctrl.signal,onDelta,onActivity,chalkCtx,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        }
+      } else if (this._instructorMode.isInstructor === true) {
+        throw new Error('강사 채팅은 지금 내 Claude 구독 연결에서만 됩니다.');
       } else if (runtime === "agent-sdk") {
         if (!profile) {
           throw new Error(profileNotReadyNotice(this.coachDisplayName()));
@@ -4401,9 +4439,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const isInstructor = await this._instructorMode.checkInstructorMode(token, proxyUrl);
-    const instructorBrief = (isInstructor && token)
-      ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
+    // Instructor auth always uses the issuer token slot, never the student token.
+    const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
+    const isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    // #1298 — on the auto-read path (postConfig/refresh), act on the whoami result.
+    // The setInstructorToken command has its own rejection handler; this covers the background refresh path.
+    if (issuerToken) {
+      const action = this._instructorMode.handleAutoReadResult();
+      if (action === "rejected_delete_and_show") {
+        this.onIssuerAutoRejected?.();
+      }
+    }
+    const instructorBrief = (isInstructor && issuerToken)
+      ? await this._instructorMode.fetchInstructorBrief(issuerToken, proxyUrl)
       : undefined;
     const instructorConnection = isInstructor
       ? (local?.provider === "claude" ? "내 Claude 구독"
@@ -4426,6 +4474,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         ...(isInstructor ? { isInstructor: true } : {}),
         ...(instructorBrief ? { instructorBrief } : {}),
         ...(instructorConnection ? { instructorConnection } : {}),
+        ...(isInstructor && local ? { instructorModelChoices: localModelSelection(local).choices } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight

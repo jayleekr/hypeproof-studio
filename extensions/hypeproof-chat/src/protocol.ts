@@ -115,6 +115,9 @@ export interface ChatConfig {
   // #1298 — human-readable connection label shown in the instructor band.
   // "내 Claude 구독" | "내 Codex 구독" (local runtime) or "서버" (proxy/worker path).
   instructorConnection?: string;
+  // #1298 — model choices for the instructor band dropdown. Set from localModelSelection
+  // when instructor mode is active; profile is null so cannot use profile.model_selection.
+  instructorModelChoices?: Array<{ id: string; alias: string; label: string }>;
 }
 
 /**

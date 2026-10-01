@@ -15,7 +15,9 @@ html, body, #root {
 .hps-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* #1298 — 100vh breaks when ChatPanel is nested inside InstructorChatPanel's flex column;
+     the band gets cut off. 100% inherits from #root (height: 100%) and works in both cases. */
+  height: 100%;
 }
 
 /* ---------- Header ---------- */
@@ -1518,3 +1520,36 @@ html, body, #root {
 .hps-verify-fail .hps-verify-badge, .hps-verify-non_reproducible .hps-verify-badge { color: var(--vscode-errorForeground, #c62828); }
 .hps-verify-pass .hps-verify-badge { color: #2e7d32; }
 .hps-verify-reason { opacity: 0.85; }
+
+/* #1298 — instructor band shown in InstructorChatPanel when isInstructor === true */
+.hps-instructor-band {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--vscode-editorInfo-background, rgba(60,120,200,0.12));
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  font-size: 12px;
+}
+.hps-instructor-badge {
+  font-weight: 600;
+  color: var(--vscode-editorInfo-foreground, #6ab0f5);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--vscode-editorInfo-background, rgba(60,120,200,0.18));
+}
+.hps-instructor-connection { color: var(--hp-muted, #8a8a8a); }
+.hps-instructor-model-label { color: var(--hp-muted, #8a8a8a); }
+.hps-instructor-model { font-weight: 500; }
+.hps-instructor-model-input {
+  font: inherit; font-size: 12px;
+  background: var(--hp-bg, var(--vscode-input-background));
+  color: var(--hp-ink, var(--vscode-input-foreground));
+  border: 1px solid var(--hp-line, var(--vscode-input-border, #444));
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 0; flex: 1;
+}
+.hps-instructor-model-input:focus-visible { outline: 2px solid var(--hp-accent, #0ea5e9); outline-offset: 1px; }
+.hps-instructor-model-error { color: var(--vscode-errorForeground, #f48771); font-size: 11px; flex-basis: 100%; }
