@@ -239,6 +239,37 @@ else
   fail "PROFILE_ID validation not found before --no-app branch"
 fi
 
+# 30. Static isolation: NO_APP and AFTER_SCRIPT only appear in arg-parse and [5/6]+ sections.
+#
+# Verified ranges in the current script:
+#   Arg-parse section:   lines 23-41  (variable declarations + while-case block)
+#   Steps [1]–[4.5]:     lines 42-393 (worktree through authoring draft)
+#   [5/6] branch start:  line 394     (if [[ "$NO_APP" -eq 1 ]])
+#
+# Assertion: NO_APP and AFTER_SCRIPT MUST NOT appear in the [1]–[4.5] body.
+# We detect the boundaries dynamically so the test stays valid after minor edits.
+
+# Find last line of arg-parse (the 'done' that closes the while-case loop).
+ARGPARSE_END="$(grep -En '^done$|^done ' "$SCRIPT" | head -1 | cut -d: -f1)"
+# Find first [5/6] section (NO_APP branch or Dev-app header).
+STEP5_START="$(grep -En 'NO_APP.*-eq.*1' "$SCRIPT" | head -1 | cut -d: -f1)"
+
+if [[ -z "$ARGPARSE_END" ]] || [[ -z "$STEP5_START" ]]; then
+  fail "static isolation: could not locate argparse-end or step-5 start (ARGPARSE_END='$ARGPARSE_END' STEP5_START='$STEP5_START')"
+else
+  # Lines that fall strictly between arg-parse and step-5 and contain NO_APP or AFTER_SCRIPT.
+  BODY_START=$(( ARGPARSE_END + 1 ))
+  BODY_END=$(( STEP5_START - 1 ))
+  # Use awk to extract and search the [1]–[4.5] body.
+  LEAK_LINES="$(awk -v s="$BODY_START" -v e="$BODY_END" \
+    'NR>=s && NR<=e && /\bNO_APP\b|\bAFTER_SCRIPT\b/ {print NR": "$0}' "$SCRIPT")"
+  if [[ -z "$LEAK_LINES" ]]; then
+    ok "static isolation: NO_APP/AFTER_SCRIPT absent from [1]–[4.5] body (lines ${BODY_START}–${BODY_END})"
+  else
+    fail "static isolation: NO_APP/AFTER_SCRIPT found in [1]–[4.5] body — fix these lines:"$'\n'"$LEAK_LINES"
+  fi
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
