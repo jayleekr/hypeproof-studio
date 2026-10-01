@@ -45,6 +45,7 @@ const {
   versionArtifactText,
   isVersionArtifact,
   runIds,
+  criterionKey,
 } = core;
 
 const hex = (s) => createHash("sha256").update(s).digest("hex");
@@ -293,6 +294,91 @@ test("CR-T14: one row per criterion per run, the last verdict, so repeated calls
   assert.ok(report.criteria.every((c) => c.status === "pass" && c.reproducible), "rows of one run are not compared with each other");
 });
 
+test("CR-T14 negative: a new start with the same words is the same criterion; runs are compared by text, not event id", () => {
+  const r = recorder();
+  const a = r.criterion("주문하기 뒤 완료 화면이 보인다");
+  r.verdict({ run: "run-1", criterion: a, version: V0, verdict: pass() });
+  // "테스트 시작" again: a new criterion_set event with the same words (spacing differs).
+  const b = r.criterion("주문하기 뒤  완료 화면이 보인다 ");
+  r.verdict({ run: "run-2", criterion: b, version: V0, verdict: fail() });
+  const c = r.criterion("주문하기 뒤 완료 화면이 보인다");
+  r.verdict({ run: "run-3", criterion: c, version: V0, verdict: pass() });
+  assert.equal(criterionKey(a.student_text), criterionKey(b.student_text));
+  for (const run of ["run-1", "run-2", "run-3"]) assert.equal(verificationReport(r.batch.events, run).criteria[0].status, "non_reproducible", run);
+  assert.notEqual(productVerification(r.batch.events, V0).state, "verified");
+  // Control: other words are another criterion, so they are not compared.
+  const r2 = recorder();
+  r2.verdict({ run: "run-1", criterion: r2.criterion("완료 화면이 보인다"), version: V0, verdict: fail() });
+  r2.verdict({ run: "run-2", criterion: r2.criterion("음료 고르기가 보인다"), version: V0, verdict: pass() });
+  assert.equal(verificationReport(r2.batch.events, "run-2").criteria[0].status, "pass");
+});
+
+test("CR-T76 negative: a later report with fewer criteria, or another plan that passed, never hides a fail on the same version", () => {
+  const r = recorder();
+  const a = r.criterion("a");
+  const b = r.criterion("b");
+  r.verdict({ run: "run-1", criterion: a, version: V0, verdict: pass() });
+  r.verdict({ run: "run-1", criterion: b, version: V0, verdict: fail() });
+  r.verdict({ run: "run-2", criterion: r.criterion("a"), version: V0, verdict: pass() });
+  const subset = productVerification(r.batch.events, V0);
+  assert.equal(subset.state, "failed");
+  assert.deepEqual(subset.open.map((o) => [o.text, o.status]), [["b", "fail"]]);
+  // Another plan that passed the failed criterion on the same files.
+  r.verdict({ run: "run-3", criterion: r.criterion("b"), version: V0, verdict: pass(), plan: { steps: [], expect: [{ kind: "no_errors" }] } });
+  assert.equal(productVerification(r.batch.events, V0).state, "failed");
+  // Control: on new files the same subset is verified (the fail belongs to V0).
+  const r2 = recorder();
+  r2.verdict({ run: "run-1", criterion: r2.criterion("b"), version: V0, verdict: fail() });
+  r2.verdict({ run: "run-2", criterion: r2.criterion("b"), version: V1, verdict: pass() });
+  assert.equal(productVerification(r2.batch.events, V1).state, "verified");
+});
+
+test("CR-T15: a step that could not run is an observed failure, even when every expectation held", () => {
+  const broken = [steps[0], { index: 1, action: "click", target: 'button "주문하기"', ok: false, message: 'button "주문하기"을(를) 화면에서 찾지 못했어요' }];
+  for (const expect of [[{ kind: "text", text: "주문 오류", absent: true }], [{ kind: "no_errors" }]]) {
+    const v = evaluate(final(), expect, broken);
+    assert.equal(v.status, "fail", JSON.stringify(expect));
+    assert.ok(v.cites.some((c) => c.step === 1 && /찾지 못했어요/.test(c.detail)), "the failed step is cited");
+  }
+  // Control: the same expectations with every step run pass.
+  assert.equal(evaluate(final(), [{ kind: "no_errors" }], steps).status, "pass");
+});
+
+test("CR-T15: a snapshot cut at its cap leaves an absent or missing text and element undecided", () => {
+  for (const e of [{ kind: "text", text: "주문 오류", absent: true }, { kind: "text", text: "주문 오류" }, { kind: "element", role: "button", name: "다시 시도", absent: true }]) {
+    assert.equal(evaluate(final({ truncated: true }), [e], steps).status, "not_verified", JSON.stringify(e));
+    assert.notEqual(evaluate(final(), [e], steps).status, "not_verified", `control, uncut: ${JSON.stringify(e)}`);
+  }
+  // A text that was read is decided even on a cut snapshot.
+  assert.equal(evaluate(final({ truncated: true }), [{ kind: "text", text: "주문이 완료되었어요" }], steps).status, "pass");
+});
+
+test("the result text is measured against the recorder's cap: shortened to fit, or refused by name", () => {
+  const big = { ...pass(), cites: Array.from({ length: 20 }, (_, i) => ({ step: 1, kind: "snapshot", detail: `${"가".repeat(499)}${i}` })), runtime_errors: Array.from({ length: 10 }, () => ({ kind: "console", message: "오".repeat(200), step: 1 })) };
+  const base = { format: "hps-verify-result/1", run_id: "run-1", criterion_id: "c1", criterion_text: "a", artifact_version: V0, tested_at: 1, plan: PLAN, verdict: big };
+  const text = verifyResultText(base);
+  assert.ok(text.length <= 19_000, String(text.length));
+  assert.equal(readVerifyResult({ kind: "tool_result", text }).verdict.status, "pass");
+  // A plan is never shortened, so one too long to fit is refused rather than stored cut.
+  const huge = { steps: [], expect: [{ kind: "text", text: "x".repeat(25_000) }] };
+  assert.throws(() => verifyResultText({ ...base, plan: huge }), /result_too_long/);
+});
+
+test("a test event that disagrees with its result on the version is not bound", () => {
+  const r = recorder();
+  const c = r.criterion("a");
+  r.verdict({ run: "run-1", criterion: c, version: V0, verdict: pass() });
+  r.push({ kind: "artifact", text: versionArtifactText({ id: V1, entry: "index.html", files: [] }), sha256: V1.slice(7) });
+  r.push({ kind: "tool_request", text: "verify_criterion", tool_id: "t2", sha256: V0.slice(7) });
+  const result = r.push({ kind: "tool_result", tool_id: "t2", outcome: "success", sha256: V0.slice(7), artifact_version: V0, text: verifyResultText({ format: "hps-verify-result/1", run_id: "run-2", criterion_id: c.id, criterion_text: "a", artifact_version: V0, tested_at: 9, plan: PLAN, verdict: fail() }) });
+  const tampered = { kind: "test_observed", actor: "ai", context: CTX, evidence_type: "action", source_state: "real", criterion_ref: c.id, outcome: "mismatch", result_ref: result.id };
+  r.push({ ...tampered, artifact_after: V1.slice(7) });
+  assert.deepEqual(runIds(r.batch.events), ["run-1"], "the run-2 verdict is bound to nothing");
+  // Control: the same event naming the result's own version binds it.
+  r.push({ ...tampered, artifact_after: V0.slice(7) });
+  assert.deepEqual(runIds(r.batch.events), ["run-1", "run-2"]);
+});
+
 // ── CR-T16 ───────────────────────────────────────────────────────────────────
 
 test("CR-T16 positive: a fix request carries report, criterion and version; a pass after it is retest_confirmed and SX-15 confirms", () => {
@@ -332,6 +418,9 @@ test("CR-T16 negative: a fix request without report, criterion or version is ref
   assert.deepEqual(buildFixRequest({ ...base, version: null }), { ok: false, code: "missing_version_ref" });
   assert.deepEqual(buildFixRequest({ ...base, version: V1 }), { ok: false, code: "version_mismatch" });
   assert.deepEqual(buildFixRequest({ ...base, student_text: " " }), { ok: false, code: "missing_student_text" });
+  // A criterion that passed needs no fix request.
+  const passed = { ...report, criteria: report.criteria.map((x) => ({ ...x, status: "pass" })) };
+  assert.deepEqual(buildFixRequest({ ...base, report: passed }), { ok: false, code: "criterion_passed" });
   // A pass that comes with no fix request in between stays test_observed.
   assert.equal(testEventKind(r.batch.events, c.id, "pass", { retest: true, versionHex: V1.slice(7) }), "test_observed");
   r.push({ kind: "change_requested", actor: "user", context: CTX, evidence_type: "change", source_state: "self_reported", student_text: "고쳐 주세요", criterion_ref: c.id, artifact_before: V0.slice(7), turn_ref: report.criteria[0].test_ref });
@@ -358,7 +447,9 @@ test("CR-T76 positive: three passes on a version show verified; a fail shows the
   assert.equal(now.state, "failed");
   assert.deepEqual(now.open.map((o) => o.id), [d.id]);
   r.verdict({ run: "run-3", criterion: cs[1], version: V0, verdict: fail() });
-  assert.equal(productVerification(r.batch.events, V0).state, "incomplete", "control: a flip on an unchanged criterion is non-reproducible, never verified");
+  const flipped = productVerification(r.batch.events, V0);
+  assert.notEqual(flipped.state, "verified", "control: a flip on an unchanged criterion is non-reproducible, never verified");
+  assert.deepEqual(flipped.open.map((o) => [o.text, o.status]), [["b", "non_reproducible"], ["d", "fail"]], "and run-2's fail on the same files stays open");
 });
 
 test("CR-T76 negative: no report, a report of another version, or a coach saying 완료했어요 all stay not verified", () => {

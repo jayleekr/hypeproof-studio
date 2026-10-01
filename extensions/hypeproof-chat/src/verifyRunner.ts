@@ -16,6 +16,7 @@
 // Plain data in and out, no provider SDK (CR-03).
 
 import { checkAgentOrigin, failuresOf, type CrToolResult, type Observation } from "./experimentBrowser.ts";
+import { AX_SNAPSHOT_MAX_LINES } from "./browserControlHelpers.ts";
 import {
   elementRef,
   evaluate,
@@ -89,18 +90,22 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
     let last: Observation = first.observation;
     const artifact = last.artifact;
     // The failures of every document the run visited, not just the last one (a console
-    // error before a navigate or reload still counts).
+    // error before a navigate or reload still counts). A record carries the executor's step
+    // counter, which runs on across the turn; it is mapped to this run's step index, so
+    // "단계 N" names the runner step that observed it (a load error of the entry page is 0).
     const seen = new Set<string>();
     const errors: ErrorRecord[] = [];
-    const collect = (o: Observation) => {
+    const runnerStep = new Map<number, number>();
+    const collect = (o: Observation, index: number) => {
+      if (typeof o.step === "number") runnerStep.set(o.step, index);
       for (const f of failuresOf(o.records)) {
         const key = `${o.documentGeneration}|${f.kind}|${f.step}|${f.message}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        errors.push({ kind: f.kind, message: f.message, step: f.step });
+        errors.push({ kind: f.kind, message: f.message, step: f.step === null ? null : runnerStep.get(f.step) ?? null });
       }
     };
-    collect(last);
+    collect(last, 0);
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i]!;
       const index = i + 1;
@@ -143,7 +148,7 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
         return notVerified(steps, message, artifact, last);
       }
       last = r.observation;
-      collect(last);
+      collect(last, index);
       steps.push({ index, action: step.action, ...(target ? { target } : {}), ok: true, message: textOf(r).split("\n")[0]!.slice(0, 300), route: last.route });
     }
     // The entry page's files changed under the run: what was observed is not one version.
@@ -153,7 +158,16 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
     let screenshot: string | null = null;
     if (opts.storeScreenshot && last.screenshot?.data) screenshot = await opts.storeScreenshot(last.screenshot.data, last.screenshot.mimeType).catch(() => null);
     const verdict = evaluate(
-      { step: steps.at(-1)!.index, snapshot: last.snapshot, route: last.route, errors, screenshot, viewport: last.viewport },
+      {
+        step: steps.at(-1)!.index,
+        snapshot: last.snapshot,
+        route: last.route,
+        errors,
+        screenshot,
+        viewport: last.viewport,
+        // The snapshot stops at its line cap; text past it was never read (CR-15).
+        truncated: last.snapshot.split("\n").length >= AX_SNAPSHOT_MAX_LINES,
+      },
       plan.expect,
       steps,
     );

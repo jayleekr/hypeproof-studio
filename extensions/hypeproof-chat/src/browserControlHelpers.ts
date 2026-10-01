@@ -320,11 +320,14 @@ interface AxNode {
  * model can read, plus a `ref → backendDOMNodeId` map for click/type. Interactive
  * nodes get `[ref=eN] role "name"`; headings/text are included as context.
  */
+/** The line cap of an AX snapshot: a snapshot this long may have been cut. */
+export const AX_SNAPSHOT_MAX_LINES = 200;
+
 export function buildAxSnapshot(
   nodes: AxNode[],
   opts: { maxLines?: number } = {},
 ): { text: string; refs: Map<string, number> } {
-  const maxLines = opts.maxLines ?? 200;
+  const maxLines = opts.maxLines ?? AX_SNAPSHOT_MAX_LINES;
   const refs = new Map<string, number>();
   const lines: string[] = [];
   let n = 0;

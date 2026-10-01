@@ -17,7 +17,8 @@
 //   or retest_confirmed   the student's `criterion_set`, `artifact_after` → the version,
 //                     `result_ref` → the tool_result, outcome match / mismatch / unknown
 //
-// `verificationReport()` reads those back. Everything here is pure and provider-free
+// `verificationReport()` reads those back. CR-14 compares runs of a criterion by its text
+// (`criterionKey`), plan, version and viewport, across every run on the version. Everything here is pure and provider-free
 // (CR-03): plain data in, plain data out.
 //
 // Imports: TYPES only from the validator, like learning-events.ts, so the core stays acyclic.
@@ -257,7 +258,15 @@ export interface FinalObservation {
   errors: ErrorRecord[];
   screenshot: string | null;
   viewport: { width: number; height: number } | null;
+  /**
+   * The snapshot was cut at its line cap, so text past the cap was never read: an absent
+   * text or element, or a missing one, is then undecided, never pass or fail.
+   */
+  truncated?: boolean;
 }
+
+/** The same criterion across runs: its text, whitespace-normalized (CR-14 compares by text, not by event id). */
+export const criterionKey = (text: string): string => text.normalize("NFC").replace(/\s+/g, " ").trim();
 
 const OBSERVATION_KINDS = new Set<Citation["kind"]>(["snapshot", "record", "screenshot", "route"]);
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -288,6 +297,7 @@ function lineText(line: string): string | null {
   }
   return /^[A-Za-z]+: (.*)$/.exec(line)?.[1] ?? null;
 }
+const TRUNCATED = "화면 내용이 길어 앞부분만 읽었어요";
 const textLine = (snapshot: string, text: string): string | null => snapshot.split("\n").find((l) => lineText(l)?.includes(text)) ?? null;
 
 /**
@@ -302,16 +312,16 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
     switch (e.kind) {
       case "text": {
         const line = textLine(final.snapshot, e.text);
-        const ok = e.absent ? line === null : line !== null;
+        const ok = line === null && final.truncated ? null : e.absent ? line === null : line !== null;
         cites.push({ step: at, kind: "snapshot", detail: line ?? `(스냅샷에 "${e.text}" 없음)` });
-        results.push({ kind: e.kind, ok, detail: `${e.absent ? "보이지 않아야 함" : "보여야 함"}: ${e.text}` });
+        results.push({ kind: e.kind, ok, detail: `${e.absent ? "보이지 않아야 함" : "보여야 함"}: ${e.text}${ok === null ? ` (${TRUNCATED})` : ""}` });
         break;
       }
       case "element": {
         const line = elementLine(final.snapshot, e.role, e.name);
-        const ok = e.absent ? line === null : line !== null;
+        const ok = line === null && final.truncated ? null : e.absent ? line === null : line !== null;
         cites.push({ step: at, kind: "snapshot", detail: line ?? `(스냅샷에 ${e.role} "${e.name}" 없음)` });
-        results.push({ kind: e.kind, ok, detail: `${e.absent ? "없어야 함" : "있어야 함"}: ${e.role} "${e.name}"` });
+        results.push({ kind: e.kind, ok, detail: `${e.absent ? "없어야 함" : "있어야 함"}: ${e.role} "${e.name}"${ok === null ? ` (${TRUNCATED})` : ""}` });
         break;
       }
       case "route": {
@@ -402,21 +412,42 @@ export interface VerifyResult {
   verdict: CriterionVerdict;
 }
 
-/** Serialized under the recorder's 20,000-character event text cap. */
+/** The recorder's event text cap: a longer text is cut and marks the whole batch incomplete. */
+export const VERIFY_RESULT_TEXT_CAP = 20_000;
+/** Room left under the cap for what the recorder's secret scrub may add. */
+const RESULT_BUDGET = VERIFY_RESULT_TEXT_CAP - 1_000;
+
+/**
+ * Serialized under the recorder's 20,000-character event text cap, measured, not assumed:
+ * the verdict's evidence is shortened step by step until it fits, and a result that still
+ * does not fit is refused by name (`result_too_long`). The plan is never shortened, because
+ * a re-test runs it exactly as stored.
+ */
 export function verifyResultText(r: VerifyResult): string {
   if (!VERSION_ID.test(r.artifact_version)) throw new Error("missing_artifact_version");
-  const capped: VerifyResult = {
-    ...r,
-    criterion_text: r.criterion_text.slice(0, MAX_TEXT),
-    verdict: {
-      ...r.verdict,
-      steps: r.verdict.steps.slice(0, MAX_STEPS + 2).map((x) => ({ ...x, message: x.message.slice(0, 300) })),
-      cites: r.verdict.cites.slice(0, 20).map((c) => ({ ...c, detail: c.detail.slice(0, 500) })),
-      runtime_errors: r.verdict.runtime_errors.slice(0, 10).map((e) => ({ ...e, message: e.message.slice(0, 200) })),
-      network_errors: r.verdict.network_errors.slice(0, 10).map((e) => ({ ...e, message: e.message.slice(0, 200) })),
-    },
-  };
-  return `${VERIFY_RESULT_FORMAT}\n${JSON.stringify(capped)}`;
+  const LEVELS = [
+    { steps: 300, target: 400, cites: 20, cite: 500, errors: 10, error: 200, detail: 400, run: 300 },
+    { steps: 120, target: 200, cites: 12, cite: 200, errors: 5, error: 120, detail: 200, run: 300 },
+    { steps: 60, target: 80, cites: 8, cite: 120, errors: 2, error: 80, detail: 80, run: 80 },
+  ];
+  for (const l of LEVELS) {
+    const capped: VerifyResult = {
+      ...r,
+      criterion_text: r.criterion_text.slice(0, MAX_TEXT),
+      ...(r.run_criteria ? { run_criteria: r.run_criteria.map((c) => ({ id: c.id, text: c.text.slice(0, l.run) })) } : {}),
+      verdict: {
+        ...r.verdict,
+        steps: r.verdict.steps.slice(0, MAX_STEPS + 2).map((x) => ({ ...x, message: x.message.slice(0, l.steps), ...(x.target !== undefined ? { target: x.target.slice(0, l.target) } : {}) })),
+        cites: r.verdict.cites.slice(0, l.cites).map((c) => ({ ...c, detail: c.detail.slice(0, l.cite) })),
+        expectations: r.verdict.expectations.map((e) => ({ ...e, detail: e.detail.slice(0, l.detail) })),
+        runtime_errors: r.verdict.runtime_errors.slice(0, l.errors).map((e) => ({ ...e, message: e.message.slice(0, l.error) })),
+        network_errors: r.verdict.network_errors.slice(0, l.errors).map((e) => ({ ...e, message: e.message.slice(0, l.error) })),
+      },
+    };
+    const text = `${VERIFY_RESULT_FORMAT}\n${JSON.stringify(capped)}`;
+    if (text.length <= RESULT_BUDGET) return text;
+  }
+  throw new Error("result_too_long");
 }
 
 /** Read a result back from a `tool_result` event; null when it is not one, or is malformed. */
@@ -555,14 +586,16 @@ export function verificationReport(events: readonly ObservationEvent[], runId: s
   for (const b of lastOf.values()) {
     const v = b.result.verdict;
     const decided = (x: VerdictStatus) => x !== "not_verified";
-    // CR-14 compares re-runs of the same plan: a different plan is a different test.
+    // CR-14 compares re-runs of the same plan: a different plan is a different test. The
+    // criterion is matched by its text, not its event id, so pressing "테스트 시작" again with
+    // the same words (a new criterion_set event) is still compared with the earlier runs.
+    const key = criterionKey(b.result.criterion_text);
     const others = all.filter(
       (o) =>
         o.result.run_id !== runId &&
-        o.result.criterion_id === b.result.criterion_id &&
+        criterionKey(o.result.criterion_text) === key &&
         o.result.artifact_version === version &&
         vpKey(o.result.verdict.viewport) === vpKey(v.viewport) &&
-        o.result.criterion_text === b.result.criterion_text &&
         planKey(o.result) === planKey(b.result),
     );
     const reproducible = !decided(v.status) || others.every((o) => !decided(o.result.verdict.status) || o.result.verdict.status === v.status);
@@ -645,9 +678,22 @@ export function productVerification(events: readonly ObservationEvent[], version
     .filter((r): r is VerificationReport => !!r && validateVerificationReport(r).length === 0);
   const latestOther = [...reports].reverse().find((r) => r.artifact_version_id !== versionId);
   const previous = latestOther ? { run_id: latestOther.run_id, artifact_version_id: latestOther.artifact_version_id } : undefined;
-  const here = versionId ? [...reports].reverse().find((r) => r.artifact_version_id === versionId) : undefined;
+  const sameVersion = versionId ? reports.filter((r) => r.artifact_version_id === versionId) : [];
+  const here = sameVersion.at(-1);
   if (!here) return { state: previous ? "needs_recheck" : "not_verified", open: [], ...(previous ? { previous } : {}) };
   const open = here.criteria.filter((c) => c.status !== "pass").map((c) => ({ id: c.id, text: c.text, status: c.status }));
+  // A later report never hides a decided fail or non-reproducible result for the same
+  // criterion on the same files (CR-14, CR-81): not by a start with fewer criteria, and not
+  // by a different plan that passed. The same files can only be fixed by changing them.
+  for (const r of sameVersion) {
+    if (r === here) continue;
+    for (const c of r.criteria) {
+      if (c.status !== "fail" && c.status !== "non_reproducible") continue;
+      const at = open.findIndex((o) => criterionKey(o.text) === criterionKey(c.text));
+      if (at === -1) open.push({ id: c.id, text: c.text, status: c.status });
+      else if (open[at]!.status !== "fail" && open[at]!.status !== "non_reproducible") open[at] = { id: c.id, text: c.text, status: c.status };
+    }
+  }
   const state: ProductVerificationState = open.length === 0 ? "verified" : open.some((c) => c.status === "fail") ? "failed" : "incomplete";
   return { state, run_id: here.run_id, open, ...(previous ? { previous } : {}) };
 }

@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import type { ObservationEvent } from "../../../worker/src/lib/measurement-core/legacy-observation.ts";
 import {
   CRITERIA_MAX,
+  VERIFY_RESULT_TEXT_CAP,
   VERIFY_TOOL,
   buildFixRequest,
   checkCriteria,
@@ -41,6 +42,7 @@ import {
   type VerifyPlan,
 } from "../../../worker/src/lib/measurement-core/verification.ts";
 import { VERSION_CHANGED, runCriterionPlan, verdictLine, type VerifyExecutor } from "./verifyRunner.ts";
+import { scrubSecrets } from "./shellPolicy.ts";
 import type { ActiveRun, VerifyCriterion, VerifyProposal, VerifyView } from "./verifyView.ts";
 
 export const VERIFY_PROPOSE_TOOL = "verify_propose_criteria";
@@ -300,6 +302,9 @@ export class VerifySession {
   /** CR-16 — a failed criterion as a fix request to the coach. */
   async fix(criterionId: unknown, studentText: unknown): Promise<{ ok: true; sendText: string } | { ok: false; code: string }> {
     if (!this.ports.switchOn()) return { ok: false, code: "switch_off" };
+    // A fix request in the middle of a re-test would land between that re-test's start and
+    // its verdicts, and turn its pass into retest_confirmed (SX-15 ordering).
+    if (this.running) return { ok: false, code: "busy" };
     const rec = await this.ports.recorder();
     if (!rec) return { ok: false, code: "no_record" };
     const events = rec.events();
@@ -349,6 +354,28 @@ export class VerifySession {
     if (!rec) return { isError: true, text: `${line}\n(${refusalText("no_record")})` };
     const version = outcome.artifact.id;
     const hex = versionHex(version);
+    // The result must read back as it was judged once the recorder has stored it (cut at its
+    // text cap, secrets scrubbed). One that would not is refused before anything is written:
+    // an unreadable verdict would leave the criterion done with no result, and a text over
+    // the cap marks the seat's whole record incomplete.
+    let resultText: string;
+    try {
+      resultText = verifyResultText({
+        format: "hps-verify-result/1",
+        run_id: run.run_id,
+        criterion_id: criterion.id,
+        criterion_text: criterion.text,
+        run_criteria: run.criteria.map((c) => ({ id: c.id, text: c.text.slice(0, 300) })),
+        artifact_version: version,
+        tested_at: this.ports.now?.() ?? Date.now(),
+        plan,
+        verdict: outcome.verdict,
+      });
+      const stored = scrubSecrets(resultText);
+      if (stored.length > VERIFY_RESULT_TEXT_CAP || !readVerifyResult({ kind: "tool_result", text: stored, artifact_version: version })) throw new Error("result_unreadable");
+    } catch (err) {
+      return { isError: true, text: `${line}\n(결과를 기록하지 못했어요: ${err instanceof Error ? err.message : String(err)})` };
+    }
     try {
       const lastArtifact = [...rec.events()].reverse().find((e) => e.kind === "artifact");
       if (lastArtifact?.sha256 !== hex) rec.record("artifact", versionArtifactText(outcome.artifact), { sha256: hex });
@@ -356,19 +383,11 @@ export class VerifySession {
       rec.record("tool_request", `${VERIFY_TOOL}(${criterion.text.slice(0, 120)})`, { tool_id: toolId, sha256: hex });
       const result = rec.record(
         "tool_result",
-        verifyResultText({
-          format: "hps-verify-result/1",
-          run_id: run.run_id,
-          criterion_id: criterion.id,
-          criterion_text: criterion.text,
-          run_criteria: run.criteria.map((c) => ({ id: c.id, text: c.text.slice(0, 300) })),
-          artifact_version: version,
-          tested_at: this.ports.now?.() ?? Date.now(),
-          plan,
-          verdict: outcome.verdict,
-        }),
+        resultText,
         { tool_id: toolId, outcome: "success", sha256: hex, artifact_version: version, ...(outcome.verdict.screenshot ? { screenshot_digest: outcome.verdict.screenshot } : {}) },
       );
+      // No test event binds a result that does not read back: the call is an error, not a verdict.
+      if (!readVerifyResult(result)) throw new Error("result_unreadable");
       const status = outcome.verdict.status;
       rec.recordLearning({
         kind: testEventKind(rec.events(), criterion.id, status, { retest: run.origin === "retest", versionHex: hex }),

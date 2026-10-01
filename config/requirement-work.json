@@ -3007,6 +3007,7 @@
         "extensions/hypeproof-chat/src/verifyRunner.ts",
         "extensions/hypeproof-chat/src/verifySession.ts",
         "extensions/hypeproof-chat/src/verifyView.ts",
+        "extensions/hypeproof-chat/src/browserControlHelpers.ts",
         "extensions/hypeproof-chat/src/curriculumRuntime.ts",
         "extensions/hypeproof-chat/src/browserMcp.ts",
         "extensions/hypeproof-chat/src/sdkCoachHelpers.ts",

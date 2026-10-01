@@ -144,6 +144,16 @@ export function VerifyPanel(props: {
                 {c.method === "vision" && <span className="hps-verify-vision"> · 화면 판단</span>}
               </div>
               {c.reason && <div className="hps-verify-reason">{c.reason}</div>}
+              {/* The coach writes the expectations, so the student sees what the verdict was judged on. */}
+              {c.expectations.length > 0 && (
+                <ul className="hps-verify-expect" data-testid="verify-expectations">
+                  {c.expectations.map((e, i) => (
+                    <li key={i}>
+                      {e.ok === true ? "✓" : e.ok === false ? "✗" : "?"} 확인한 것: {e.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {c.steps.length > 0 && (
                 <details>
                   <summary>한 일과 근거 보기</summary>

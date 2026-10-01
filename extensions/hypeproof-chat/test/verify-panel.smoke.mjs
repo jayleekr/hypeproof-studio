@@ -38,6 +38,12 @@ const ok = (n) => { passed++; console.log(`✓ ${n}`); };
   assert.match(text, /✓ 이동/);
   assert.match(text, /근거\(화면 내용\)/);
   assert.doesNotMatch(text, /✓ navigate|근거\((?:snapshot|record|screenshot|route)\)/);
+  assert.doesNotMatch(html, /verify-expectations/, "control: no expectations, no list");
+  // The coach wrote the expectations, so each result shows what it was judged on.
+  const judged = report(V0, [crit("c1", "주문하면 완료 화면이 보인다", "pass", { expectations: [{ kind: "text", ok: true, detail: "보이지 않아야 함: 주문 오류" }] })]);
+  const shown = await render(view({ verification: { state: "verified", run_id: "run-1", open: [] }, report: judged }));
+  assert.match(shown.html, /data-testid="verify-expectations"/);
+  assert.match(shown.text, /✓ 확인한 것: 보이지 않아야 함: 주문 오류/);
   ok("CR-T76 UI positive: a version with a three-pass report bound to it shows 검증됨 with each result");
 }
 {
@@ -78,5 +84,32 @@ const ok = (n) => { passed++; console.log(`✓ ${n}`); };
   assert.match(html, /data-testid="verify-proposal"/);
   assert.match(text, /코치가 제안한 조건 — 확인해야 테스트에 쓰여요/);
   ok("CR-T12 UI: coach proposals are offered as drafts to confirm, not as criteria");
+}
+{
+  // The composer while a product test drives the browser (App passes sendLocked from the
+  // host's view.running): Send is disabled for a typed draft, and a parked message goes back
+  // to the draft instead of being sent.
+  const { chatPanelProps, chatConfig } = await import("./sx-screen-fixtures.mjs");
+  const { readFileSync } = await import("node:fs");
+  const withDraft = (extra) => chatPanelProps({ config: chatConfig(3, { activityDraft: { text: "주문 화면을 바꿔 주세요", queued: null, images: [], imports: [] } }), ...extra });
+  const sendButton = (html) => /<button[^>]*class="hps-btn-send"[^>]*>/.exec(html)?.[0] ?? "";
+  const locked = await renderComponent("ChatPanel", withDraft({ sendLocked: true }));
+  assert.match(sendButton(locked), /disabled/, "Send is disabled while a test runs");
+  const free = await renderComponent("ChatPanel", withDraft({}));
+  assert.ok(sendButton(free), "control: the Send button is drawn");
+  assert.doesNotMatch(sendButton(free), /disabled/, "control: with the same draft and no test, Send is enabled");
+  const chatSrc = readFileSync(new URL("../webview-ui/src/ChatPanel.tsx", import.meta.url), "utf8");
+  const appSrc = readFileSync(new URL("../webview-ui/src/App.tsx", import.meta.url), "utf8");
+  const LOCKS = {
+    submit: /\|\| streaming \|\| unavailable \|\| props\.sendLocked\) return;/,
+    parked: /if \(props\.sendLocked\) \{ restoreQueuedToDraft\(\); return; \}\s*const text = queued as string;/,
+    app: /sendLocked=\{!!state\.verify\?\.running\}/,
+  };
+  const lockProblems = (chat, app) => Object.entries(LOCKS).filter(([k, re]) => !re.test(k === "app" ? app : chat)).map(([k]) => k);
+  assert.deepEqual(lockProblems(chatSrc, appSrc), []);
+  assert.ok(lockProblems(chatSrc.replace(" || props.sendLocked) return;", ") return;"), appSrc).includes("submit"));
+  assert.ok(lockProblems(chatSrc.replace("if (props.sendLocked) { restoreQueuedToDraft(); return; }", ""), appSrc).includes("parked"));
+  assert.ok(lockProblems(chatSrc, appSrc.replace("sendLocked={!!state.verify?.running}", "")).includes("app"));
+  ok("composer lock: Send disabled while a test runs (rendered), the parked message returns to the draft, App wires the host's running");
 }
 console.log(`\n${passed} verify panel checks passed`);

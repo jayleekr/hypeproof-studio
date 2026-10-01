@@ -567,12 +567,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   });
 
   /**
+   * The recorder of the turn now streaming, captured by `handleSend` and cleared when the
+   * turn ends. Other webview handlers may replace `this.nativeObservation` mid-turn
+   * (`prepareObservation`), and the turn later persists its own recorder over the same key,
+   * so verdicts written anywhere else during the turn would be overwritten.
+   */
+  private verifyTurnRecorder: NativeObservationRecorder | null = null;
+
+  /**
    * The record a verify action writes to. Inside a turn this is the turn's own recorder
-   * (`prepareObservation` sets it), so the turn's later writes never overwrite the verdicts;
+   * (`verifyTurnRecorder`), so the turn's later writes never overwrite the verdicts;
    * outside a turn it is prepared from the saved batch. Learning events need `/2`.
    */
   private async verifyRecorder(): Promise<VerifyRecorderPort | null> {
-    const recorder = this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder();
+    const recorder = this.verifyTurnRecorder ?? (this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder());
     if (!recorder) return null;
     const profile = await this.ensureProfile();
     const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
@@ -3235,6 +3243,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       void this.postConfig();
     }
     const observation = await this.prepareObservation(proxyUrl, token, profile);
+    // cr-verify — the coach's verify calls in this turn write to this turn's recorder.
+    this.verifyTurnRecorder = observation?.batch.format === 'hps-observation/2' ? observation : null;
     const recordObservation = (kind: import('./nativeObservationContract').ObservationKind, value: string, extra: Partial<import('./nativeObservationContract').ObservationEvent> = {}) => {
       if (!observation) return;
       try { observation.record(streamId,kind,value,extra);this.persistObservation(observation); }
@@ -3867,6 +3877,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.activeStreams.delete(streamId);
       // cr-verify — the run this turn carried takes no more coach calls once the turn ends.
       this.verifySession?.endTurn();
+      this.verifyTurnRecorder = null;
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
