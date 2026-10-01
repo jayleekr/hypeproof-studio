@@ -72,7 +72,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   const enc = new TextEncoder();
   if (enc.encode(html).length > MAX_SIZE_BYTES) {
     violations.push(violation('markup.too_large', ['HTML-03'], `파일 크기가 256KB 를 초과한다`, file, null, null));
-    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [] }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
+    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [], prerequisites: null }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
   }
 
   // 잘못된 수치 참조를 전체 HTML에서 사전 스캔 (텍스트 수집 경로와 무관하게 감지)
@@ -91,7 +91,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   const meta: PlanMeta = {
     kind: null, course: null, knowledgeVersion: null,
     format: null, audienceTier: null, familySession: false,
-    durationMin: null, methods: [],
+    durationMin: null, methods: [], prerequisites: null,
   };
 
   const sections: Map<string, ParsedSection> = new Map();
@@ -217,6 +217,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
           case 'chalk:family-session': meta.familySession = content === 'true'; break;
           case 'chalk:duration-min': meta.durationMin = parseInt(content, 10) || null; break;
           case 'chalk:methods': meta.methods = splitWords(content); break;
+          case 'chalk:prerequisites': meta.prerequisites = content; break;
         }
       }
 
@@ -468,6 +469,6 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   };
   } catch (err) {
     violations.push(violation('markup.internal', ['HTML-02'], `내부 오류: ${err instanceof Error ? err.message : String(err)}`, file, null, null));
-    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [] }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
+    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [], prerequisites: null }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
   }
 }

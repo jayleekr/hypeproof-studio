@@ -39,6 +39,7 @@ export interface PlanMeta {
   familySession: boolean;
   durationMin: number | null;
   methods: string[];
+  prerequisites: string | null;   // chalk:prerequisites (선택)
 }
 
 export interface StepCell {
