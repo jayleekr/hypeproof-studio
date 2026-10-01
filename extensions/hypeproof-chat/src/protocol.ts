@@ -378,6 +378,12 @@ export type WebviewMessage = (
   | { type: "publishSubmit"; form: import("./publishView").PublishForm }
   | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number }
   | { type: "publishRevoke"; linkId: string }
+  // cr-evidence — the experiment evidence panel (CR-24–CR-27, CR-69; CR switch only, re-checked by the host).
+  | { type: "evidenceOpen"; experimentId?: string }
+  | { type: "evidenceNote"; experimentId: string; note: import("./evidenceView").NoteForm }
+  | { type: "evidenceDraft"; experimentId: string }
+  | { type: "evidenceReview"; experimentId: string; draftId: string; revision: number; actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }> }
+  | { type: "evidenceDelete"; experimentId: string; sessionId?: string }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -527,6 +533,8 @@ export type HostMessage = (
   // cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden). `error`/`errorLines`: why the
   // last action was refused (the file and line of a refused set); `shareUrl`: the link just made.
   | { type: "publishState"; view: import("./publishView").PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
+  // cr-evidence — the "실험 증거" panel (null = hidden). `error`: why the last action was refused; `done`: what it did.
+  | { type: "evidenceState"; view: import("./evidenceView").EvidenceView | null; error?: string; done?: string }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again

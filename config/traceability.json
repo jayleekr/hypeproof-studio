@@ -3066,6 +3066,15 @@
         },
         {
           "path": "worker/migrations/0033-curriculum-runtime-evidence.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/EvidencePanel.tsx"
         }
       ]
     },
@@ -3127,6 +3136,9 @@
         },
         {
           "path": "worker/test/cr-evidence.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-evidence.smoke.mjs"
         }
       ]
     },

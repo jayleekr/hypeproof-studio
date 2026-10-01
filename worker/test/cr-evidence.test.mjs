@@ -570,6 +570,39 @@ await test("CR-T28: the review input builder reads evidence items; chat history 
   }
 });
 
+await test("CR-T27 (App view against the real Service): the panel's session reads the experiment, a claim opens its three sessions, a deleted one reads 확인 필요", async () => {
+  const { EvidenceSession } = await import("../../extensions/hypeproof-chat/src/evidenceSession.ts");
+  const { claimSources } = await import("../../extensions/hypeproof-chat/src/evidenceView.ts");
+  const { makeCtx } = await import("./harness/index.mjs");
+  const f = await fixture();
+  try {
+    const s = await withEvidence(f);
+    const fetchImpl = (url, init) => f.app.fetch(new Request(url, init), f.env, makeCtx());
+    const session = new EvidenceSession({ switchOn: () => true, token: async () => s.token, base: () => "https://service.test/v1/curriculum", fetchImpl, projectId: () => s.project.id });
+    const made = await session.makeDraft(s.experiment.id);
+    assert.equal(made.ok, true, JSON.stringify(made));
+    const v = await session.view();
+    assert.deepEqual([v.selected, v.sessions.length, v.notes.length], [s.experiment.id, 3, 1]);
+    const claim = v.drafts[0].items.find((i) => i.source_refs.length === 3);
+    assert.ok(claim, JSON.stringify(v.drafts));
+    const rows = claimSources(v, claim);
+    assert.deepEqual(rows.map((r) => r.state), ["ok", "ok", "ok"]);
+    assert.ok(rows.every((r) => /참가 세션/.test(r.label)));
+    // The draft's source is deleted through the panel's own action: it goes, and a planted draft citing it reads 확인 필요.
+    assert.equal((await session.delete(s.experiment.id, s.sessions[1])).ok, true);
+    const after = await session.view();
+    assert.ok(!after.drafts.some((d) => d.id === v.drafts[0].id), "the draft citing the deleted session is gone");
+    const planted = claimSources(after, { source_refs: [`session:${s.sessions[1]}`], sources: [{ ref: `session:${s.sessions[1]}`, state: await (await recordOf(f, s)).resolveEvidenceRef(s.experiment.id, `session:${s.sessions[1]}`) }] });
+    assert.deepEqual([planted[0].label, planted[0].state], ["확인 필요", "deleted"]);
+    // Switch off: the session reaches nothing; the routes answer as unknown.
+    f.setSwitch(false);
+    const off = await new EvidenceSession({ switchOn: () => false, token: async () => s.token, base: () => "https://service.test/v1/curriculum", fetchImpl, projectId: () => s.project.id }).view();
+    assert.equal(off.available, false);
+  } finally {
+    f.close();
+  }
+});
+
 // ── CR-T64 — deletion ────────────────────────────────────────────────────────
 
 await test("CR-T64: deleting a session or an experiment's test data removes events, notes and derived drafts with a receipt; another team gets 404 and nothing is removed", async () => {

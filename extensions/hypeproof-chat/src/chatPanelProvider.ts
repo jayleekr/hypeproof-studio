@@ -36,6 +36,7 @@ import {
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
 import { PublishSession } from "./publishSession";
+import { EvidenceSession } from "./evidenceSession";
 import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
@@ -736,6 +737,69 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const r = await this.publishSession.revoke(String(msg.linkId ?? ""));
     return this.postPublishState(r.ok ? {} : { error: r.message });
+  }
+
+  // ── Experiment evidence (cr-evidence, #1394) ──────────────────────────────
+  /** The evidence panel over the same Project the publish panel remembers; reads and writes go to the Service. */
+  private readonly evidenceSession = new EvidenceSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the evidence panel state (null hides it with the switch off). */
+  private async postEvidenceState(extra: { error?: string; done?: string } = {}, select?: string): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "evidenceState", view: await this.evidenceSession.view(select), ...extra });
+  }
+
+  /** CR-24–CR-27 — the "실험 증거 보기" command: re-checks the served switch, then opens the panel. */
+  async experimentEvidence(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 실험 증거를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postEvidenceState();
+  }
+
+  /** One evidence action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handleEvidenceMessage(
+    msg:
+      | { type: "evidenceOpen"; experimentId?: string }
+      | { type: "evidenceNote"; experimentId: string; note: import("./evidenceView").NoteForm }
+      | { type: "evidenceDraft"; experimentId: string }
+      | { type: "evidenceReview"; experimentId: string; draftId: string; revision: number; actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }> }
+      | { type: "evidenceDelete"; experimentId: string; sessionId?: string },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, error: "이 수업에서는 실험 증거를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "evidenceOpen") return this.postEvidenceState({}, msg.experimentId);
+    const exp = String(msg.experimentId ?? "");
+    if (msg.type === "evidenceNote") {
+      const r = await this.evidenceSession.addNote(exp, msg.note ?? ({} as import("./evidenceView").NoteForm));
+      return this.postEvidenceState(r.ok ? { done: "기록을 남겼어요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceDraft") {
+      const r = await this.evidenceSession.makeDraft(exp);
+      return this.postEvidenceState(r.ok ? { done: "기록에서 초안을 만들었어요. 읽어 보고 받아들이거나 고쳐 주세요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceReview") {
+      const r = await this.evidenceSession.review(exp, String(msg.draftId ?? ""), Number(msg.revision), Array.isArray(msg.actions) ? msg.actions : []);
+      return this.postEvidenceState(r.ok ? {} : { error: r.message });
+    }
+    // CR-69 — deleting participant records is the person's explicit act, behind a modal.
+    const what = msg.sessionId ? "이 참가 세션의 기록" : "이 실험의 참가 기록 · 메모 · 초안 전부";
+    const pick = await vscode.window.showWarningMessage(`${what}을 지울까요? 지운 기록은 되돌릴 수 없고, 그 기록을 근거로 쓴 초안도 함께 지워져요.`, { modal: true }, "지우기");
+    if (pick !== "지우기") return this.postEvidenceState();
+    const r = await this.evidenceSession.delete(exp, msg.sessionId ? String(msg.sessionId) : undefined);
+    return this.postEvidenceState(r.ok ? { done: "지웠어요. 지운 기록의 영수증이 남았어요." } : { error: r.message });
   }
 
   /** A coach call of a verify tool (both runtimes): the same session, the same answer (CR-03). */
@@ -3050,6 +3114,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "publishRevoke":
         // cr-publish — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
         await this.handlePublishMessage(msg);
+        break;
+      case "evidenceOpen":
+      case "evidenceNote":
+      case "evidenceDraft":
+      case "evidenceReview":
+      case "evidenceDelete":
+        // cr-evidence — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleEvidenceMessage(msg);
         break;
       case "clearHistory":
         void this.clearHistory();
