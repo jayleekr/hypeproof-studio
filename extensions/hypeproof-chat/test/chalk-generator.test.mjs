@@ -340,6 +340,12 @@ await check('T-G15 set_inputs raises revision; subsequent save_plan uses latest 
       res.end(JSON.stringify({ revision: currentRevision }));
       return;
     }
+    if (req.method === 'GET' && req.url?.includes('/knowledge/versions')) {
+      // resolveKnowledgeVersion fallback: return latest version
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ versions: [{ version: 1, parent_version: null, origin: 'test', source_repo: null, source_commit: null, note: '', created_by: 'test', created_at: 0, doc_count: 0, digest: '' }] }));
+      return;
+    }
     let b = '';
     req.on('data', c => b += c);
     req.on('end', () => {

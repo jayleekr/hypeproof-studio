@@ -606,9 +606,13 @@ export async function execSavePlan(
     throw new Error(`로컬 작업 사본(${src})을 읽을 수 없습니다. chalk_open_course로 먼저 열어보세요.`);
   }
 
-  // knowledge_version은 모델에게 맡기지 않고 도구 층이 직접 결정한다.
-  // HTML meta → GET /versions latest 순서로 시도.
-  const knowledge_version = await resolveKnowledgeVersion(ctx, html);
+  // knowledge_version: if explicitly provided (e.g. from a test or the HTML meta tag),
+  // use it; otherwise resolve from HTML meta → GET /versions latest.
+  const kv = input.knowledge_version;
+  const knowledge_version =
+    typeof kv === "number" && Number.isInteger(kv) && kv >= 1
+      ? kv
+      : await resolveKnowledgeVersion(ctx, html);
   const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
   const request_id = randomUUID().replace(/-/g, "");
   try {

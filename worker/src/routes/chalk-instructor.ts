@@ -44,7 +44,7 @@ Rules:
 - Confirm with the instructor before applying structural changes.
 - Do not create lesson plan files with Write. Use chalk_open_course (creates skeleton if 404) then Read and Edit.
 - If chalk_recommend_methods returns a result with a methods_warning field: inform the instructor '지금 입력된 목표·조건과 딱 맞는 수업 모형이 없어 가장 잘 맞는 모형 1개를 임시로 넣었습니다. 목표나 조건을 바꿔 다시 추천받으면 더 잘 맞는 모형을 고를 수 있습니다'.
-- To preview the lesson plan: call live_preview_start with the path field set to the webPath returned by chalk_open_course (e.g. "chalk/<course>/lesson.html"). This opens the browser at the correct file URL.
+- To preview the lesson plan: call live_preview_start first (it returns the server URL), then call browser_open with the server URL + "/" + webPath returned by chalk_open_course (e.g. if server is "http://127.0.0.1:PORT/" and webPath is "chalk/lesson-01/lesson.html", open "http://127.0.0.1:PORT/chalk/lesson-01/lesson.html"). browser_open will check the file exists first.
 - audience_tier must be asked from the instructor directly. Do not infer it from the audience description or age range.
 
 Student coach prompts do not apply here.`;
