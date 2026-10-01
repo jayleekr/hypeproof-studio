@@ -764,7 +764,7 @@
         "CR-84"
       ],
       "inline_prefixes": [],
-      "sha256": "e8938d83a629d97654f03f7330968dc18895613d6fb9ff7cad91b7a8b27a6b72",
+      "sha256": "52990af1bed3e94aedeb282d254aaaa152702006cf53a21909205c5e2328503e",
       "owner": "jayleekr",
       "intent": "docs/intents/curriculum-runtime.md",
       "design": "docs/plan/curriculum-runtime.md",
@@ -2883,8 +2883,6 @@
             "CR-09",
             "CR-10",
             "CR-11",
-            "CR-59",
-            "CR-60",
             "CR-68"
           ]
         }
@@ -2893,10 +2891,10 @@
         "cr-recon"
       ],
       "curriculum_week": "W1",
-      "next_action": "Behind the CR switch, extend BrowserControl.execute with select, scroll, hover and reload; buffer CDP console, exception and failed-request events per document generation; return URL, route, viewport and artifact version with every observation and expose them through browserMcp; add element selection that hands ref, DOM snippet, style, crop and source mapping to the coach; show the automation indicator while agent browser tools act; keep agent browser actions on the local preview origin (cr-verify extends CR-11 and CR-68 to the runner, cr-publish extends CR-11 to published test origins).",
+      "next_action": "Behind the CR switch, extend BrowserControl.execute with select, scroll, hover and reload; buffer CDP console, exception and failed-request events per document generation; return URL, route, viewport and artifact version with every observation and expose them through browserMcp; add element selection that hands ref, DOM snippet, style, crop and source mapping to the coach; show the automation indicator while agent browser tools act; keep agent browser actions on the local preview origin (cr-verify extends CR-11 and CR-68 to the runner, cr-publish extends CR-11 to published test origins). CR-10's artifact references ride on the tool_result event as Jay's decision 8 keys (BROWSER_RESULT_REF_KEYS), the screenshot and trace bytes go to the local record (LocalRecord.putBlob), and the command hypeproof-chat.browserResults reads them back labelled by version. CR-59 and CR-60 moved to cr-e2e (decision 9).",
       "design_delta": "Extend the existing CDP stack and MCP tools; no second browser-control framework. The upstream browserView agent tools are not driven and vscodium-base is not patched (docs/plan/curriculum-runtime-recon.md R1). Results bind to the artifact version that recon R4 defines: the digest of the published file set. AE-37 (#557) binds single-file artifact events, and each file keeps the sha256 those events carry.",
       "positive_control": "Existing browser smokes and 09-preview.spec.ts stay green with the switch off; the kiosk fixture five-step flow succeeds; a clean page reports zero console records. Agent browser actions on the live-server origin run, with the automation indicator shown during each browser-tool step and gone after it.",
-      "negative_control": "Stale refs after reload or navigation are rejected; a planted console error at step 3 is reported at step 3; an agent browser action navigating to an external origin is refused with a reason; an agent browser-tool step with no visible indicator fails; a CR surface visible with the switch off fails.",
+      "negative_control": "Stale refs after reload or navigation are rejected; a planted console error in flow step 3 is reported once, at the index of the agent action that raised it with the opening navigate counted (action 4 in the App flow), and a later request that does not navigate reads it as an earlier request's record, never at one of its own steps, while an error the student raises between requests stays a failure of the next request; an agent browser action navigating to an external origin is refused with a reason; an agent browser-tool step with no visible indicator fails; a CR surface visible with the switch off fails, except CR-02's listed delete command while the signed-in person has browser-result bytes stored, which must be hidden when they have none and must not reach another person's bytes.",
       "evidence_required": "Submitted SHA · gates run with exit codes · evidence that each control was red on the pre-implementation tree · the targeted CR-T results with evidence class (synthetic / captured-replay / live-host) · NOT RUN list. If there is no real-device run, say so. Timings name the machine and sample size. PRD §15 outputs for this slice: a manual demo procedure and the known limitations and risks.",
       "implementation_paths": [
         "extensions/hypeproof-chat/src/cdpSession.ts",
@@ -2925,7 +2923,14 @@
         "worker/src/lib/moderation.ts",
         "worker/src/prompts/_curriculum-runtime-browser-contract.md",
         "worker/scripts/cohort-harness/validate.py",
-        "worker/scripts/cohort-harness/rules.yaml"
+        "worker/scripts/cohort-harness/rules.yaml",
+        "worker/src/lib/measurement-core/learning-events.ts",
+        "worker/src/lib/measurement-core/legacy-observation.ts",
+        "worker/src/lib/measurement-core/local-record.ts",
+        "extensions/hypeproof-chat/src/localRecordFile.ts",
+        "extensions/hypeproof-chat/src/localReviewPanel.ts",
+        "extensions/hypeproof-chat/src/nativeObservationRecorder.ts",
+        "e2e/fixtures/app.ts"
       ],
       "verification_inputs": [
         "docs/requirements/curriculum-runtime.md",
@@ -2945,7 +2950,15 @@
         "worker/scripts/cohort-harness/test/fixtures/teen-cr.json",
         "worker/test/cr-switch.test.mjs",
         "e2e/curriculum-runtime/experiment-browser.real.mjs",
-        "e2e/curriculum-runtime/fixtures/kiosk-practice"
+        "e2e/curriculum-runtime/fixtures/kiosk-practice",
+        "worker/test/cr-browser-refs.test.mjs",
+        "e2e/curriculum-runtime/app-layer.spec.ts",
+        "e2e/curriculum-runtime/app-service.mjs",
+        "e2e/curriculum-runtime/playwright.config.ts",
+        "e2e/tests/09-preview.spec.ts",
+        "extensions/hypeproof-chat/test/local-record-file.smoke.mjs",
+        "worker/test/measurement-core-local-record.test.mjs",
+        "e2e/fixtures/app.ts"
       ]
     },
     {
@@ -3345,6 +3358,8 @@
           "path": "docs/requirements/curriculum-runtime.md",
           "ids": [
             "CR-02",
+            "CR-59",
+            "CR-60",
             "CR-71"
           ]
         }
@@ -3354,11 +3369,11 @@
         "cr-gateway"
       ],
       "curriculum_week": "W1",
-      "next_action": "Script the fifteen PRD §14 steps (the §14 procedure in docs/testing/curriculum-runtime.md) on the kiosk-practice app under e2e/classroom, run it on the dev host, then run it once live on a real Mac with a real phone and record the evidence file.",
+      "next_action": "Script the fifteen PRD §14 steps (the §14 procedure in docs/testing/curriculum-runtime.md) on the kiosk-practice app under e2e/classroom, run it on the dev host, then run it once live on a real Mac with a real phone and record the evidence file. Measure CR-59 (preview refresh after save, CR-T55) and CR-60 (element capture to context, CR-T56) in the Studio app on this Mac, 30 samples each, with the screen unlocked (Jay's decision 9, 2026-10-01: moved here from cr-browser).",
       "design_delta": "Uses only shipped CR behaviour behind the switch; no test-only shortcuts in product code. Each step reads the previous step's record. The existing preview and HTML regressions are re-run with the switch off, and CR-T02 walks the whole switch-off inventory the earlier items built.",
-      "positive_control": "All fifteen steps pass on the dev host; the live run completes with a real phone; the switch-off regressions stay green. With the switch off, CR-T02 walks the full switch-off inventory from every item and finds every entry unreachable.",
-      "negative_control": "A planted break between steps 8 and 10 stops the loop at step 10; a live-run step satisfied only by synthetic data is NOT RUN, not PASS. Any inventory entry reachable with the switch off fails.",
-      "evidence_required": "Submitted SHA · app build and machine · phone model and browser · per-step result with evidence class · the live-host run recorded in docs/testing/curriculum-runtime-<date>-evidence.md · NOT RUN list.",
+      "positive_control": "All fifteen steps pass on the dev host; the live run completes with a real phone; the switch-off regressions stay green. With the switch off, CR-T02 walks the full switch-off inventory from every item and finds every entry unreachable. In the Studio app on the reference Mac, preview refresh after save has p50 under 2 s (CR-T55) and element capture to context p50 under 1 s (CR-T56), 30 samples each.",
+      "negative_control": "A planted break between steps 8 and 10 stops the loop at step 10; a live-run step satisfied only by synthetic data is NOT RUN, not PASS. Any inventory entry reachable with the switch off fails. A planted 3 s delay in the refresh path, and a full-page screenshot planted in place of the element crop, are each reported as a miss.",
+      "evidence_required": "Submitted SHA · app build and machine · phone model and browser · per-step result with evidence class · the live-host run recorded in docs/testing/curriculum-runtime-<date>-evidence.md · CR-T55 and CR-T56 timings from the Studio app on the reference Mac (machine, app build, sample size, p50) with their planted-delay controls · NOT RUN list.",
       "implementation_paths": [
         "e2e/classroom",
         "e2e/tests",

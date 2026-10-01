@@ -10,8 +10,17 @@
 // tool, webview message and Worker route. Each later `cr-*` item appends its own
 // surfaces here, and `test/cr-switch.smoke.mjs` walks the whole list with the switch off
 // and on. A surface that is not listed is not checked, so listing is not optional.
+//
+// One exception is listed too, under `switchOffWhileStored` (CR-02's carve-out, MC-27 and
+// Jay's decision 6 "a delete action exists"): the command that deletes the browser-result
+// bytes an earlier switch-on stored stays reachable with the switch off while the signed-in
+// person has bytes stored, and is hidden when they have none. It shows nothing of the
+// results, only a count. `manifestStoredOnlyProblems` checks it is gated on exactly that.
 
 export const CR_CONTEXT_KEY = "hypeproof-chat.curriculumRuntimeEnabled";
+
+/** Context key: the signed-in person has browser-result bytes stored (CR-10). Never the CR switch. */
+export const CR_BYTES_CONTEXT_KEY = "hypeproof-chat.crBrowserBytesStored";
 
 /** The five Experiment Browser tool names shared by both coach runtimes (CR-04, CR-06). */
 export const CR_BROWSER_TOOL_NAMES = [
@@ -59,14 +68,20 @@ export interface CrSurfaceInventory {
   webviewMessages: readonly string[];
   /** Worker routes as `METHOD /path`. `cr-browser` adds none. */
   workerRoutes: readonly string[];
+  /**
+   * The allowed exception: commands that delete what an earlier switch-on stored. Shown
+   * (switch on or off) only while CR_BYTES_CONTEXT_KEY is true, hidden otherwise.
+   */
+  switchOffWhileStored: readonly string[];
 }
 
 export const CR_SURFACES: CrSurfaceInventory = {
-  commands: ["hypeproof-chat.pickElement"],
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"],
   mcpTools: CR_BROWSER_TOOL_NAMES.map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES],
   webviewMessages: ["removeElementContext"],
   workerRoutes: [],
+  switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };
 
 interface ManifestCommand {
@@ -119,6 +134,37 @@ export function manifestSwitchProblems(
     for (const [menu, items] of Object.entries(menus)) {
       for (const item of items ?? []) {
         if (item.command === id && !requiresKey(item.when)) problems.push(`${id}: ${menu} entry is visible with the switch off`);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Which `switchOffWhileStored` commands are not gated on exactly "bytes are stored": the
+ * enablement and every menu entry (an explicit palette entry included) must be
+ * CR_BYTES_CONTEXT_KEY alone, so the command is hidden when nothing is stored and never
+ * shown by anything else. Empty means every one is gated.
+ */
+export function manifestStoredOnlyProblems(
+  manifest: ExtensionManifestLike,
+  commands: readonly string[] = CR_SURFACES.switchOffWhileStored,
+): string[] {
+  const problems: string[] = [];
+  const exact = (expr: string | undefined) => expr?.trim() === CR_BYTES_CONTEXT_KEY;
+  const declared = manifest.contributes?.commands ?? [];
+  const menus = manifest.contributes?.menus ?? {};
+  for (const id of commands) {
+    const cmd = declared.find((c) => c.command === id);
+    if (!cmd) {
+      problems.push(`${id}: not declared`);
+      continue;
+    }
+    if (!exact(cmd.enablement)) problems.push(`${id}: enablement is not ${CR_BYTES_CONTEXT_KEY}`);
+    if (!(menus.commandPalette ?? []).some((m) => m.command === id)) problems.push(`${id}: no commandPalette entry, so the palette shows it`);
+    for (const [menu, items] of Object.entries(menus)) {
+      for (const item of items ?? []) {
+        if (item.command === id && !exact(item.when)) problems.push(`${id}: ${menu} entry is not gated on ${CR_BYTES_CONTEXT_KEY}`);
       }
     }
   }

@@ -24,7 +24,7 @@ registerHooks({
   },
 });
 
-const { CR_SURFACES, CR_CONTEXT_KEY, manifestSwitchProblems, isCurriculumRuntimeEnabled } = await import("../src/curriculumRuntime.ts");
+const { CR_SURFACES, CR_CONTEXT_KEY, CR_BYTES_CONTEXT_KEY, manifestSwitchProblems, manifestStoredOnlyProblems, isCurriculumRuntimeEnabled } = await import("../src/curriculumRuntime.ts");
 const { permittedMcpToolsFor } = await import("../src/sdkCoachHelpers.ts");
 const { buildHypeproofMcpServer, MCP_BROWSER_TOOLS } = await import("../src/browserMcp.ts");
 const { BrowserControl } = await import("../src/browserControl.ts");
@@ -62,7 +62,28 @@ assert.ok(plant((m) => (cmd(m).command = "hypeproof-chat.renamed")).some((p) => 
 ok("commands: the manifest gates every inventoried CR command; planted ungated variants are caught");
 // Every command handler re-checks the served switch (a command runs without its menu).
 assert.match(providerSrc, /async pickElement\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
-ok("commands: the pickElement handler re-checks the served switch before anything else");
+assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
+assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"], "both CR commands are in the inventory the manifest check walks");
+ok("commands: the pickElement and browserResults handlers re-check the served switch before anything else");
+
+// ── the listed exception: delete-only, shown only while the person has bytes stored ──
+assert.deepEqual(CR_SURFACES.switchOffWhileStored, ["hypeproof-chat.clearBrowserResultBytes"], "the delete command is in the inventory as the one allowed exception");
+assert.deepEqual(manifestStoredOnlyProblems(manifest), [], "gated on exactly 'bytes are stored', never on anything else");
+for (const id of CR_SURFACES.switchOffWhileStored) assert.ok(!CR_SURFACES.commands.includes(id), "not also listed as a switch-gated command");
+const plantStored = (fn) => { const m = structuredClone(manifest); fn(m); return manifestStoredOnlyProblems(m); };
+const clearCmd = (m) => m.contributes.commands.find((c) => c.command === "hypeproof-chat.clearBrowserResultBytes");
+assert.ok(plantStored((m) => delete clearCmd(m).enablement).some((p) => /enablement/.test(p)), "an always-enabled delete command is caught");
+assert.ok(plantStored((m) => (clearCmd(m).enablement = `${CR_BYTES_CONTEXT_KEY} || true`)).some((p) => /enablement/.test(p)));
+assert.ok(plantStored((m) => (m.contributes.menus.commandPalette = m.contributes.menus.commandPalette.filter((x) => x.command !== "hypeproof-chat.clearBrowserResultBytes"))).some((p) => /palette/.test(p)), "no palette entry = always in the palette");
+assert.ok(plantStored((m) => (m.contributes.menus.commandPalette.find((x) => x.command === "hypeproof-chat.clearBrowserResultBytes").when = "true")).some((p) => /commandPalette/.test(p)));
+// The key is false when the signed-in person has nothing stored: it reads only the owners
+// list, and an owner is in it only after a store and until a count of 0.
+const wiring = await import("../src/crHostWiring.ts");
+assert.deepEqual(wiring.crBytesOwnersAfter(undefined, "o-a", false), []);
+assert.deepEqual(wiring.crBytesOwnersAfter(["o-b"], "o-a", true), ["o-b", "o-a"]);
+assert.deepEqual(wiring.crBytesOwnersAfter(["o-b", "o-a"], "o-a", false), ["o-b"]);
+assert.match(providerSrc, /const flagged = !!owner && Array\.isArray\(list\) && list\.includes\(owner\);\s*void vscode\.commands\.executeCommand\("setContext", CR_BYTES_CONTEXT_KEY, flagged\);/);
+ok("commands: the delete command is the listed switch-off exception, gated on exactly 'bytes are stored'; planted variants are caught");
 
 // ── MCP tools: granted and registered only with the switch on ───────────────
 const adult = { game: { template_tier: "website" }, sdk_tools: { browser: true }, minor_cohort: false };
@@ -133,6 +154,43 @@ ok("glue: the context key mirrors the switch and the SDK server registers CR too
     assert.match(r.content[0].text, /열린 브라우저 탭이 없어요/, "and answered by the CR executor");
   }
   ok("proxy tools: unknown with the switch off, routed to the CR executor with it on (read per call)");
+  // The executor's own navigation pins the tab (setTargetTab), which drops the control's
+  // executor; the one that navigated keeps its place, so the refs it adopts after the
+  // navigation are there for the next step (in-app CR-T07, 2026-10-01).
+  {
+    const ex = control.crExecutor();
+    const tabB = { url: "http://127.0.0.1:5173/index.html" };
+    control.openOrNavigate = async () => control.setTargetTab(tabB);
+    await ex.port.navigate("http://127.0.0.1:5173/index.html");
+    assert.equal(control.crExecutor(), ex, "the navigating executor is still the control's");
+    control.setTargetTab(undefined);
+    assert.notEqual(control.crExecutor(), ex, "control: a tab change from anywhere else still drops it");
+    delete control.openOrNavigate;
+  }
+  ok("CR executor: its own navigation keeps it (and its refs); another tab change drops it");
+  // With the switch on, navigating to the origin an open tab already shows drives that tab
+  // (the student's preview) instead of opening a second, same-titled one (in-app CR-T09).
+  {
+    const sent = [];
+    const preview = { url: "http://127.0.0.1:5173/", title: "키오스크 연습" };
+    vscode.window.browserTabs = [preview];
+    vscode.window.activeBrowserTab = undefined;
+    control.setTargetTab(undefined);
+    control.cdp = async () => ({ send: async (m, p) => { sent.push([m, p?.url]); return {}; } });
+    control.waitLoad = async () => {};
+    await control.openOrNavigate("http://127.0.0.1:5173/index.html"); // the stub's openBrowserTab throws
+    assert.equal(control.currentTab(), preview, "the open preview tab is driven");
+    assert.deepEqual(sent, [["Page.navigate", "http://127.0.0.1:5173/index.html"]]);
+    enabled = false;
+    control.setTargetTab(undefined);
+    await assert.rejects(control.openOrNavigate("http://127.0.0.1:5173/index.html"), /openBrowserTab not scripted/, "control: switch off keeps the pre-CR behaviour (a new tab)");
+    enabled = true;
+    delete control.cdp;
+    delete control.waitLoad;
+    vscode.window.browserTabs = [];
+    control.setTargetTab(undefined);
+  }
+  ok("CR navigate: an open tab on the same origin is driven, not duplicated; switch off unchanged");
   // pickElement on its own refuses a tab that is not the student's preview, before any CDP.
   vscode.window.activeBrowserTab = { url: "https://example.com/", startCDPSession: async () => { throw new Error("no CDP may be opened"); } };
   await assert.rejects(control.pickElement({ root: null }), /범위 밖이라 거절/);

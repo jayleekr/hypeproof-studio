@@ -2,7 +2,7 @@
 
 Status: run record, 2026-09-30. Item `cr-browser`, epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388). Row definitions: [curriculum-runtime.md](curriculum-runtime.md). No row here is a completion; completion needs the ledger record and a reviewer other than the implementer (plan, "What done means").
 
-No real-device run was made: no Studio app run with this branch reached a CR surface, no reference-Mac timing, no phone.
+No real-device run was made: no Studio app run with this branch reached a CR surface, no reference-Mac timing, no phone. (Until 2026-10-01: the section "Finish" records the in-app runs and supersedes the requirement status and NOT RUN list of the sections before it.)
 
 ## What was run
 
@@ -33,19 +33,19 @@ No real-device run was made: no Studio app run with this branch reached a CR sur
 
 | Row | Layer run | Class | Result | What it leaves |
 |---|---|---|---|---|
-| CR-T02 | Worker half `worker/test/cr-switch.test.mjs`; App unit half `test/cr-switch.smoke.mjs` (context-key value and SDK registration decision included); in-app `09-preview.spec.ts` | synthetic | Worker half PASS, App unit half PASS; **in-app BLOCKED**: the positive control (`09-preview.spec.ts`, switch off) is red on the pre-change build too (below) | in-app walk with the switch on (needs a CR-enabled local cohort) |
+| CR-T02 | Worker half `worker/test/cr-switch.test.mjs`; App unit half `test/cr-switch.smoke.mjs` (context-key value and SDK registration decision included); in-app `09-preview.spec.ts` | synthetic; live-host (finish) | Worker half PASS, App unit half PASS; in-app: BLOCKED on 2026-09-30 (F1, below), then **PASS in the finish** (`app-layer.spec.ts`, switch on and off, and from round 3 the delete exception's lifecycle) | the HTML generation specs with the switch off were **NOT RUN** (left to `cr-e2e`'s full switch-off walk) |
 | CR-T03 | `test/cr-provider-neutral.smoke.mjs` | synthetic | PASS (modules incl. `crHostWiring.ts` scanned; 5-call parity SDK vs proxy; an external origin refused with the same text by both runtimes) | verify-runner module (`cr-verify`) |
 | CR-T04 | `test/experiment-browser.smoke.mjs`; real Chromium | synthetic | PASS (round 3: URL, route, viewport, document generation and artifact version checked in the text the model receives on both runtimes; round 2: every part of one observation comes from one document; a commit during the tree read re-observes it whole; real Chromium, 30 redirects landing 2–12 ms into the observation, no mixed result) | Studio app run |
 | CR-T05 | `test/experiment-browser.smoke.mjs`; real Chromium | synthetic | PASS (3 records planted, 0 clean, previous document kept apart, SSE reload = new document; log attached after load: the load-time 404 of `typo.html` recovered, a clean late-attached page reads "확인된 것 없음", never "없음"; an id-less Log entry right after a commit is not put on the new document) | Studio app run |
 | CR-T06 | `test/experiment-browser.smoke.mjs`; real Chromium | synthetic | PASS | Studio app run |
-| CR-T07 | real Chromium, scripted agent over CR-06 actions, kiosk fixture | synthetic | PASS (5 steps; planted disabled step 4 → failure at 4) | **Playwright e2e in the app NOT RUN** |
-| CR-T08 | unit half in the smoke; real Chromium | synthetic | PASS (round 3: the verdict reads the text the model receives, `toMcpToolResult` / `toProxyToolResult`, not the `observation` side field; planted error at step 3 reported once at 3; clean flow none, also with `console.log`/`console.info` on every step; an error the student causes between agent steps carries step `null`) | **Playwright e2e in the app NOT RUN** |
-| CR-T09 | `test/element-pick.smoke.mjs`, `test/element-preview.smoke.mjs` (real ChatPanel render); `test/cr-host.smoke.mjs` (queue, send, remove); real Chromium incl. an inspect-mode click | synthetic | PASS (ref = snapshot ref, snippet, style subset, element crop, `index.html:23`; script-generated → `unmapped`, also a script-made clone sharing `#begin`'s text; removed → the next turn carries no element text or crop; sent text = previewed `sentText`; the crop joins a queued page screenshot) | **in-app pick NOT RUN**; F8 unresolved |
-| CR-T10 | `test/artifact-version.smoke.mjs` (helpers); `test/cr-host.smoke.mjs` (the recording module the provider calls) | synthetic | helper level PASS (v0 result stored on `LocalRecord`, readable and labelled v0 after v1; no version → refused). Host level: one proxy call, one SDK tool_result and one pick each produce an `hps-browser-result/1` tool_result event through `crHostWiring.ts`; the provider's calls into it are checked by source match, **not by driving `ChatPanelProvider`** | an in-app run that reads the record back |
+| CR-T07 | real Chromium, scripted agent over CR-06 actions, kiosk fixture | synthetic | PASS (5 steps; planted disabled step 4 → failure at 4); **in-app PASS in the finish** (live-host App, synthetic agent) | a real model |
+| CR-T08 | unit half in the smoke; real Chromium | synthetic | PASS (round 3: the verdict reads the text the model receives, `toMcpToolResult` / `toProxyToolResult`, not the `observation` side field; planted error at step 3 reported once at 3; clean flow none, also with `console.log`/`console.info` on every step; an error the student causes between agent steps carries step `null`; round 3 of the finish: also between requests, it stays a failure of the next request); **in-app PASS in the finish**, across requests from finish round 2 | a real model |
+| CR-T09 | `test/element-pick.smoke.mjs`, `test/element-preview.smoke.mjs` (real ChatPanel render); `test/cr-host.smoke.mjs` (queue, send, remove); real Chromium incl. an inspect-mode click | synthetic | PASS (ref = snapshot ref, snippet, style subset, element crop, `index.html:23`; script-generated → `unmapped`, also a script-made clone sharing `#begin`'s text; removed → the next turn carries no element text or crop; sent text = previewed `sentText`; the crop joins a queued page screenshot) | in-app pick **PASS in the finish**; F8 not measured separately |
+| CR-T10 | `test/artifact-version.smoke.mjs` (helpers); `test/cr-host.smoke.mjs` (the recording module the provider calls) | synthetic | helper level PASS (v0 result stored on `LocalRecord`, readable and labelled v0 after v1; no version → refused). Host level: one proxy call, one SDK tool_result and one pick each produce an `hps-browser-result/1` tool_result event through `crHostWiring.ts`; the provider's calls into it are checked by source match, **not by driving `ChatPanelProvider`** | in-app read-back **PASS in the finish** |
 | CR-T11 | smoke; `test/cr-host.smoke.mjs`; real Chromium | synthetic | `cr-browser` cases PASS: live-server origin runs; external, `file://`, other port, external history entry refused before any CDP call; **indirect escapes** (a link click, a script setting `location`, a form submit, the other origin's paths colliding with `index.html`) refused, nothing observed or recorded, tab back on the preview; the viewport wrapper `/__hp_viewport` refused with a reason; **SDK runtime**: `browser_open` to another origin refused before any tab call (and denied in `canUseTool`, no modal), `browser_screenshot` returns the CR refusal instead of falling back; **round 2**: a target=_blank link and `window.open` off scope are refused and the new window closed; a location change 600 ms after the step returned, and a redirect 600 ms after `browser_navigate` returned, are stopped with the tab kept on the preview and refuse the next call; `browser_navigate` to a page that redirects out 20 ms after load is refused and the tab taken back | runner cases (`cr-verify`), published-origin cases (`cr-publish`); the `canUseTool` denial is not driven by a test (`sdkCoach.ts` needs the SDK) |
 | CR-T55 | real Chromium: a fixture copy served by `serveStatic` + live-reload, a file watcher with LiveServer's 150 ms debounce, SSE push; file write → new document at `readyState` complete, n=30 | synthetic | p50 353 / 346.5 / 346.5 ms (3 runs, n=30 each, M3 Pro); control: a planted 3 s delay before the push is reported as a miss (p50 3336 ms, n=3) | **reference-Mac app run NOT RUN** (the Electron watcher and the integrated browser are not in the synthetic path) |
 | CR-T56 | unit controls in `element-pick.smoke.mjs`; real Chromium n=30 | synthetic | controls PASS; real Chromium p50 17 / 17 / 25 ms (3 runs, n=30 each, M3 Pro) | **reference-Mac app run NOT RUN**; recon F8 measured 2.0–3.0 s crops on the `origin/main` build in the app |
-| CR-T63 | unit half in the smoke (round 2: every executor tool, `browser_navigate`, back and forward included; `Page.navigate` and `Page.navigateToHistoryEntry` count as actions); real Chromium (outline visible mid-step for a hover and a `browser_navigate` step, evidence screenshot clean, gone after) | synthetic | `cr-browser` case PASS | **Playwright in the app NOT RUN**; runner case (`cr-verify`) |
+| CR-T63 | unit half in the smoke (round 2: every executor tool, `browser_navigate`, back and forward included; `Page.navigate` and `Page.navigateToHistoryEntry` count as actions); real Chromium (outline visible mid-step for a hover and a `browser_navigate` step, evidence screenshot clean, gone after) | synthetic | `cr-browser` case PASS; **in-app PASS in the finish** | runner case (`cr-verify`) |
 
 ### `09-preview.spec.ts` baseline (switch off)
 
@@ -93,7 +93,7 @@ The real-Chromium run found three instrument errors before any product verdict, 
 | **CR-59** (preview refresh p50 < 2 s) | **not met, not claimed.** Synthetic CR-T55 only (p50 347–353 ms, headless Chromium with Studio's serving code); the app run on the reference Mac is NOT RUN, and this branch changes nothing on the refresh path |
 | **CR-60** (element capture < 1 s) | **not met, not claimed.** Only the headless-Chromium p50 exists; recon F8 measured 2.0–3.0 s crops in the app on `origin/main`, which is evidence against the target there |
 
-The ledger keeps CR-59 and CR-60 on this item's scope (the plan assigns them here); they stay open until CR-T55 and CR-T56 run in the app on the reference Mac. Moving them to a follow-up item needs Jay's consent and was not done.
+The ledger keeps CR-59 and CR-60 on this item's scope (the plan assigns them here); they stay open until CR-T55 and CR-T56 run in the app on the reference Mac. Moving them to a follow-up item needs Jay's consent and was not done. (Superseded 2026-10-01: Jay moved both to `cr-e2e`, decision 9; see "Finish" below.)
 
 **Claim for the PR and the ledger.** No requirement of this item is complete. The PR refers to #1391 and does not close it; no `completion` record is written for `cr-browser` until the app-layer rows run and the stored-schema decision is made.
 
@@ -192,11 +192,172 @@ Planted defects, one at a time (scratch runner; the real run for the model-text 
 
 The first full `worker npm test` of round 3 exited 0. On the round-2 tree a reviewer saw one exit 1 from `classroom-ops-delivery.test.mjs` (AT-31: the substring `4821` can occur in a random hex digest); it passed on rerun and is unrelated to this branch, which touches no classroom file.
 
+## Finish (2026-10-01, `feat/cr-browser-finish`)
+
+Two decisions by Jay on 2026-10-01 unblocked the rest: decision 8 allows additive optional keys on `hps-observation/1`, decision 9 moves CR-59 and CR-60 to `cr-e2e`.
+
+- Commits (branch SHAs, pre-squash: after the squash merge they are not reachable from `main`; the record-only PR names the squash commit as the evidence SHA): `b95f28ab` (CR-10 persistence), `d605e440` (09-preview measures the path the cohort takes, recon F1), `62045bb2` (three in-app defects), `d3de6f5a` (in-app spec), `fc9602b6` (ledger), then this record.
+- Machine: Apple M3 Pro, macOS 15.7.4, screen unlocked, Node 22.22.1. App: a scratch copy of HypeProof Studio 0.1.51 (`d4db9049`) with the extension and webview built from `fc9602b6` injected (`e2e/classroom/mac-devhost.mjs reinject`, 4 bundle hashes match), marked `LSUIElement` so it never activates. Every app run went through the e2e fixture's quiet mode (off-screen, shown inactive, not focusable, in-memory secret storage) and started only after 5 minutes without keyboard or mouse input.
+- Evidence classes (MC-38): **live-host** for the App (the integrated browser, the App's proxy loop, the local record, the command palette); **synthetic** for the account, the session and the model (`e2e/curriculum-runtime/app-service.mjs`: the real Service router over HTTP, a scripted agent as the provider). The rows below prove transport, enforcement and browser behaviour in the App, never a real model's judgement.
+
+### CR-10 under decision 8
+
+Browser results are `tool_result` events tagged `hps-browser-result/1` with the optional keys `artifact_version`, `screenshot_digest` and `trace_digest` (`BROWSER_RESULT_REF_KEYS`). `legacy-observation.ts` accepts them only on a `tool_result`, as sha256 digests, and byte digests only next to the version; records without them read unchanged. The bytes are `blobs/` entries of the same local record (`LocalRecord.putBlob`), and a digest is named only after its bytes were read back. `hypeproof-chat.browserResults` (behind the switch) reads the stored results back and labels each "현재 버전", "이전 버전" or "버전 확인 안 됨". Assessment uploads leave the keys out (`assessmentBatch`), so a Service deployed before decision 8 does not refuse a batch. Unit and D1-free tests: `worker/test/cr-browser-refs.test.mjs`, `extensions/hypeproof-chat/test/cr-host.smoke.mjs`.
+
+### In-app rows (`e2e/curriculum-runtime/app-layer.spec.ts`)
+
+Four consecutive gated runs at the final tree (11:47–11:50), each `2 passed`. (A reviewer then saw 2 failures in 4 runs of the same tree: a follow-up message that never left the composer. Superseded by "Finish review round 1", which measures the pass rate over 5 runs with a `send()` that proves each message left.)
+
+| Row | Positive | Negative control (in the same run) |
+|---|---|---|
+| CR-T02 (in-app) | switch on: `browser_observe`, `browser_select`, `browser_scroll`, `browser_hover`, `browser_reload` offered; both CR commands in the palette | switch off: none of the five tools and neither command; the existing `browser_navigate` and "HTML 미리보기" still found (instrument control) |
+| CR-T07 | five steps reach "주문이 완료되었어요" | planted disabled step 4 stops at 4 |
+| CR-T08 | planted console error reported once, at action 4 (flow step 3; the opening navigate is action 1; the CR-T08 row now states this definition) | clean and chatty (`console.log`/`info`) flows report none |
+| CR-T63 | orange outline in 36 of 93 frames sampled during the flow; a tool line was `running` during a step | the last 5 frames after the flow carry no outline; no running tool line after |
+| CR-T09 | pick of "주문 시작": chip `index.html:23`, crop attached, the next request starts with exactly the previewed text and carries the image; the pick did not press the button | a script-made element reads "소스 위치: 찾지 못함"; a removed element sends nothing and no image |
+| CR-T10 (app) | results read back as "현재 버전 · sha256:04cdec9f…"; 32 `blobs/` entries on the local record | after `index.html` changes the same results read "이전 버전" and none "현재 버전" |
+
+The first gated run (11:45) hid the app after the workbench was ready (`app.hide()`), and every observation failed with `CDP Page.captureScreenshot timed out`: a hidden app's integrated browser paints no frames, like a locked screen (F7). The CR config now sets `HPS_QUIET_NO_HIDE=1`; the window stays off-screen and unfocusable. That run is also the instrument's control: no painting turns CR-T07 red at step 1.
+
+The three product defects the earlier, visible in-app runs found are fixed in `62045bb2`, each with a smoke whose planted revert turns it red (scratch mutation run): the navigating executor kept by the control (`cr-switch`), a same-origin tab driven instead of duplicated (`cr-switch`), step numbers restarting per turn (`experiment-browser`, `cr-host`).
+
+### F1 (09-preview)
+
+`e2e/tests/09-preview.spec.ts` on the same app copy, gated and quiet, against `scripts/dev-stack.sh`: 3 passed, exercising REQ-D1 (live path), REQ-D4 and REQ-D5; REQ-D3/D6 were not exercised (the dev stack serves no webview cohort, and on the live path the test returns before those checks). Its planted control (a canned turn without HTML fails both checks with "no preview opened") is in `d605e440`.
+
+### Gates at the final code (exit codes)
+
+`packages/measurement` test 0 · `worker` test 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `worker` typecheck 0 · `chalk` test 0 · `chalk` typecheck 0 · `validate-profiles` 0 · cohort-harness self-test 0 · extension typecheck 0 · extension `npm test` 0 · installer smokes 0 · `cr-traceability.test.mjs` 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
+
+### Requirement status at the finish
+
+| Requirement | Status |
+|---|---|
+| CR-02, CR-07, CR-08, CR-09, CR-68 | in-app rows above pass with their controls (CR-68 through CR-T63). CR-08's cross-request rule ("an earlier request's error is never reported at a step of the current request") was covered only by the `experiment-browser` smoke until finish review round 2, which added it to the in-app run |
+| CR-03, CR-04, CR-05, CR-06, CR-11 | synthetic rows (real Chromium) as before; exercised in the App by the CR-T07 flow |
+| CR-10 | persisted as artifact references with version and stored bytes, read back and labelled by version in the product; unit and in-app rows pass |
+| CR-59, CR-60 | moved to `cr-e2e` (decision 9); not claimed here |
+
+**Claim for the PR.** Every requirement `cr-browser` owns after decision 9 has evidence at the layer its row names; the PR can close #1391. The completion record is written by the record-only PR after merge, with a reviewer other than the implementer.
+
+## Finish review round 1 (2026-10-01)
+
+Fixes for the review of `b306e646`, in one commit after merging `origin/main` (`dda50ad7`, the idle gate).
+
+- **CR-10 bytes have an owner and a lifecycle.** They no longer count against the local review's MC-35 limit; they have their own bound (`DEFAULT_BLOB_MAX_BYTES`, 64 MB, oldest removed first, age kept in `blob-order/` keys so no screenshot is read to find it). `deleteTask` removes the bytes the task's observations name (`removed.browser_result_bytes`; corrected in round 2: true only for local-record observations that carry digests, and no App path writes such observations today, so this is not a delete path the student has), and `DELETE_NOT_COVERED` names the rest (`browser_result_bytes_not_named_by_the_task`). `deleteBlobs` deletes all or named bytes; the results command lists "저장된 화면·동작 기록 지우기" with a count and a confirmation. `records()` reports `browser_results` (count, bytes, bound).
+- **No bytes without the event that names them.** The proxy and pick paths get a sink only when the turn has a recorder; the SDK path stores nothing at inspect time and only stores when the matching `tool_result` is recorded.
+- **Write cost.** One lock per result (screenshot and trace together). `FileRecordStorage` keeps what it has read per file and re-reads only files whose size or mtime changed, so a lock no longer re-reads every screenshot. Two writers in one extension host wait for each other instead of the second failing `storage_busy`; a call made from inside a held lock still fails closed. Measured with 150 KB images through `exclusive(putBlob)`, one process: 48 ms at 0 stored, 35–51 ms from 50 to 450 stored (was 35 ms → 421 ms at 400), bound reached at 335 blobs (67 MB) with review usage 0.
+- **CR-08 across requests.** `CrExecutor.newTurn()` also starts a new request in the event logs: records captured before it lose their step and read "이전 요청", and `failuresOf` skips them. Smoke: turn 1 error at step 3, turn 2 clicks without navigating; turn 2 reports no failure and the line reads "이전 요청 turn1-step3-error". Planted revert (`turn++` removed): RED with "단계 3 turn1-step3-error".
+- **CR-T08 numbering.** The row now defines the step as the Nth agent action of the request, the opening navigate counted; the in-app spec asserts step 4 directly. The scripted agent's answer names flow steps only ("3단계 planted-step3-error", "4단계에서 멈췄어요"), so its two numbers no longer disagree.
+- **In-app send.** `send()` waits for the idle composer and fails at once, with the composer's state, if the student's bubble does not appear in 15 s.
+
+Gates at the fix commit (exit codes): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 (first run 1: `local-review-recovery` nests a lock call inside a held lock, which the new in-process chain made wait; fixed to fail closed as before, then 0) · `webview-ui` tsc 0 · `e2e` real Chromium 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
+
+Planted defects, one at a time (scratch runner):
+
+| Planted defect | Test | Result |
+|---|---|---|
+| review usage counts browser-result bytes | cr-browser-refs (port-count variant) | RED (the first run survived: the test port had no `usageBytes`; the test now runs on both port kinds) |
+| no eviction of the oldest bytes | cr-browser-refs | RED |
+| `deleteTask` leaves the bytes its observations name | cr-browser-refs | RED |
+| `records()` hides stored bytes | cr-browser-refs | RED |
+| `deleteBlobs` ignores the named digests | cr-browser-refs | RED |
+| SDK result stores its bytes at inspect time | cr-host | RED (after the check waits for pending writes) |
+| provider passes the sink without a recorder | cr-host | RED |
+| one lock per blob instead of per result | cr-host | RED |
+| same-process writers fail `storage_busy` | local-record-file | RED |
+| earlier-request records keep their step | experiment-browser | RED |
+| failure rule counts earlier-request records | experiment-browser | RED |
+| malformed version accepted by `browserResultParts` | cr-host | GREEN: `browserResultEventText` refuses the same id before any byte reaches the sink, so the refusal and "no sink call" hold either way; the check is defence in depth |
+
+In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with the fix build injected (4 bundle hashes match), `scripts/prep-test-app.sh`, `GATE=idle HPS_APP_PATH=… bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts`: **5 of 5 runs `2 passed`** (12:32–12:35), no message lost (no `send-lost` entry). Each run: CR-T08 planted error at step 4 once, disabled flow stops at 4, chatty and clean flows none; CR-T10 results read "현재 버전" then "이전 버전", 32 `blobs/` entries. The reviewer's lost message did not recur and its cause was not determined; if it happens again the run now stops at that send with the composer's draft, placeholder, parked text and notices.
+
+## Finish review round 2 (2026-10-01)
+
+Fixes for the review of `cb53321c`, commit `f8b3a15a` (branch SHA, pre-squash).
+
+- **Stored screens have a delete path the product reaches, switch on or off.** The browser-result events live in the workspace's native observation batch (`workspaceState`); the bytes live in the local record under global storage. No local-record observation names the digests in Studio (the local review imports only user and coach turns), so `deleteTask`'s byte removal never runs in the App; the round-1 bullet above overstated it. The student's delete paths are now: the results command's "저장된 화면·동작 기록 지우기" row (switch on), and a new command "HypeProof: 저장된 실험 브라우저 화면 지우기" (`hypeproof-chat.clearBrowserResultBytes`) enabled and shown by the context key `hypeproof-chat.crBrowserBytesStored`, not by the CR switch. The key follows the record: set at start-up, after bytes are stored and after a delete. The command shows only the count, asks, and deletes; with nothing stored it is hidden. (Round 3: it is now written into CR-02 and CR-T02 as their one listed exception and inventoried as `CR_SURFACES.switchOffWhileStored`, rather than declared "not a CR surface" here.)
+- **No orphans when the recorder is full.** Bytes are written before the event that names them, and a recorder at 500 events refuses that event. The turn's sink is now `roomGuardedSink`: it stores nothing unless `NativeObservationRecorder.hasRoom(8)` (the result's event plus what the turn may record while the bytes are written). Residual: more than 8 events recorded during one byte write would still leave bytes no event names; the bound and the delete command still reach them.
+- **Delete order.** `deleteBlobs` removes each blob before its age marker, as eviction does, and then any markers whose bytes were already gone.
+- **Comments state the actual guarantee.** A digest resolved when its event was written; the bytes can later be evicted (silently, oldest first) or deleted. Eviction does lose captures of earlier versions that cannot be retaken; no notice is shown (left as is, listed under limitations).
+- **Results list label.** "현재 버전 · 버전 1" (versions numbered per page in the order first seen) instead of a `sha256:` prefix.
+- **CR-T08 across requests in the App.** After the planted flow, `[cr:again]` sends a request that does not navigate: `browser_observe` on the same document, then a click on "도움말 보기". Every record line of the earlier error must read "이전 요청", and no failure may be attributed to a step of this request. CR-T08 also asserts on the raw tool-result lines the App sent, not on the scripted agent's de-duplicated list: the planted error appears only as "단계 4".
+- **09-preview** reads the expected path from the served profile's `preview.type` and fails when the other path opens.
+- **Ledger.** The cr-browser negative control states the CR-T08 step definition and the cross-request rule (also in `docs/plan/requirements-activation.md`); `verification_inputs` gain `local-record-file.smoke.mjs`, `measurement-core-local-record.test.mjs` and `e2e/fixtures/app.ts`; `implementation_paths` gain `nativeObservationRecorder.ts` and `e2e/fixtures/app.ts`.
+
+Planted defects at `f8b3a15a`, one at a time (scratch runner, restored after each):
+
+| Planted defect | Test | Result |
+|---|---|---|
+| `deleteBlobs` removes markers before blobs | cr-browser-refs | RED |
+| `FileRecordStorage` scan cache trusted regardless of size/mtime | local-record-file | RED |
+| key/text version mismatch accepted by `readBrowserResultEvent` | cr-host | RED |
+| delete runs without "지우기" | cr-host | RED |
+| sink guard ignores the recorder's room | cr-host | RED |
+| provider passes the unguarded sink | cr-host | RED |
+| recorder `hasRoom` off by one | cr-host | RED |
+| delete command enabled only with the CR switch | cr-host | RED |
+| delete command hidden from the palette | cr-host | RED |
+| delete handler checks the CR switch | cr-host | RED |
+| context key not refreshed after bytes are stored | cr-host | RED |
+| no context refresh at start-up | cr-host | RED |
+| results menu drops the delete row when no result is listed | cr-host | RED |
+| results label back to the digest prefix | cr-host | RED |
+
+In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with `f8b3a15a`'s extension and webview injected (`dist/extension.js` and `package.json` hashes equal to the build), `scripts/prep-test-app.sh`, `GATE=idle … e2e-quiet.sh`, all runs started behind the idle gate:
+
+- Positive: **7 of 8 runs `2 passed`** (12:59–13:07). Each passing run: CR-T08 planted error only as "단계 4" in the raw lines; `[cr:again]` lines read "이전 요청 planted-step3-error…", failures `[]`, actions `["도움말 보기"]`; CR-T10 "현재 버전 · 버전 1" then "이전 버전 · 버전 1", 36 `blobs/` entries. The failing run stopped in `send()` at `[cr:ask] 이 버튼이 왜 안 돼?` (after the CR-T08 checks had passed): the composer read `""` right after `fill`, the message-lost class a reviewer saw before round 1. Cause not determined; not a CR-T08 result.
+- Negative, CR-08 across requests: `CrExecutor.newTurn()` without `turn++` (steps still restart, earlier records keep their step): **RED** at "CR-T08: an earlier request's error reads 이전 요청", with the raw line "단계 4 planted-step3-error" in the `[cr:again]` request.
+- Negative, both `crNewTurn()` call sites removed: **RED** earlier, at "reported at the step index of the action that raised it". Removing only the proxy call site stays green, as the reviewer found: the shared-setup call `this.mcpBrowser?.crNewTurn()` runs for proxy turns too and resets the same long-lived control (`proxyTurnBrowser` hands proxy turns `this.mcpBrowser` with the switch on), so the two sites are redundant on that path, not untested.
+
+`09-preview.spec.ts`, same app copy, gated and quiet, against `scripts/dev-stack.sh` (sk-biopharm, `preview.type: live_server`): 3 passed. Planted: expected path forced to `iframe` (a webview cohort) → REQ-D1/D3/D6 and REQ-D4 RED at "the preview path the served profile's preview.type picks". REQ-D3/D6 themselves still run only on a webview cohort, which the dev stack does not serve.
+
+Gates at `f8b3a15a` (exit codes, run after committing): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 · `webview-ui` tsc 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
+
+## Finish review round 3 (2026-10-01)
+
+Fixes for the review of `75d7c726`, commit `07da30f3` (branch SHA, pre-squash); the in-app instrument fix and this section in the commit after it.
+
+- **CR-08: an error between requests is a failure.** `PageEventLog.records()` marks "이전 요청" only on records captured during an earlier request's agent step. A record captured outside any step (the student clicking between requests, the CR-09 "이 버튼이 왜 안 돼?" case) keeps step `null` and stays in `failuresOf`. Smoke: request 1 observe + hover, the student raises an error, request 2 observes: the model reads the error as a failure, not "이전 요청"; control on one page: request 1's step error is still "이전 요청".
+- **CR-10 record keeps the mark.** A stored result's records carry `earlier_request: true` (additive, decision 8), and `crResultHistory` counts errors with `failuresOf`, so the list and the agent agree.
+- **Stored screens belong to who stored them.** The bytes directory is one per OS account, shared by every student on a classroom PC. Each stored blob now also has an owner marker `blob-owners/<owner>/<digest>`; the owner is a digest of the signed-in account, or of the cohort-local user within its cohort (`crBytesOwner`), never the identity. `blobCount` and `deleteBlobs` take the owner: another student's count is 0 and their delete leaves these bytes; bytes two owners stored stay until both delete. Signed out, nothing is stored. Eviction removes the evicted bytes' owner markers.
+- **Showing the delete command costs no disk I/O.** The context key is read from `globalState` (`hypeproof-chat.crBytesOwners`), refreshed at start-up, on every profile resolution and token change, after a store and after a delete. No local-record directory is created for a seat that never stored anything. The record is counted (`blobCount`, keys only) when the student opens the command or the results list; a corrupt review record no longer hides the bytes, and a count that fails still offers the delete ("개수 확인 안 됨").
+- **CR-02 / CR-T02 canon.** Both rows now name the delete command as their one listed exception (MC-27, decision 6), and `CR_SURFACES.switchOffWhileStored` inventories it; `cr-switch.smoke` checks the enablement and every menu entry are exactly the bytes-stored key. This edits an acceptance criterion and needs Jay's sign-off; it also reopens `cr-recon`'s completion (it pins the requirements document), so `align.py check --doc curriculum-runtime` exits 1 with `BROKEN cr-recon` until the record-only PR re-records it with `--replace`.
+- **Evidence doc.** The per-row table and the F1 line above now state the final layer and what REQ-D3/D6 did not exercise; the testing-doc status line no longer says no row ran in the app.
+
+Planted defects, one at a time (scratch runner `fix-r3/mutate.py`, restored after each; unmutated control: all four suites green):
+
+| Planted defect | Result |
+|---|---|
+| between-request record marked earlier (the round-2 rule) | experiment-browser RED |
+| `earlier_request` not stored | cr-host RED |
+| history counts errors with its own filter | cr-host RED |
+| owner-scoped delete ignores the owner | cr-browser-refs RED · cr-host RED |
+| owner-scoped count ignores the owner | cr-browser-refs RED · cr-host RED |
+| `putBlob` writes no owner marker | cr-browser-refs RED · cr-host RED |
+| eviction leaves owner markers | cr-browser-refs RED |
+| owner ignores the cohort | cr-host RED |
+| context refresh reads the record | cr-host RED · cr-switch RED |
+| sink stores bytes when signed out | cr-host RED |
+| delete command enabled by the CR switch | cr-switch RED · cr-host RED |
+| delete command dropped from the inventory | cr-switch RED |
+| no context refresh on sign-in | cr-host RED |
+
+In-app (`app-layer.spec.ts`, now 3 tests), scratch copy of 0.1.51 with `07da30f3`'s extension and webview injected (`dist/extension.js` and `package.json` hashes equal to the build), `GATE=idle … e2e-quiet.sh`:
+
+- First 3 runs: 1 of 3 `3 passed`; the other two failed in the new test's instrument (`storedBlobs` read a record file the App removed between listing and reading, ENOENT). The reader now skips such a file.
+- Then **3 of 3 runs `3 passed`** (13:44–13:47), no message lost. Each run, the delete exception: hidden before anything is stored; 10–12 `blobs/` entries after the clean flow and the command shown (switch on); after a relaunch with the switch off on the same user data dir, the command shown while results and pick are hidden; the dialog reads "내가 저장한 실험 브라우저 화면과 동작 기록 12개를 지울까요? 되돌릴 수 없어요."; after "지우기", 0 entries and the command hidden.
+- Negative: the delete command's enablement and palette entry planted as `crBrowserBytesStored && curriculumRuntimeEnabled`: **RED** in the exception test (bytes still 12 after the switch-off relaunch: nothing could delete them). The app copy was re-injected with the real build afterwards.
+- The message-loss failure of round 2 did not recur in these 6 runs; its cause is still not determined.
+
+Gates at `07da30f3` (exit codes, run after committing): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 · `webview-ui` tsc 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` **1** (`BROKEN cr-recon`, the expected reopening above; no other finding).
+
 ## NOT RUN
 
-- Every CR-T row in the Studio app (Playwright e2e and real Mac): CR-T02 switch-on walk, CR-T07, CR-T08, CR-T09, CR-T63, and the timings CR-T55, CR-T56.
-- Recon F8 (the `origin/main` build starving the browser tab: wheel, pick, crop). It needs an unlocked screen; every app run here was locked (F7).
+- The timings CR-T55 and CR-T56 in the app (now `cr-e2e`, decision 9).
+- Recon F8 on the `origin/main` build (wheel, pick, crop starvation). The in-app CR-T09 pick and crop pass on this branch; no separate F8 measurement was made.
 - Any real device or phone.
+- A real model behind the in-app rows (the agent is scripted).
 
 ## Manual demo procedure (PRD §15)
 
@@ -215,7 +376,7 @@ The first full `worker npm test` of round 3 exited 0. On the round-2 tree a revi
 - F8 is unresolved: on the `origin/main` build the recon measured crops of 2.0–3.0 s and missed picks in the app. CR-60's 1 s target in the app is unverified; the synthetic p50 is not evidence for it.
 - The element crop reaches the coach only where the cohort has `input.image_paste`; otherwise the chip says no image goes.
 - SDK-path result recording pairs each browser `tool_result` with the oldest pending result, which assumes browser tools run one at a time.
-- Step numbers count per `BrowserControl`. With the switch on both runtimes drive the provider's long-lived control (round 3), so steps count across turns; with it off a proxy turn has its own control. Records captured outside an agent step carry step `null`.
+- Step numbers count per `BrowserControl`. With the switch on both runtimes drive the provider's long-lived control (round 3), so steps count across turns; with it off a proxy turn has its own control. (Fixed in the finish: both runtimes call `crNewTurn()` at the start of a turn, so steps restart at 1.) Records captured outside an agent step carry step `null`.
 - Indirect escapes (CR-11): the load is stopped when the navigation is requested and the tab is taken back to where the step started, but the other origin may already have received the request (the real run saw 2 requests reach it across 3 attempts). Nothing of that page is observed, returned or recorded.
 - The CR-11 guard enforces only during an agent step and for 5 s after it (`ESCAPE_TAIL_MS`), on either runtime: since round 3 the proxy turn no longer closes the CDP session at its end (`proxyTurnBrowser`), so the tail and a pending escape outlive the turn. Closing the shared control (the tab changes, the panel is disposed) still ends the guard. The driven tab is also the student's preview, so outside that window their own navigations are not undone; the agent's next call is then refused by the ordinary scope check. A page timer that leaves more than 5 s after the last step is caught that way, not stopped.
 - New windows are closed through `Target.getTargets` / `Target.closeTarget` on the page session, and only windows that were not open when the step began (round 3): a window the student opened earlier is left alone. One the student opens during a step or its 5 s tail is indistinguishable from the agent's and is closed. That works on real Chromium (Playwright build); how the Studio shell's integrated browser routes a popup, and whether those calls reach it there, is not verified. The other origin may receive the popup's first request before it is closed.
@@ -225,7 +386,10 @@ The first full `worker npm test` of round 3 exited 0. On the round-2 tree a revi
 - A log attached after the page loaded (the first CR call of a turn) recovers load-time HTTP errors from the document's Resource Timing (Chromium 109+); load-time network errors without a status (refused connection, DNS) are not recoverable, so such an observation says "확인된 것 없음" and points to `browser_reload`.
 - An id-less `Log` entry that arrives within 1 s of a main-frame commit is dropped rather than attributed (it may be the previous document's).
 - The artifact version's file set holds static references only (HTML, CSS, JS imports). Files a page loads dynamically (`fetch('menu.json')`, an image `src` built in script) are not in it, so editing only such a file does not produce a new version, and results before and after the edit carry the same version (recon R4's definition; partial coverage of CR-10's "marked as belonging to the earlier version").
-- Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later.
+- Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later. (Fixed in the finish: the bytes are `blobs/` entries of the same local record, `LocalRecord.putBlob`.)
+- Browser-result bytes live in the App's global storage, their events in the workspace's observation batch: clearing or moving a workspace leaves the bytes until the bound removes them or the student deletes them (results command, or the delete command, which works with the switch off). Deleting bytes leaves the events, which then resolve to no stored screen. Local-review task deletion does not reach them (no local-record observation names them).
+- Eviction at the 64 MB bound is silent and oldest-first, so a capture of an earlier artifact version, which cannot be taken again, can disappear without notice.
+- (Fixed in finish round 3: a record marked "이전 요청" is stored with `earlier_request: true`, and the history counts errors through `failuresOf`.)
 - CR-10 persistence needs an observation recorder, which the App builds only when the profile names `observation.format`. The validator now fails a profile with the switch on and no format (`cr_without_observation_format`); a profile that bypassed the validator would still drop browser results silently.
 - The page-level indicator is the overlay outline; the chat-panel half is the tool-log line (`browserToolLogLine`, now labelled for the five CR tools). `CrHooks.onIndicator` is not wired in the product.
 - The artifact version re-reads the file set on every observation (no cache).
