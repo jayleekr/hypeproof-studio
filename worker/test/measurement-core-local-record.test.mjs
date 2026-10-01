@@ -401,8 +401,8 @@ test("MC-T18 deleting a task removes core-managed records only for that task and
   await record.appendObservations("codex", batch("s2"));
   await throwsCode(() => record.deleteTask("task-a", { by: "adapter_explicit", at: 12 }), "delete_requires_user");
   const result = await record.deleteTask("task-a", { by: "user", at: 12 });
-  assert.deepEqual(result.removed, { observations: 3, interpretations: 1, reviews: 1, submissions: 1, receipts: 1, improvements: 1, sessions: 1 });
-  assert.deepEqual([...result.not_covered], ["host_original_records", "copies_exported_by_the_user"]);
+  assert.deepEqual(result.removed, { observations: 3, interpretations: 1, reviews: 1, submissions: 1, receipts: 1, improvements: 1, sessions: 1, browser_result_bytes: 0 });
+  assert.deepEqual([...result.not_covered], ["host_original_records", "copies_exported_by_the_user", "browser_result_bytes_not_named_by_the_task"]);
   const remaining = [...store.data.keys()];
   assert.equal(remaining.some((k) => k.includes("/s1/") || k.startsWith("interpretations/task-a") || k.startsWith("receipts/") || k === "tasks/task-a"), false);
   assert.equal(remaining.includes(key("u1", "s2", "codex")), true);

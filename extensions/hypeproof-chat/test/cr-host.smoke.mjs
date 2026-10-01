@@ -112,7 +112,14 @@ function localRecord() {
     list: async (p) => [...store.keys()].filter((k) => k.startsWith(p)).sort(),
     remove: async (k) => { store.delete(k); },
   });
-  return { store, record, sink: (blob) => record.putBlob(blob) };
+  const calls = [];
+  const sink = async (blobs) => {
+    calls.push(blobs.length);
+    const out = [];
+    for (const b of blobs) out.push(await record.putBlob(b));
+    return out;
+  };
+  return { store, record, sink, calls, blobKeys: () => [...store.keys()].filter((k) => k.startsWith("blobs/")) };
 }
 
 /** Every event must also pass the one validator, on the format the recorder writes. */
@@ -145,9 +152,9 @@ await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put
   assert.equal(pr[0].screenshot_digest, result.screenshot_digest, "text and keys agree");
 
   const sdk = new w.SdkCrResults();
-  sdk.reset();
+  sdk.reset(local.sink);
   sdk.onToolUse("tu-1", "mcp__hypeproof__browser_observe", true);
-  sdk.onInspect("browser_observe", {}, obs, local.sink);
+  sdk.onInspect("browser_observe", {}, obs);
   const sr = await sdk.onToolResult("tu-1", false);
   assert.equal(sr.refs.artifact_version, FAKE_VERSION.id);
   assert.ok(await local.record.getBlob(sr.refs.screenshot_digest));
@@ -167,15 +174,20 @@ await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put
   // The events the recorder writes are valid hps-observation/1 events, references and all.
   const stored = validBatch([...proxy.events, ...pick.events]);
   assert.equal(stored.filter((e) => e.artifact_version === FAKE_VERSION.id).length, 2);
+  // One write session per result: screenshot and trace go to the sink together.
+  assert.ok(local.calls.every((n) => n === 2), `each result's bytes in one sink call: ${local.calls}`);
   // The provider calls these for each path, with its sink, and the turn's end waits for them.
-  assert.match(providerSrc, /this\.crSdkResults\.onInspect\(name, input, r\.observation, this\.crBlobSink\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.onInspect\(name, input, r\.observation\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.reset\(observation \? this\.crBlobSink : undefined\);/);
   assert.match(providerSrc, /const crResult = this\.crSdkResults\.onToolResult\(a\.id, a\.isError\);/);
   assert.match(providerSrc, /if \(crResult\) observationCaptures\.push\(crResult\.then\(\(r\) => recordObservation\('tool_result', r\.text, \{ \.\.\.r\.refs, tool_id: a\.id/);
   assert.match(providerSrc, /this\.crSdkResults\.onToolUse\(a\.id, a\.name, this\.isCurriculumRuntimeEnabled\(\)\)/);
-  assert.match(providerSrc, /const recording = recordProxyCrResult\(p\.recordObservation, call\.id, fixed\.call\.name, fixed\.call\.input \?\? \{\}, tr\.observation, this\.crBlobSink\);\s*if \(p\.trackObservation\) p\.trackObservation\(recording\);/);
+  assert.match(providerSrc, /const recording = recordProxyCrResult\(p\.recordObservation, call\.id, fixed\.call\.name, fixed\.call\.input \?\? \{\}, tr\.observation, p\.blobSink\);\s*if \(p\.trackObservation\) p\.trackObservation\(recording\);/);
   assert.match(providerSrc, /trackObservation: \(q\) => observationCaptures\.push\(q\),/);
-  assert.match(providerSrc, /if \(element\) observationCaptures\.push\(recordElementCapture\(recordObservation, `pick-\$\{crypto\.randomUUID\(\)\}`, element, this\.crBlobSink\)\);/);
-  assert.match(providerSrc, /return await store\.exclusive\(\(\) => record\.putBlob\(blob\)\);/);
+  assert.match(providerSrc, /const turnBlobSink = observation \? this\.crBlobSink : undefined;/);
+  assert.match(providerSrc, /blobSink: turnBlobSink,/);
+  assert.match(providerSrc, /if \(element\) observationCaptures\.push\(recordElementCapture\(recordObservation, `pick-\$\{crypto\.randomUUID\(\)\}`, element, turnBlobSink\)\);/);
+  assert.match(providerSrc, /return await store\.exclusive\(async \(\) => \{\s*const out: Array<string \| null> = \[\];\s*for \(const blob of blobs\) out\.push\(await record\.putBlob\(blob\)/);
 });
 
 await test("CR-10 negative: bytes that were not stored are never named; a sink that answers another digest is not trusted", async () => {
@@ -184,9 +196,10 @@ await test("CR-10 negative: bytes that were not stored are never named; a sink t
   const click = (await ex.execute("browser_click", { ref: "e1" })).observation;
   for (const [why, sink] of [
     ["no sink", undefined],
-    ["sink full", async () => null],
+    ["sink full", async (b) => b.map(() => null)],
+    ["sink malformed", async () => null],
     ["sink throws", async () => { throw new Error("storage_busy"); }],
-    ["sink lies", async () => `sha256:${"f".repeat(64)}`],
+    ["sink lies", async (b) => b.map(() => `sha256:${"f".repeat(64)}`)],
   ]) {
     const r = recorder();
     await w.recordProxyCrResult(r.record, "c", "browser_click", { ref: "e1" }, click, sink);
@@ -199,6 +212,45 @@ await test("CR-10 negative: bytes that were not stored are never named; a sink t
     assert.deepEqual([text.screenshot_digest, text.trace_digest], [null, null], `${why}: the readable copy says the same`);
     validBatch(r.events);
   }
+});
+
+await test("CR-10 negative: no bytes are stored without the event that names them", async () => {
+  const ex = observationOf(makeFakePage());
+  const obs = (await ex.execute("browser_observe")).observation;
+  // SDK turn with no recorder: reset() without a sink, so the result stores nothing.
+  const none = localRecord();
+  const sdk = new w.SdkCrResults();
+  sdk.reset();
+  sdk.onToolUse("tu-1", "mcp__hypeproof__browser_observe", true);
+  sdk.onInspect("browser_observe", {}, obs);
+  const r = await sdk.onToolResult("tu-1", false);
+  assert.equal(r.refs.screenshot_digest, undefined);
+  assert.deepEqual(none.blobKeys(), [], "no recorder: nothing on disk");
+  // Control: with the turn's sink, the same call stores its bytes.
+  const local = localRecord();
+  sdk.reset(local.sink);
+  sdk.onToolUse("tu-2", "mcp__hypeproof__browser_observe", true);
+  sdk.onInspect("browser_observe", {}, obs);
+  // Nothing is stored at inspect time: the bytes wait for the tool_result that is recorded.
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(local.blobKeys(), [], "inspect alone stores nothing");
+  sdk.reset(local.sink);
+  assert.deepEqual(local.blobKeys(), [], "a result whose tool_result never came stores nothing");
+  sdk.onToolUse("tu-3", "mcp__hypeproof__browser_observe", true);
+  sdk.onInspect("browser_observe", {}, obs);
+  const stored = await sdk.onToolResult("tu-3", false);
+  assert.equal(local.blobKeys().length, 2, "control: recorded result, screenshot and trace stored");
+  assert.ok(stored.refs.screenshot_digest && stored.refs.trace_digest);
+  // A malformed artifact version is refused before any byte is stored (CR-10 negative).
+  const bad = localRecord();
+  for (const id of ["v0", `sha256:${"g".repeat(64)}`, `sha256:${"a".repeat(63)}`, "a".repeat(71)]) {
+    const rec = recorder();
+    await w.recordProxyCrResult(rec.record, "c", "browser_observe", {}, { ...obs, artifact: { ...FAKE_VERSION, id } }, bad.sink);
+    assert.equal(rec.events[1].outcome, "error", `${id}: refused`);
+    assert.equal("artifact_version" in rec.events[1], false);
+  }
+  assert.deepEqual(bad.calls, [], "a refused result never reaches the sink");
+  assert.deepEqual(bad.blobKeys(), []);
 });
 
 await test("CR-10: SDK results pair with their tool_results oldest first; browser_select asks, observe is allowed", async () => {
@@ -273,6 +325,9 @@ await test("CR-10 read-back: stored results come back newest first, labelled cur
   assert.match(providerSrc, /const events = recorder\?\.snapshot\(\)\.events \?\? \[\];/);
   assert.match(providerSrc, /const items = crResultHistory\(events, \(entry\) => current\.get\(entry\) \?\? null\);/);
   assert.match(providerSrc, /blob = await this\.crRecordHandle\(\)\.record\.getBlob\(picked\.item\.screenshot_digest\);/);
+  // The stored bytes are listed and can be deleted from the same command.
+  assert.match(providerSrc, /stored = \(await this\.crRecordHandle\(\)\.record\.records\(\)\)\.browser_results\.stored;/);
+  assert.match(providerSrc, /await store\.exclusive\(\(\) => record\.deleteBlobs\(\{ by: "user", at: Date\.now\(\) \}\)\)/);
 });
 
 await test("CR-10: an assessment request leaves the reference keys out; the stored batch keeps them", async () => {
@@ -424,7 +479,7 @@ await test("CR-09 proxy: a picked element's ref is known to the executor the nex
 
 await test("CR-08: both runtimes start a new turn on the long-lived control, so step numbers count this request's actions", () => {
   assert.match(providerSrc, /const browser = turnBrowser\.browser;\s*\/\/[^\n]*\n\s*browser\.crNewTurn\(\);/);
-  assert.match(providerSrc, /this\.crSdkResults\.reset\(\);\s*this\.mcpBrowser\?\.crNewTurn\(\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.reset\(observation \? this\.crBlobSink : undefined\);\s*this\.mcpBrowser\?\.crNewTurn\(\);/);
 });
 
 console.log(`\n${passed} cr-host checks passed`);

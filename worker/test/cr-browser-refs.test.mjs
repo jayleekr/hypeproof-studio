@@ -92,8 +92,11 @@ test("positive: stored bytes resolve to exactly their digest; storing again is a
   const t = await record.putBlob({ media_type: "application/json", json: trace });
   assert.equal(t, await digestOf(trace));
   assert.deepEqual(JSON.parse(new TextDecoder().decode((await record.getBlob(t)).bytes)), trace);
-  // A blob is not a task, an observation or a receipt: the record's own views do not see it.
-  assert.deepEqual((await record.records()).tasks, []);
+  // A blob is not a task, an observation or a receipt, but the record's own view shows it (MC-27).
+  const mine = await record.records();
+  assert.deepEqual(mine.tasks, []);
+  assert.equal(mine.browser_results.stored, 2);
+  assert.ok(mine.browser_results.bytes > 0);
 });
 
 test("negative: a secret in a trace never reaches storage; tampered, missing or malformed bytes never resolve", async () => {
@@ -117,10 +120,93 @@ test("negative: a secret in a trace never reaches storage; tampered, missing or 
   await assert.rejects(record.putBlob({ media_type: "text/html", base64: "PGI+" }), /invalid_blob/);
   await assert.rejects(record.putBlob({ media_type: "image/png", base64: "not base64!" }), /invalid_blob/);
   await assert.rejects(record.putBlob({ media_type: "image/png", base64: Buffer.alloc(4 * 1024 * 1024 + 1).toString("base64") }), /blob_too_large/);
-  const full = new LocalRecord(memoryPort(), { maxBytes: 100 });
+  const full = new LocalRecord(memoryPort(), { maxBlobBytes: 100 });
   await assert.rejects(full.putBlob({ media_type: "image/png", base64: Buffer.alloc(200, 7).toString("base64") }), /capacity_exceeded/);
   // A port that loses the write: no digest is handed out.
   const lossy = memoryPort();
   lossy.write = async () => {};
   await assert.rejects(new LocalRecord(lossy).putBlob({ media_type: "image/png", base64: "UE5H" }), /storage_failure/);
+});
+
+// ── Lifecycle of the stored bytes (review r1: owner, delete path, bound, quota) ─────
+
+const png = (n, fill) => Buffer.alloc(n, fill).toString("base64");
+const blobKeys = (port) => [...port.store.keys()].filter((k) => k.startsWith("blobs/"));
+
+/** A port that reports exact usage itself (as FileRecordStorage does), not through LocalRecord's fallback. */
+function countingPort() {
+  const port = memoryPort();
+  const sum = (p) => [...port.store].filter(([k]) => k.startsWith(p)).reduce((n, [, v]) => n + v.length, 0);
+  return Object.assign(port, { usageBytes: async () => sum(""), usageOf: async (p) => sum(p) });
+}
+
+for (const [portName, makePort] of [["fallback count", memoryPort], ["port count", countingPort]])
+test(`positive: browser-result bytes never count against the review data's limit (MC-35), ${portName}`, async () => {
+  const port = makePort();
+  const record = new LocalRecord(port, { maxBytes: 600, maxBlobBytes: 1024 * 1024 });
+  for (let i = 0; i < 5; i++) await record.putBlob({ media_type: "image/png", base64: png(20_000, i + 1) }, { at: i });
+  assert.equal(blobKeys(port).length, 5);
+  assert.ok((await record.records()).browser_results.bytes > 600, "far more bytes than the review limit");
+  // The review's own writes still fit: screenshots do not crowd out the local review.
+  await record.createTask({ id: "task-a", project: "p", at: 1 });
+  await record.createTask({ id: "task-b", project: "p", at: 1 });
+  assert.ok((await record.usage()).bytes < 600);
+  // Control: review data itself is still bounded (a third task does not fit 600).
+  await assert.rejects(record.createTask({ id: "task-c", project: "p", at: 1 }), /capacity_exceeded/);
+});
+
+test("positive: the bytes are bounded on their own; the oldest go first and review data is never touched", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port, { maxBlobBytes: 3 * 30_000 });
+  await record.createTask({ id: "task-a", project: "p", at: 1 });
+  const d = [];
+  for (let i = 0; i < 5; i++) d.push(await record.putBlob({ media_type: "image/png", base64: png(20_000, i + 1) }, { at: 100 + i }));
+  assert.ok((await record.records()).browser_results.bytes <= 3 * 30_000);
+  assert.equal(await record.getBlob(d[0]), null, "the oldest capture was removed");
+  assert.ok(await record.getBlob(d[4]), "the newest is kept");
+  assert.equal((await record.records()).browser_results.stored, blobKeys(port).length);
+  assert.ok(await record.getTask("task-a"), "review data untouched");
+  // Negative: one capture larger than the whole bound is refused, nothing is evicted for it.
+  const before = blobKeys(port).length;
+  await assert.rejects(new LocalRecord(port, { maxBlobBytes: 1000 }).putBlob({ media_type: "image/png", base64: png(5000, 9) }), /capacity_exceeded/);
+  assert.equal(blobKeys(port).length, before);
+});
+
+test("positive: deleteBlobs removes every stored capture, or just the named ones, and records() says so", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port);
+  const a = await record.putBlob({ media_type: "image/png", base64: png(10, 1) });
+  const b = await record.putBlob({ media_type: "image/png", base64: png(10, 2) });
+  await assert.rejects(record.deleteBlobs({ by: "adapter_explicit", at: 1 }), /delete_requires_user/);
+  assert.deepEqual(await record.deleteBlobs({ by: "user", at: 1, digests: [a] }), { removed: 1 });
+  assert.equal(await record.getBlob(a), null);
+  assert.ok(await record.getBlob(b));
+  assert.deepEqual(await record.deleteBlobs({ by: "user", at: 2 }), { removed: 1 });
+  assert.deepEqual((await record.records()).browser_results.stored, 0);
+  assert.deepEqual([...port.store.keys()].filter((k) => k.startsWith("blob")), [], "no bytes and no age markers left");
+});
+
+test("positive: deleting a task removes the bytes its observations name; bytes another observation names stay", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port);
+  const shotA = await record.putBlob({ media_type: "image/png", base64: png(10, 1) });
+  const traceA = await record.putBlob({ media_type: "application/json", json: { tool: "browser_click", step: 1 } });
+  const shared = await record.putBlob({ media_type: "image/png", base64: png(10, 3) });
+  const loose = await record.putBlob({ media_type: "image/png", base64: png(10, 4) });
+  const result = (seq, shot, trace) => ev(seq, "tool_result", { tool_id: `c${seq - 1}`, outcome: "success", artifact_version: VERSION, screenshot_digest: shot, ...(trace ? { trace_digest: trace } : {}) });
+  for (const [task, session, events] of [
+    ["task-a", "s1", [ev(1, "tool_request", { tool_id: "c1" }), result(2, shotA, traceA), ev(3, "tool_request", { tool_id: "c3" }), result(4, shared)]],
+    ["task-b", "s2", [ev(1, "tool_request", { tool_id: "c1" }), result(2, shared)]],
+  ]) {
+    await record.createTask({ id: task, project: "p", at: 1 });
+    await record.linkSession(task, { host: "studio", session_id: session, by: "user", at: 1 });
+    await record.appendObservations("studio", { format: "hps-observation/1", scope: "synthetic-cr", session, program: "p1", events });
+  }
+  const out = await record.deleteTask("task-a", { by: "user", at: 5 });
+  assert.equal(out.removed.browser_result_bytes, 2);
+  assert.equal(await record.getBlob(shotA), null, "the task's screenshot is gone");
+  assert.equal(await record.getBlob(traceA), null, "the task's trace is gone");
+  assert.ok(await record.getBlob(shared), "bytes task-b still names stay");
+  assert.ok(await record.getBlob(loose), "bytes no task names are not the task's");
+  assert.ok(out.not_covered.includes("browser_result_bytes_not_named_by_the_task"), "and the result says so instead of claiming them");
 });

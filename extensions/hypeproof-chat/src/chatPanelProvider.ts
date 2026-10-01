@@ -465,15 +465,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     return this.crRecord;
   }
-  private readonly crBlobSink: BlobSink = (blob) => {
+  private readonly crBlobSink: BlobSink = (blobs) => {
     const next = this.crBlobWrites.then(async () => {
       try {
         const { store, record } = this.crRecordHandle();
-        return await store.exclusive(() => record.putBlob(blob));
+        // One lock for the result's screenshot and trace together.
+        return await store.exclusive(async () => {
+          const out: Array<string | null> = [];
+          for (const blob of blobs) out.push(await record.putBlob(blob).catch(() => null));
+          return out;
+        });
       } catch {
-        // Busy (a local review in another window holds the lock), full or failed: the
-        // event then carries no digest for these bytes, never a dangling one.
-        return null;
+        // Busy (a local review in another window holds the lock) or failed: the event
+        // then carries no digest for these bytes, never a dangling one.
+        return blobs.map(() => null);
       }
     });
     this.crBlobWrites = next;
@@ -815,15 +820,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
     }
     const items = crResultHistory(events, (entry) => current.get(entry) ?? null);
-    if (!items.length) {
+    // What the record holds, so stored screenshots are never invisible (MC-27).
+    let stored = 0;
+    try {
+      stored = (await this.crRecordHandle().record.records()).browser_results.stored;
+    } catch {
+      stored = 0;
+    }
+    if (!items.length && !stored) {
       this.postPageNotice("아직 기록된 실험 브라우저 결과가 없어요.");
       return;
     }
-    const picked = await vscode.window.showQuickPick(
-      items.map((item) => ({ label: item.label, description: item.description, detail: item.detail, item })),
-      { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" },
-    );
-    if (!picked?.item.screenshot_digest) return;
+    type Pick = vscode.QuickPickItem & { item?: (typeof items)[number]; clear?: true };
+    const rows: Pick[] = items.map((item) => ({ label: item.label, description: item.description, detail: item.detail, item }));
+    if (stored) rows.push({ label: "", kind: vscode.QuickPickItemKind.Separator }, { label: "$(trash) 저장된 화면·동작 기록 지우기", description: `${stored}개`, detail: "이 컴퓨터에 저장된 실험 브라우저 화면과 동작 기록을 모두 지워요. 결과 목록은 남아요.", clear: true });
+    const picked = await vscode.window.showQuickPick(rows, { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" });
+    if (picked?.clear) {
+      await this.clearBrowserResultBytes(stored);
+      return;
+    }
+    if (!picked?.item?.screenshot_digest) return;
     if (!this.isImagePasteEnabled()) {
       this.postPageNotice("이 수업에서는 기록된 화면을 코치에게 보낼 수 없어요.");
       return;
@@ -843,6 +859,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       `[실험 브라우저 기록] 붙인 화면은 ${picked.item.label}에서 찍은 것이다 (${picked.item.description}). ` +
       (picked.item.state === "current" ? "지금 파일과 같은 버전이다." : "지금 파일과 다를 수 있다. 지금 화면처럼 말하지 마라.");
     this.postPageNotice(`${picked.item.label} 화면을 다음 메시지에 붙였어요.`);
+  }
+
+  /** CR-10 — the student deletes the stored browser-result bytes (screenshots, action traces). */
+  private async clearBrowserResultBytes(stored: number): Promise<void> {
+    const ok = await vscode.window.showWarningMessage(
+      `저장된 실험 브라우저 화면과 동작 기록 ${stored}개를 지울까요? 되돌릴 수 없어요.`,
+      { modal: true },
+      "지우기",
+    );
+    if (ok !== "지우기") return;
+    try {
+      await this.crBlobWrites.catch(() => undefined);
+      const { store, record } = this.crRecordHandle();
+      const { removed } = await store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now() }));
+      this.postPageNotice(`저장된 화면·동작 기록 ${removed}개를 지웠어요.`);
+    } catch {
+      this.postPageNotice("기록을 지우지 못했어요. 다른 창에서 기록을 쓰는 중이면 잠시 뒤에 다시 해 주세요.");
+    }
   }
 
   /** Queue a picked element for the NEXT turn and show the student exactly what goes. */
@@ -2361,7 +2395,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const r = await this.mcpBrowser.execute({ id: `mcp-${name}`, name, input });
           // CR-10 — a CR result is recorded against its artifact version when the SDK
           // reports this call's tool_result (onActivity takes it from this queue).
-          this.crSdkResults.onInspect(name, input, r.observation, this.crBlobSink);
+          this.crSdkResults.onInspect(name, input, r.observation);
           // BrowserToolResult(content: text | image_url) → McpToolResult(text | image), the
           // same conversion the CR-03 adapter parity check runs.
           return toMcpToolResult(r);
@@ -3014,7 +3048,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const observationCaptures: Promise<void>[] = [];
     // CR-10 — the element capture is a browser result bound to its artifact version; its
     // bytes are stored first, and the turn's end waits for it (observationCaptures).
-    if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, this.crBlobSink));
+    // Bytes are stored only when a recorder will write the event that names them.
+    const turnBlobSink = observation ? this.crBlobSink : undefined;
+    if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, turnBlobSink));
     const messageId = randomId();
     const ctrl = new AbortController();
     this.activeStreams.set(streamId, ctrl);
@@ -3175,7 +3211,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
       };
       // CR-10 — SDK tool ids of the delegated browser tools whose results carry an observation.
-      this.crSdkResults.reset();
+      this.crSdkResults.reset(observation ? this.crBlobSink : undefined);
       this.mcpBrowser?.crNewTurn();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         if (a.kind==='tool_use') this.crSdkResults.onToolUse(a.id, a.name, this.isCurriculumRuntimeEnabled());
@@ -3336,6 +3372,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             onDelta,
             onCitations,
             recordObservation,
+            blobSink: turnBlobSink,
             trackObservation: (q) => observationCaptures.push(q),
           });
         } else {
@@ -3740,6 +3777,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     ) => void;
     /** CR-10 — the turn's end waits for these recordings (their bytes are stored first). */
     trackObservation?: (p: Promise<void>) => void;
+    /** CR-10 — where a result's bytes go; absent when the turn has no recorder, so none are stored. */
+    blobSink?: BlobSink;
   }): Promise<void> {
     // CR-11/CR-09 — with the switch on the turn drives the long-lived control, so the scope
     // guard and the picked element's refs outlive the turn (proxyTurnBrowser).
@@ -3835,7 +3874,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           toolResults.push(toProxyToolResult(call.id, tr, fixed.note));
           // CR-10 — with the switch on, the result is recorded against its artifact version.
           if (tr.observation && p.recordObservation) {
-            const recording = recordProxyCrResult(p.recordObservation, call.id, fixed.call.name, fixed.call.input ?? {}, tr.observation, this.crBlobSink);
+            const recording = recordProxyCrResult(p.recordObservation, call.id, fixed.call.name, fixed.call.input ?? {}, tr.observation, p.blobSink);
             if (p.trackObservation) p.trackObservation(recording);
             else void recording;
           }

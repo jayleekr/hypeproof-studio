@@ -12,12 +12,18 @@ import type { TeacherState } from "./learning-events.ts";
 export const LOCAL_RECORD_FORMAT = "hps-local-record/1";
 /** Provisional local capacity (MC-35). Exposed, never enforced by deleting data; fixed with host evidence later. */
 export const DEFAULT_LOCAL_MAX_BYTES = 256 * 1024 * 1024;
-/** What task deletion cannot reach, reported instead of claimed (MC-31). */
-export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user"] as const;
+/**
+ * What task deletion cannot reach, reported instead of claimed (MC-31). Browser-result
+ * bytes (CR-10) that no observation of the task names are not the task's: they are
+ * removed by `deleteBlobs` ("실험 브라우저 기록 화면 지우기"), never by `deleteTask`.
+ */
+export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user", "browser_result_bytes_not_named_by_the_task"] as const;
 
 export interface StoragePort {
   /** Optional exact character usage; must include durable writes and never cache receipt reads. */
   usageBytes?(): Promise<number>;
+  /** Optional exact character usage of the keys under one prefix (same rules as `usageBytes`). */
+  usageOf?(prefix: string): Promise<number>;
   read(key: string): Promise<string | null>;
   /** Resolves only once durable. With `ifAbsent`, atomically rejects with Error("exists") if the key is taken. */
   write(key: string, value: string, options?: { ifAbsent?: boolean }): Promise<void>;
@@ -61,9 +67,22 @@ export const BLOB_MEDIA_TYPES = ["image/jpeg", "image/png", "application/json"] 
 export type BlobMediaType = (typeof BLOB_MEDIA_TYPES)[number];
 /** Provisional, like DEFAULT_LOCAL_MAX_BYTES (MC-35): one screenshot or trace, decoded. */
 export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
+/**
+ * Provisional bound on all stored browser-result bytes (CR-10), kept apart from
+ * DEFAULT_LOCAL_MAX_BYTES: screenshots never count against, or crowd out, the review
+ * data MC-35 protects. When a new capture does not fit, the OLDEST captures are removed
+ * first. They are copies of a page the browser can take again, not review data; the
+ * events that named them stay; the list then finds no stored screen for them.
+ */
+export const DEFAULT_BLOB_MAX_BYTES = 64 * 1024 * 1024;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-const blobKey = (digest: string) => `blobs/${digest.slice("sha256:".length)}`;
+const BLOB_PREFIX = "blobs/";
+/** Age order of stored bytes: `blob-order/<at, zero-padded>-<hex>` → { size }. Listing is enough to find the oldest. */
+const BLOB_ORDER_PREFIX = "blob-order/";
+const blobKey = (digest: string) => `${BLOB_PREFIX}${digest.slice("sha256:".length)}`;
+const blobOrderKey = (at: number, digest: string) => `${BLOB_ORDER_PREFIX}${String(Math.max(0, Math.floor(at))).padStart(15, "0")}-${digest.slice("sha256:".length)}`;
+const isBlobKey = (key: string) => key.startsWith(BLOB_PREFIX) || key.startsWith(BLOB_ORDER_PREFIX);
 
 interface BlobRecord {
   format: typeof LOCAL_RECORD_FORMAT;
@@ -71,6 +90,8 @@ interface BlobRecord {
   digest: string;
   media_type: BlobMediaType;
   bytes: number;
+  /** When these bytes were first stored (age order for the bound). */
+  at?: number;
   /** base64 of exactly the bytes `digest` names. */
   data: string;
 }
@@ -422,6 +443,8 @@ export interface MyRecords {
   unassigned_observations: number;
   gaps: Array<{ host: string; scope: string; session: string; missing: number[]; incomplete: boolean }>;
   deleted_tasks: string[];
+  /** CR-10 — stored browser-result bytes (screenshots, action traces): shown, not hidden (MC-27). */
+  browser_results: { stored: number; bytes: number; max_bytes: number };
 }
 
 /** Source-aware identity (MC-08/34): the same scope, session and event id from two hosts are two records. */
@@ -434,10 +457,12 @@ const receiptKey = (ref: { id: string; revision: number }) => `receipts/${enc(re
 export class LocalRecord {
   readonly #store: StoragePort;
   readonly #maxBytes: number;
+  readonly #maxBlobBytes: number;
 
-  constructor(store: StoragePort, options: { maxBytes?: number } = {}) {
+  constructor(store: StoragePort, options: { maxBytes?: number; maxBlobBytes?: number } = {}) {
     this.#store = store;
     this.#maxBytes = options.maxBytes ?? DEFAULT_LOCAL_MAX_BYTES;
+    this.#maxBlobBytes = options.maxBlobBytes ?? DEFAULT_BLOB_MAX_BYTES;
   }
 
   // Every port failure is reported as a named failure, never as success (MC-35).
@@ -464,13 +489,38 @@ export class LocalRecord {
     }
   }
 
-  async usage(): Promise<{ bytes: number; max_bytes: number }> {
-    if (this.#store.usageBytes) {
-      try { return { bytes: await this.#store.usageBytes(), max_bytes: this.#maxBytes }; }
+  /** Characters stored under one prefix, through the port's exact count when it has one. */
+  async #usageOf(prefix: string): Promise<number> {
+    if (this.#store.usageOf) {
+      try { return await this.#store.usageOf(prefix); }
       catch { throw new Error("storage_failure"); }
     }
     let bytes = 0;
+    for (const key of await this.#keys(prefix)) {
+      try {
+        bytes += (await this.#store.read(key))?.length ?? 0;
+      } catch {
+        throw new Error("storage_failure");
+      }
+    }
+    return bytes;
+  }
+
+  async #blobUsage(): Promise<number> {
+    return (await this.#usageOf(BLOB_PREFIX)) + (await this.#usageOf(BLOB_ORDER_PREFIX));
+  }
+
+  /** The review data's usage against MC-35's limit. Browser-result bytes have their own bound (DEFAULT_BLOB_MAX_BYTES). */
+  async usage(): Promise<{ bytes: number; max_bytes: number }> {
+    if (this.#store.usageBytes) {
+      let total: number;
+      try { total = await this.#store.usageBytes(); }
+      catch { throw new Error("storage_failure"); }
+      return { bytes: total - (await this.#blobUsage()), max_bytes: this.#maxBytes };
+    }
+    let bytes = 0;
     for (const key of await this.#keys("")) {
+      if (isBlobKey(key)) continue;
       try {
         bytes += (await this.#store.read(key))?.length ?? 0;
       } catch {
@@ -480,8 +530,11 @@ export class LocalRecord {
     return { bytes, max_bytes: this.#maxBytes };
   }
 
-  /** false when `ifAbsent` found the key taken. Never evicts anything to make room. */
-  async #write(key: string, value: unknown, ifAbsent: boolean): Promise<boolean> {
+  /**
+   * false when `ifAbsent` found the key taken. Never evicts review data to make room;
+   * browser-result bytes are checked against their own bound (`quota: "blob"`).
+   */
+  async #write(key: string, value: unknown, ifAbsent: boolean, quota: "review" | "blob" = "review"): Promise<boolean> {
     // Last line of MC-30: no known secret format reaches storage, whichever field carries it.
     const raw = canonicalJson(redactDeep(value));
     let existing: string | null;
@@ -493,8 +546,8 @@ export class LocalRecord {
     // An existing record answers an ifAbsent write before any quota check, so an identical
     // retry stays idempotent when storage is full (MC-25/35). The port write itself stays atomic.
     if (ifAbsent && existing !== null) return false;
-    const { bytes } = await this.usage();
-    check(bytes - (existing?.length ?? 0) + raw.length <= this.#maxBytes, "capacity_exceeded");
+    const [bytes, max] = quota === "blob" ? [await this.#blobUsage(), this.#maxBlobBytes] : [(await this.usage()).bytes, this.#maxBytes];
+    check(bytes - (existing?.length ?? 0) + raw.length <= max, "capacity_exceeded");
     try {
       await this.#store.write(key, raw, { ifAbsent });
       return true;
@@ -613,9 +666,11 @@ export class LocalRecord {
    * Store bytes an event names by digest and return that digest. JSON is stored as the
    * canonical JSON of its MC-30-redacted value, so no known secret format reaches storage
    * through it, and its digest equals `digestOf(redactDeep(json))`. Images are stored as
-   * given. Storing the same bytes again is a no-op that returns the same digest.
+   * given. Storing the same bytes again is a no-op that returns the same digest. When the
+   * bytes do not fit DEFAULT_BLOB_MAX_BYTES the oldest stored bytes are removed first; review
+   * data is never touched to make room (MC-35).
    */
-  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }): Promise<string> {
+  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }, options: { at?: number } = {}): Promise<string> {
     check(isObj(input) && (BLOB_MEDIA_TYPES as readonly string[]).includes(String(input.media_type)), "invalid_blob");
     let bytes: Uint8Array;
     if (input.media_type === "application/json") {
@@ -628,13 +683,70 @@ export class LocalRecord {
     check(bytes.length > 0, "invalid_blob");
     check(bytes.length <= MAX_BLOB_BYTES, "blob_too_large");
     const digest = await sha256Of(bytes);
-    const record: BlobRecord = { format: LOCAL_RECORD_FORMAT, kind: "blob", digest, media_type: input.media_type, bytes: bytes.length, data: toBase64(bytes) };
-    await this.#write(blobKey(digest), record, true);
+    let present: string | null;
+    try {
+      present = await this.#store.read(blobKey(digest));
+    } catch {
+      throw new Error("storage_failure");
+    }
+    if (present === null) {
+      const at = Number.isFinite(options.at) ? Number(options.at) : Date.now();
+      const record: BlobRecord = { format: LOCAL_RECORD_FORMAT, kind: "blob", digest, media_type: input.media_type, bytes: bytes.length, at, data: toBase64(bytes) };
+      const size = canonicalJson(redactDeep(record)).length;
+      const marker = { size };
+      const need = size + canonicalJson(marker).length;
+      check(need <= this.#maxBlobBytes, "capacity_exceeded");
+      await this.#evictBlobsFor(need);
+      // The age marker goes first: a crash between the two leaves a marker without bytes
+      // (removed by the next eviction), never bytes that no bound or delete can find.
+      await this.#write(blobOrderKey(at, digest), marker, false, "blob");
+      await this.#write(blobKey(digest), record, true, "blob");
+    }
     // Read back before handing the digest out: a port that loses or alters the bytes (or
     // a redaction pattern that happened to match inside the base64) must not leave a
     // digest on an event that resolves to nothing.
     check((await this.getBlob(digest)) !== null, "storage_failure");
     return digest;
+  }
+
+  /** Remove the oldest stored bytes until `need` more characters fit the bound. */
+  async #evictBlobsFor(need: number): Promise<void> {
+    let used = await this.#blobUsage();
+    if (used + need <= this.#maxBlobBytes) return;
+    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
+      if (used + need <= this.#maxBlobBytes) return;
+      const key = BLOB_PREFIX + order.slice(-64);
+      let sizes: number;
+      try {
+        sizes = ((await this.#store.read(key))?.length ?? 0) + ((await this.#store.read(order))?.length ?? 0);
+      } catch {
+        throw new Error("storage_failure");
+      }
+      await this.#remove(key);
+      await this.#remove(order);
+      used -= sizes;
+    }
+  }
+
+  /**
+   * Delete stored browser-result bytes, all of them or the named digests, at the person's
+   * request ("실험 브라우저 기록 화면 지우기"). The events that named them stay.
+   */
+  async deleteBlobs(input: { by: "user"; at: number; digests?: readonly string[] }): Promise<{ removed: number }> {
+    check(isObj(input) && input.by === "user", "delete_requires_user");
+    let wanted: Set<string> | null = null;
+    if (input.digests !== undefined) {
+      check(Array.isArray(input.digests) && input.digests.every((d) => typeof d === "string" && DIGEST.test(d)), "invalid_digest");
+      wanted = new Set(input.digests.map((d) => d.slice("sha256:".length)));
+    }
+    let removed = 0;
+    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) if (!wanted || wanted.has(order.slice(-64))) await this.#remove(order);
+    for (const key of await this.#keys(BLOB_PREFIX)) {
+      if (wanted && !wanted.has(key.slice(BLOB_PREFIX.length))) continue;
+      await this.#remove(key);
+      removed++;
+    }
+    return { removed };
   }
 
   /** The bytes a digest names, checked against it; null when they are not stored. */
@@ -898,11 +1010,18 @@ export class LocalRecord {
   async deleteTask(taskId: string, input: { by: "user"; at: number }): Promise<{ removed: Record<string, number>; not_covered: readonly string[] }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
     await this.getTask(taskId);
-    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0 };
+    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0 };
     const evidence: string[] = [];
+    // CR-10 — the stored bytes this task's observations name go with them.
+    const named = new Set<string>();
+    const namesOf = (o: ObservationRecord | null): string[] =>
+      (["screenshot_digest", "trace_digest"] as const)
+        .map((k) => (o?.event as Record<string, unknown> | undefined)?.[k])
+        .filter((d): d is string => typeof d === "string" && DIGEST.test(d));
     for (const aKey of await this.#keys("assignments/")) {
       if ((await this.#read<Assignment>(aKey))?.task !== taskId) continue;
       const oKey = `observations/${aKey.slice("assignments/".length)}`;
+      for (const d of namesOf(await this.#read<ObservationRecord>(oKey))) named.add(d);
       await this.#remove(oKey);
       await this.#remove(aKey);
       evidence.push(oKey);
@@ -935,6 +1054,11 @@ export class LocalRecord {
       if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
       await this.#remove(k);
       removed.sessions++;
+    }
+    if (named.size) {
+      // Bytes another remaining observation still names stay (content-addressed, shared).
+      for (const k of await this.#keys("observations/")) for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.delete(d);
+      removed.browser_result_bytes = (await this.deleteBlobs({ by: "user", at: input.at, digests: [...named] })).removed;
     }
     // Keys only, no content: lets later collection and reinterpretation refuse the deleted evidence.
     await this.#write(`deleted/${taskId}`, { task: taskId, at: input.at, evidence }, false);
@@ -1023,7 +1147,8 @@ export class LocalRecord {
       if (g && (g.missing.length > 0 || g.incomplete)) gaps.push(g);
     }
     const deleted = (await this.#keys("deleted/")).map((k) => k.slice("deleted/".length));
-    return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted };
+    const browser_results = { stored: (await this.#keys(BLOB_PREFIX)).length, bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
+    return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted, browser_results };
   }
 }
 

@@ -10,8 +10,9 @@
 //                   switch on: both commands and all five tools appear.
 //   CR-T07          five-step kiosk flow reaches the order screen; planted disabled step 4
 //                   stops at step 4.
-//   CR-T08          planted console error in step 3 reported once, at step 3; the clean and
-//                   the chatty (console.log/info) flows report none.
+//   CR-T08          planted console error in flow step 3 reported once, at the step index of
+//                   the action that raised it (action 4: the opening navigate is action 1);
+//                   the clean and the chatty (console.log/info) flows report none.
 //   CR-T63          the page outline is painted while agent steps run and gone after; the
 //                   chat-panel tool line is "running" during a step and none is after.
 //   CR-T09          a pick in the integrated browser queues the element (ref, snippet, crop,
@@ -68,6 +69,12 @@ class Service {
   }
 }
 
+/**
+ * Send one message and prove it left: the composer must be idle first (its idle
+ * placeholder; a turn still finishing would park the message instead), and the student's
+ * bubble must appear before anything polls the Service. A message that does not show up
+ * fails HERE, with what the composer held, instead of as a run that "did not finish".
+ */
 async function send(win: Page, text: string): Promise<void> {
   // The unified chat is an editor tab; opening index.html can cover it. Bring it forward.
   const tab = win.locator(".tabs-container .tab", { hasText: "AI와 작업" }).first();
@@ -79,9 +86,28 @@ async function send(win: Page, text: string): Promise<void> {
   const later = chat.locator(".hps-update-banner-dismiss");
   if (await later.isVisible().catch(() => false)) await later.click();
   const input = chat.locator("textarea[placeholder^=\"메시지를 입력\"]").first();
+  await expect(input, "the composer is idle (no turn still finishing)").toBeEditable({ timeout: 60_000 });
+  const bubbles = chat.locator(".hps-msg-user .hps-msg-body");
+  const before = await bubbles.count();
   await input.fill(text);
+  await expect(input).toHaveValue(text);
   await input.press("Enter");
+  try {
+    await expect.poll(async () => (await bubbles.allInnerTexts()).slice(before).some((t) => t.includes(text)), { timeout: 15_000 }).toBe(true);
+  } catch {
+    const diag = {
+      draft: await chat.locator("textarea").first().inputValue().catch(() => null),
+      placeholder: await chat.locator("textarea").first().getAttribute("placeholder").catch(() => null),
+      queued: await chat.locator(".hps-queued-text").allInnerTexts().catch(() => []),
+      notices: await chat.locator(".hps-page-notice").allInnerTexts().catch(() => []),
+      banner: await later.isVisible().catch(() => null),
+      bubbles: (await bubbles.allInnerTexts().catch(() => [])).slice(-2),
+    };
+    sendLost.push({ text, ...diag });
+    throw new Error(`message did not leave the composer: ${JSON.stringify({ text, ...diag })}`);
+  }
 }
+const sendLost: unknown[] = [];
 
 /** Command palette rows for a query, without running anything. */
 async function paletteRows(win: Page, query: string): Promise<string[]> {
@@ -172,6 +198,7 @@ test.afterEach(async () => {
 test.afterAll(() => {
   const out = path.join(repo, "e2e/test-results/cr-app/result.json");
   fs.mkdirSync(path.dirname(out), { recursive: true });
+  if (sendLost.length) record["send-lost"] = sendLost;
   fs.writeFileSync(out, JSON.stringify(record, null, 2));
 });
 
@@ -242,11 +269,10 @@ test("CR-T02/07/08/09/10/63 in-app, switch on", async () => {
   const at3 = planted.failures.filter((f) => /planted-step3-error/.test(f.message));
   record["CR-T08"] = { planted, disabled };
   expect(at3.length, "CR-T08: the planted error is reported once").toBe(1);
-  // "단계 N" is the Nth action of the turn; the opening navigate is action 1, so flow
-  // step 3 ("수량 늘리기") is action 4. The instrument maps the reported step back.
-  expect(at3[0].step, "CR-T08: a step is reported").not.toBeNull();
-  expect(planted.actions[at3[0].step! - 1], "CR-T08: the reported step is flow step 3").toBe("수량 늘리기");
-  expect(planted.actions.indexOf("수량 늘리기"), "instrument: flow step 3 is the turn's fourth action").toBe(3);
+  // CR-T08 row: "단계 N" is the Nth agent action of the request, the opening navigate
+  // counted, so flow step 3 ("수량 늘리기") is action 4 and the error is reported at 4.
+  expect(planted.actions.indexOf("수량 늘리기") + 1, "instrument: flow step 3 is the request's fourth action").toBe(4);
+  expect(at3[0].step, "CR-T08: reported at the step index of the action that raised it").toBe(4);
   expect(planted.failures.length).toBe(1);
 
   await send(win, "[cr:flow:chatty] 다시 해봐");

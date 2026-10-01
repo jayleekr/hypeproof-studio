@@ -54,6 +54,8 @@ const refOf = (snapshot, role, name) => new RegExp(`\\[ref=(e\\d+)\\] ${role} "$
 const failuresInText = (text) => {
   const out = [];
   for (const line of text.split("\n")) {
+    // A record of an earlier request is not this request's failure (CR-08).
+    if (/^- \[[a-z]+\/[a-z]+\] 이전 요청 /.test(line)) continue;
     const m = /^- \[(console|exception|network|log)\/([a-z]+)\](?: 단계 (\d+))? (.*?)(?: @ \S+)?$/.exec(line);
     if (!m || !(m[1] === "exception" || m[1] === "network" || m[2] === "error" || m[2] === "assert")) continue;
     out.push({ step: m[3] ? Number(m[3]) : null, kind: m[1], message: m[4] });
@@ -110,7 +112,10 @@ function agent(body) {
 function finish(run, failedAt, why) {
   run.failedAt = failedAt;
   run.done = true;
-  const failures = run.failures.map((f) => `${f.step ?? "-"}단계 ${f.message}`).join(" · ") || "없음";
+  // The executor's "단계 N" is the Nth action of the request and action 1 is the opening
+  // navigate, so action N is flow step N-1: the answer names flow steps only, the same
+  // numbering as "N단계에서 멈췄어요".
+  const failures = run.failures.map((f) => `${f.step === null ? "-" : Math.max(f.step - 1, 0)}단계 ${f.message}`).join(" · ") || "없음";
   return { text: `[로컬 시험 응답] ${failedAt === null ? "다섯 단계를 모두 마쳤어요" : `${failedAt}단계에서 멈췄어요 (${why})`}. 오류: ${failures}` };
 }
 

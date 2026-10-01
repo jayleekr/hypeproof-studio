@@ -8,16 +8,14 @@ Every CR behaviour sits behind the switch `curriculum_runtime.enabled` on the co
 
 **Flag:** `curriculum_runtime: { enabled: true }` on the profile, plus `browser_control.enabled` and `observation.format` (the validator refuses the switch without a recorder) and `input.image_paste` for the element crop.
 
-**Fastest check (one command, scripted agent, no model key).** Screen unlocked; an app copy with this branch's extension injected (`e2e/README.md`, "Driving a different .app", or `node e2e/classroom/mac-devhost.mjs`):
+**Fastest check (one command, in the background, scripted agent, no model key).** An app copy with this branch's extension injected (`e2e/README.md`, "Driving a different .app", or `node e2e/classroom/mac-devhost.mjs`), prepared once so it never takes focus:
 
 ```bash
-plutil -replace LSUIElement -bool true "<app copy>/Contents/Info.plist"   # once per copy: no Dock icon, never takes focus
-codesign --force --deep -s - "<app copy>"
-cd e2e
-HPS_APP_PATH="<app copy>" npx playwright test -c curriculum-runtime/playwright.config.ts
+bash scripts/prep-test-app.sh "<app copy>"     # once per copy: LSUIElement=1, ad-hoc re-sign
+GATE=idle HPS_APP_PATH="<app copy>" bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts
 ```
 
-The run stays in the background: quiet mode is the default (`e2e/README.md`, "Quiet mode"), so the window sits off-screen, is shown inactive and is never focusable, and the `LSUIElement` copy never activates. This config sets `HPS_QUIET_NO_HIDE=1`: a hidden app's integrated browser paints no frames and every observation's screenshot times out. It still needs an **unlocked** screen (the integrated browser paints no frames on a locked one, recon F7), so `scripts/e2e-quiet.sh`, which waits for the lock, cannot run it; start it when you step away without locking. `HPS_QUIET=0` shows the window for debugging and takes focus. Never point `HPS_APP_PATH` at `/Applications/HypeProof Studio.app`.
+`GATE=idle` starts the run only after 5 minutes without keyboard or mouse input with the screen **unlocked**, and stops it (exit 75, "retry later", not a failure) the moment you touch the Mac, so you can keep working and it waits for you to step away. The run itself is quiet: the window sits off-screen, is shown inactive and is never focusable, and the prepared copy never activates (`e2e/README.md`, "Quiet mode"). This config sets `HPS_QUIET_NO_HIDE=1` because a hidden app's integrated browser paints no frames; for the same reason the screen must stay unlocked (recon F7), so the default `GATE=lock` cannot run it. `HPS_QUIET=0` shows the window for debugging and takes focus. Never point `HPS_APP_PATH` at `/Applications/HypeProof Studio.app`.
 
 It starts its own local Service (`e2e/curriculum-runtime/app-service.mjs`: the real Service router, the `canary-sdk-contract` profile with the switch set in that process only, a scripted agent as the model) and writes `e2e/test-results/cr-app/result.json`.
 
@@ -37,10 +35,11 @@ Copy `e2e/curriculum-runtime/fixtures/kiosk-practice/` into the workspace, open 
 | Step | What the student does | Expected (in student terms) |
 |---|---|---|
 | 1 | Sends `[cr:flow] 주문 시작부터 주문 완료까지 눌러보고 오류가 있으면 몇 번째 단계였는지 알려줘` | The preview gets an orange outline while each step runs and loses it after; the chat shows one tool line per step that goes from running to done; the answer is "다섯 단계를 모두 마쳤어요. 오류: 없음" |
-| 2 | Sends `[cr:flow:console-step3] 다시 해봐` | The answer names the planted error once, at the turn's fourth action ("4단계", the opening navigate is action 1, so flow step 3) |
+| 2 | Sends `[cr:flow:console-step3] 다시 해봐` | The answer names the planted error once, at flow step 3 ("3단계 planted-step3-error"). The tool result itself says "단계 4": the browser counts the request's actions and the opening navigate is action 1 |
 | 3 | Sends `[cr:flow:disabled-step4] 다시 해봐` | "4단계에서 멈췄어요" |
 | 4 | Runs "HypeProof: 화면에서 요소 골라 코치에게 묻기" and clicks "주문 시작" in the preview | A chip "함께 보낼 요소 <button> “주문 시작” · 소스 위치: index.html:23" with a crop; ✕ removes it and nothing of it is sent |
 | 5 | Runs "HypeProof: 실험 브라우저 결과 기록 보기" | Each result is listed as "현재 버전 · sha256:…"; after `index.html` changes the same results read "이전 버전". Picking one with a screenshot attaches that stored screenshot to the next message |
+| 5a | In the same list, picks "저장된 화면·동작 기록 지우기" and confirms | "저장된 화면·동작 기록 N개를 지웠어요." The results stay listed; picking one now says "기록된 화면을 찾지 못했어요." |
 | 6 | Restarts `app-service.mjs` with `off` and reloads the window | Neither command is in the palette and the coach is offered none of the five CR tools |
 
-**Where the data is.** Browser results are `tool_result` events tagged `hps-browser-result/1` on the seat's measurement-core record, with the CR-10 keys `artifact_version`, `screenshot_digest` and `trace_digest`; the bytes are `blobs/` entries of the same record under the app's `User/globalStorage/<extension>/local-review-v1/`. The Service's `/__cr/state` shows what reached the scripted agent.
+**Where the data is.** Browser results are `tool_result` events tagged `hps-browser-result/1` on the seat's measurement-core record, with the CR-10 keys `artifact_version`, `screenshot_digest` and `trace_digest`; the bytes are `blobs/` entries of the same record under the app's `User/globalStorage/<extension>/local-review-v1/`. They are stored only when the turn has a recorder, are bounded at 64 MB of their own (oldest removed first, never counted against the local review's 256 MB), are removed with any local-review task whose observations name them, and are listed and deleted from the results command (step 5a). The Service's `/__cr/state` shows what reached the scripted agent.

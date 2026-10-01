@@ -41,6 +41,11 @@ export interface PageRecord {
   documentGeneration: string;
   /** The agent step during which it was captured, or null outside any step. */
   step: number | null;
+  /**
+   * Captured during an EARLIER agent request (CR-08). Its step number belonged to that
+   * request, so it is cleared: "단계 N" always means a step of the request now running.
+   */
+  earlierRequest?: true;
 }
 
 const MAX_MESSAGE = 500;
@@ -83,10 +88,12 @@ export class PageEventLog {
   private mainFrameId: string | null = null;
   private generation: string | null = null;
   private step: number | null = null;
+  /** The agent request now running (CR-08); every record remembers the one it was captured in. */
+  private turn = 0;
   private readonly contexts = new Map<number, string>();
   private readonly requests = new Map<string, { url: string; generation: string }>();
   private readonly failedRequests = new Set<string>();
-  private readonly byGeneration = new Map<string, { records: PageRecord[]; dropped: number }>();
+  private readonly byGeneration = new Map<string, { records: Array<PageRecord & { turn: number }>; dropped: number }>();
   private readonly docListeners = new Set<(generation: string) => void>();
   private sub: { dispose(): void } | undefined;
   private dialog: string | null = null;
@@ -172,6 +179,11 @@ export class PageEventLog {
     return this.step;
   }
 
+  /** The agent request now running (CR-08). Records of earlier requests lose their step number. */
+  setTurn(turn: number): void {
+    this.turn = turn;
+  }
+
   /** Called with the new generation whenever the main frame commits a new document. */
   onNewDocument(listener: (generation: string) => void): { dispose(): void } {
     this.docListeners.add(listener);
@@ -180,7 +192,9 @@ export class PageEventLog {
 
   records(generation: string | null = this.generation): PageRecord[] {
     if (!generation) return [];
-    return [...(this.byGeneration.get(generation)?.records ?? [])];
+    return (this.byGeneration.get(generation)?.records ?? []).map(({ turn, ...r }) =>
+      turn === this.turn ? r : { ...r, step: null, earlierRequest: true as const },
+    );
   }
 
   dropped(generation: string | null = this.generation): number {
@@ -338,7 +352,8 @@ export class PageEventLog {
       ...(rec.source ? { source: rec.source } : {}),
       documentGeneration: generation,
       step: this.step,
-    } as PageRecord);
+      turn: this.turn,
+    } as PageRecord & { turn: number });
   }
 }
 
@@ -675,7 +690,7 @@ export function observationText(o: Observation): string {
     lines.push(`이 문서의 콘솔·오류·실패한 요청 ${o.records.length}건${o.droppedRecords ? ` (+${o.droppedRecords}건 생략)` : ""}:`);
     for (const r of o.records) {
       const where = r.source?.url ? ` @ ${r.source.url}${r.source.line ? `:${r.source.line}` : ""}` : "";
-      lines.push(`- [${r.kind}/${r.level}]${r.step !== null ? ` 단계 ${r.step}` : ""} ${r.message}${where}`);
+      lines.push(`- [${r.kind}/${r.level}]${r.earlierRequest ? " 이전 요청" : r.step !== null ? ` 단계 ${r.step}` : ""} ${r.message}${where}`);
     }
   }
   lines.push("", o.snapshot);
@@ -685,10 +700,12 @@ export function observationText(o: Observation): string {
 /**
  * The failures an agent must report (CR-08): errors and failed requests, each with the
  * step it happened in. Plain `console.log` output is kept in the observation but is not
- * a failure.
+ * a failure, and neither is a record of an earlier request (it stays in the observation,
+ * marked "이전 요청").
  */
 export function failuresOf(records: readonly PageRecord[]): Array<{ step: number | null; kind: PageRecordKind; message: string }> {
   return records
+    .filter((r) => !r.earlierRequest)
     .filter((r) => r.kind === "exception" || r.kind === "network" || r.level === "error" || r.level === "assert")
     .map((r) => ({ step: r.step, kind: r.kind, message: r.message }));
 }
@@ -974,6 +991,8 @@ export class CrExecutor {
   private refs = new Map<string, number>();
   private refsGeneration: string | null = null;
   private step = 0;
+  /** Counts agent requests (newTurn); the logs use it to tell this request's records from earlier ones. */
+  private turn = 0;
 
   private readonly port: CrTabPort;
   private readonly hooks: CrHooks;
@@ -988,9 +1007,11 @@ export class CrExecutor {
     let log = this.logs.get(cdp);
     if (!log) {
       log = new PageEventLog();
+      log.setTurn(this.turn);
       this.logs.set(cdp, log);
       await log.attach(cdp);
     }
+    log.setTurn(this.turn);
     return log;
   }
 
@@ -1015,10 +1036,13 @@ export class CrExecutor {
    * A new agent turn: step numbers restart, so "단계 N" in a result is the Nth action the
    * agent took for THIS request (CR-08). With the switch on one executor outlives turns
    * (proxyTurnBrowser), and without this the third step of a second request read
-   * "단계 15" in the app (in-app CR-T08, 2026-10-01). Refs, guard and logs are kept.
+   * "단계 15" in the app (in-app CR-T08, 2026-10-01). Refs, guard and logs are kept, but
+   * records captured before this request lose their step number and read "이전 요청", so an
+   * earlier request's step 3 is never reported as this request's step 3.
    */
   newTurn(): void {
     this.step = 0;
+    this.turn++;
   }
 
   /** Remember the ref table of an observation (also used by element capture, CR-09). */

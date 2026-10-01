@@ -132,11 +132,15 @@ export type RecordFn = (
   extra?: { tool_id?: string; outcome?: "success" | "error" } & Partial<CrResultRefs>,
 ) => void;
 
+/** One set of bytes a result names: a screenshot (base64) or a trace (JSON). */
+export type ResultBlob = { media_type: BlobMediaType; base64?: string; json?: unknown };
+
 /**
- * Stores bytes on the local record (`LocalRecord.putBlob`) and resolves to their digest,
- * or to null when they were not stored. Never throws into a turn.
+ * Stores one result's bytes on the local record (`LocalRecord.putBlob`) in ONE write
+ * session and resolves to their digests, in order, each null when it was not stored.
+ * Never throws into a turn.
  */
-export type BlobSink = (blob: { media_type: BlobMediaType; base64?: string; json?: unknown }) => Promise<string | null>;
+export type BlobSink = (blobs: readonly ResultBlob[]) => Promise<Array<string | null>>;
 
 /** One browser result as its `tool_result` event: readable text plus the reference keys. */
 export interface CrResultEvent {
@@ -151,16 +155,22 @@ const OBSERVE_TOOLS = new Set(["browser_observe", "browser_read", "browser_scree
  * bytes did not land: an event never names bytes the record does not hold.
  */
 async function storeResultBlobs(record: BrowserResultRecord, blobs: BrowserResultBlobs, sink: BlobSink | undefined): Promise<void> {
-  const put = async (want: string | null, blob: Parameters<BlobSink>[0] | null): Promise<string | null> => {
-    if (!want || !blob || !sink) return null;
-    try {
-      return (await sink(blob)) === want ? want : null;
-    } catch {
-      return null;
-    }
-  };
-  record.screenshot_digest = await put(record.screenshot_digest, blobs.screenshot);
-  record.trace_digest = await put(record.trace_digest, { media_type: "application/json", json: blobs.trace });
+  const wanted: Array<{ want: string; blob: ResultBlob; set: (d: string | null) => void }> = [];
+  if (record.screenshot_digest && blobs.screenshot) wanted.push({ want: record.screenshot_digest, blob: blobs.screenshot, set: (d) => { record.screenshot_digest = d; } });
+  else record.screenshot_digest = null;
+  if (record.trace_digest) wanted.push({ want: record.trace_digest, blob: { media_type: "application/json", json: blobs.trace }, set: (d) => { record.trace_digest = d; } });
+  if (!sink || !wanted.length) {
+    for (const w of wanted) w.set(null);
+    return;
+  }
+  let got: Array<string | null> = [];
+  try {
+    const answer = await sink(wanted.map((w) => w.blob));
+    got = Array.isArray(answer) ? answer : [];
+  } catch {
+    got = [];
+  }
+  wanted.forEach((w, i) => w.set(got[i] === w.want ? w.want : null));
 }
 
 /** The `tool_result` event that binds one browser result to its artifact version. */
@@ -215,21 +225,29 @@ export async function recordElementCapture(record: RecordFn, toolId: string, ele
  * tool_result activity (browser tools run one at a time).
  */
 export class SdkCrResults {
-  private pending: Array<Promise<CrResultEvent>> = [];
+  private pending: Array<() => Promise<CrResultEvent>> = [];
   private readonly ids = new Set<string>();
+  private sink: BlobSink | undefined;
 
-  /** A new turn: nothing carried over. */
-  reset(): void {
+  /**
+   * A new turn: nothing carried over. `sink` is given only when the turn has a recorder,
+   * so no bytes are stored that no recorded event will name (CR-10).
+   */
+  reset(sink?: BlobSink): void {
     this.pending = [];
     this.ids.clear();
+    this.sink = sink;
   }
 
-  /** The MCP handler produced a CR result with an observation. */
-  onInspect(name: string, input: Record<string, unknown>, observation: Observation | undefined, sink?: BlobSink): void {
+  /**
+   * The MCP handler produced a CR result with an observation. Nothing is stored yet: the
+   * bytes go to the record only when the SDK reports this call's tool_result, which is
+   * when the event that names them is written.
+   */
+  onInspect(name: string, input: Record<string, unknown>, observation: Observation | undefined): void {
     if (!observation) return;
-    const p = crResultEvent(name, input, observation, sink);
-    p.catch(() => {});
-    this.pending.push(p);
+    const sink = this.sink;
+    this.pending.push(() => crResultEvent(name, input, observation, sink));
   }
 
   /** A tool_use activity: remember the delegated browser tools' ids while the switch is on. */
@@ -245,7 +263,7 @@ export class SdkCrResults {
   onToolResult(id: string, isError: boolean): Promise<CrResultEvent> | undefined {
     if (isError || !this.ids.has(id)) return undefined;
     this.ids.delete(id);
-    return this.pending.shift();
+    return this.pending.shift()?.();
   }
 }
 

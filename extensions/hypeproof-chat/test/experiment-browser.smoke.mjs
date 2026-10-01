@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
 
 const eb = await import("../src/experimentBrowser.ts");
-const { PageEventLog, CrExecutor, observationProblems, actionResultProblems, checkAgentOrigin } = eb;
+const { PageEventLog, CrExecutor, observationProblems, actionResultProblems, checkAgentOrigin, failuresOf } = eb;
 const { toMcpToolResult } = await import("../src/browserMcp.ts");
 const { toProxyToolResult } = await import("../src/browserControlHelpers.ts");
 
@@ -26,10 +26,14 @@ function modelText(r) {
   assert.equal(texts(toProxyToolResult("t", r).content), sdk, "both runtimes hand the model the same text");
   return sdk;
 }
-/** The failures (CR-08) the model can read off a result: error records with their step. */
+/**
+ * The failures (CR-08) the model can read off a result: error records with their step.
+ * A record marked "이전 요청" belongs to an earlier request and is not this request's failure.
+ */
 function failuresInText(text) {
   const out = [];
   for (const line of text.split("\n")) {
+    if (/^- \[[a-z]+\/[a-z]+\] 이전 요청 /.test(line)) continue;
     const m = /^- \[(console|exception|network|log)\/([a-z]+)\](?: 단계 (\d+))? (.*?)(?: @ \S+)?$/.exec(line);
     if (!m || !(m[1] === "exception" || m[1] === "network" || m[2] === "error" || m[2] === "assert")) continue;
     out.push({ step: m[3] ? Number(m[3]) : null, kind: m[1], message: m[4] });
@@ -333,6 +337,33 @@ await test("CR-T08: with one executor across turns, a new turn numbers its steps
   for (let i = 0; i < 8; i++) await old.execute("browser_hover", { ref: "e1" });
   const o = await old.execute("browser_click", { ref: "e1" });
   assert.equal(failuresInText(modelText(o)).find((f) => f.message === "no-new-turn")?.step, 9);
+});
+
+await test("CR-T08: an earlier request's error is never reported at a step of the request now running", async () => {
+  let clicks = 0;
+  const page = makeFakePage({ onClick: (p) => { if (++clicks === 3) p.consoleError("turn1-step3-error"); } });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  for (let i = 0; i < 3; i++) await ex.execute("browser_click", { ref: "e1" }); // turn 1: the error at step 3
+  ex.newTurn();
+  // Turn 2 does not navigate first ("다시 해봐" and the agent just clicks again): same document.
+  const r = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.observation.step, 1);
+  const text = modelText(r);
+  assert.deepEqual(failuresInText(text), [], `turn 2 reports no failure: ${text.split("\n").filter((l) => l.startsWith("- [")).join(" | ")}`);
+  assert.deepEqual(failuresOf(r.observation.records), [], "nor does the failure rule");
+  assert.match(text, /^- \[console\/error\] 이전 요청 turn1-step3-error/m, "the earlier error stays visible, marked as an earlier request's");
+  assert.doesNotMatch(text, /단계 3 turn1-step3-error/, "never with the step number of the earlier request");
+  const rec = r.observation.records.find((x) => x.message === "turn1-step3-error");
+  assert.deepEqual([rec.step, rec.earlierRequest], [null, true]);
+  // Control: an error raised during THIS request's step still carries its step.
+  const page2 = makeFakePage({ onClick: (p) => p.consoleError("turn2-step2-error") });
+  const { ex: ex2 } = executorFor(page2);
+  await ex2.execute("browser_observe");
+  ex2.newTurn();
+  await ex2.execute("browser_hover", { ref: "e1" });
+  const c = await ex2.execute("browser_click", { ref: "e1" });
+  assert.deepEqual(failuresInText(modelText(c)), [{ step: 2, kind: "console", message: "turn2-step2-error" }]);
 });
 
 await test("CR-T05 late attach: load-time HTTP errors are recovered, and a late-attached clean page is not called clean", async () => {
