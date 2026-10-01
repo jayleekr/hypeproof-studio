@@ -1,6 +1,6 @@
 ---
 name: hype-pr
-description: Prepare and create PRs in hypeproof-harness, hypeprooflab, or hypeproof-studio. Use when asked to create/open a PR, send changes for review, or implement an issue through PR creation (PR 만들어줘, 이슈 구현하고 PR 생성). Inspect criteria links at development start and bind an agent assessment before creating the PR. Existing-PR reviews use hype-review instead.
+description: Prepare and create PRs in hypeproof-harness, hypeprooflab, hypeproof-studio, or sediment. Use when asked to create/open a PR, send changes for review, or implement an issue through PR creation (PR 만들어줘, 이슈 구현하고 PR 생성). Inspect criteria links at development start and bind an agent assessment before creating the PR. Existing-PR reviews use hype-review instead.
 ---
 
 # Agent PR preparation
@@ -11,12 +11,20 @@ Harness checkout, found as a sibling of the main consumer checkout or through
 location (or use an existing checkout via the environment variable). If the entrypoint
 reports an outdated Harness, update a clean main checkout with a fast-forward pull,
 or use a separate updated checkout; preserve existing work. Python 3.11+,
-PyYAML and authenticated `gh` are required. Do not copy policy or the impact engine
+PyYAML are required. Local execution uses authenticated `gh`; Work can use the
+connected GitHub tools through the explicit host transport in
+`docs/HYPE-PR.ko.md` → `Work GitHub transport`. Both paths execute the same
+inspect/assessment/prepare/create guards. Do not copy policy or the impact engine
 into consumers. Keep operations scoped to the requested HypeProof repository.
 
 ## At development start
 
 Read the repository instructions and relevant canon, then its `config/traceability.json`.
+Before creating the task branch, reuse or create an open issue in the target repository
+whose scope and acceptance result match this PR-sized vertical change. An Epic is a
+parent product outcome, not the PR close target. Record the Epic as context or parent
+and close the scoped work issue. The guard verifies objective GitHub properties; you
+and the coordinator remain responsible for judging semantic scope fit.
 Find the existing Intent, REQ and test nodes for the requested change. Inspect the
 actual documents before choosing parents. New criteria need a stable ID, correct
 stage, an agreed domain owner and parent links; the PR author is not automatically
@@ -78,14 +86,29 @@ uncommitted text. Read working changes directly when developing.
    ```bash
    python3 scripts/hype-pr/pr.py create --repo OWNER/REPO --head BRANCH \
      --title 'feat(scope): 한글 요약' --body-file /tmp/pr-body.md --author LOGIN \
-     --preparation RECEIPT_PATH --apply
+     --issue ISSUE_NUMBER --preparation RECEIPT_PATH --apply
    ```
 
-   Omit `--apply` for a command preview. The apply path recomputes source checks,
+   The PR body must close that issue and no other issue. Omit `--apply` for a command
+   preview. The apply path verifies that the target is an existing open same-repository
+   issue rather than a PR or Epic, then recomputes source checks,
    verifies the remote head, derives risk from the actual diff and adds a fixed
-   preparation summary to the PR body. Assessment prose is not published. Active
-   non-author reviewers are requested under canonical policy. On stale preparation,
+   preparation summary to the PR body. Assessment prose is not published. Reviewer
+   requests are disabled by default, and any catch-all CODEOWNERS requests created
+   with the PR are removed before the command succeeds. If a draft is later marked
+   ready, inspect and remove any catch-all request GitHub creates at that transition
+   unless the user explicitly requested peer review. Add `--request-reviewers`
+   only when the user explicitly asks for peer review on that PR. On stale preparation,
    repeat inspection/assessment; do not use direct `gh pr create` as a workaround.
+
+In Work, run these same commands through `runWorkCommand` in the canonical
+`scripts/hype-pr/work_host.js`. Use read-only host options for inspect/prepare;
+enable create only for the authorized repository and exact branch. The host
+rechecks live refs and connected author before creating the PR. A lost response
+can leave a created PR: inspect GitHub before retrying; never replay automatically.
+Keep source replies and assessments in private scratch directories, not commits.
+Transport changes under development may be exercised on their own branch when
+the user has authorized implementing this transport; this is not human approval.
 
 PR creation is not merge authorization. Follow the user's existing authorization
 and repository merge requirements. This is the standard agent workflow, not a new

@@ -100,6 +100,10 @@
         "title": "HypeProof Chat: 저장된 issuer 토큰 지우기"
       },
       {
+        "command": "hypeproof-chat.chalk.setInstructorToken",
+        "title": "Chalk: 강사 토큰 입력"
+      },
+      {
         "command": "hypeproof-chat.chalk.checkPlan",
         "title": "Chalk: 초안 검사 (강사용)"
       },
@@ -317,7 +321,8 @@
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "build:webview": "cd webview-ui && npm install && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools",
+    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools && npm run test:instructor-render",
+    "test:instructor-render": "NODE_PATH=webview-ui/node_modules node_modules/.bin/esbuild test/instructor-render.test.tsx --bundle --platform=node --format=cjs --loader:.css=empty --loader:.svg=empty --jsx=automatic --external:vscode --banner:js=\"globalThis.window = globalThis.window ?? { acquireVsCodeApi: undefined };\" --outfile=/tmp/instructor-render.test.cjs && node /tmp/instructor-render.test.cjs",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
     "watch:webview": "cd webview-ui && npm run dev",
     "package": "vsce package --no-dependencies",

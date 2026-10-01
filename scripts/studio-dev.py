@@ -190,6 +190,8 @@ def launch(app, state, local_runtime=None):
                    HPS_DEV_MODEL=local_runtime['model'], HPS_DEV_EXECUTABLE=local_runtime['executable'])
     # Never import the globally shared dev-stack token implicitly.
     env['HPS_DEV_TOKEN_FILE'] = str(state / 'local-participant-token.txt')
+    # HPS_DEV_ISSUER_TOKEN_FILE: forwarded from the caller when set (review-pr.sh writes it).
+    # dict(os.environ) above already carries it; no explicit override needed.
     with (state / 'app.log').open('a') as log:
         process = subprocess.Popen([str(app / 'Contents/MacOS' / executable),
             '--user-data-dir=' + str(state / 'user-data'), '--extensions-dir=' + str(state / 'extensions'),

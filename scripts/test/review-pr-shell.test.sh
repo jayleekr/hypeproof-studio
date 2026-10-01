@@ -86,6 +86,24 @@ else
   fail "_CLEANUP_DONE guard not found"
 fi
 
+# 11. issuer token must not be written to local-participant-token.txt (TOKEN_KEY student slot)
+# Verifies the chalk-po condition 2 fix: the 4 lines that wrote issuer token to the student
+# slot were removed. A redirect (>) or printf to local-participant-token.txt means regression.
+if grep -qE '>.*local-participant-token\.txt|printf.*TOKEN.*local-participant-token' "$SCRIPT"; then
+  fail "issuer token write to local-participant-token.txt found (TOKEN_KEY violation)"
+else
+  ok "no issuer token write to local-participant-token.txt"
+fi
+
+# 12. TOKEN_JSON must only be output through the redact filter (sed '***'), never raw
+# Verifies the extraction-failure redaction fix: the sed redact line must be present,
+# confirming TOKEN_JSON is never printed in plaintext.
+if grep -q '\bTOKEN_JSON\b.*sed.*\*\*\*' "$SCRIPT"; then
+  ok "TOKEN_JSON redact pattern (sed '***') present in script"
+else
+  fail "TOKEN_JSON redact pattern not found — token may be printed in plaintext on failure"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
