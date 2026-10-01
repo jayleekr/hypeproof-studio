@@ -206,13 +206,13 @@ Browser results are `tool_result` events tagged `hps-browser-result/1` with the 
 
 ### In-app rows (`e2e/curriculum-runtime/app-layer.spec.ts`)
 
-Four consecutive gated runs at the final tree (11:47–11:50), each `2 passed`:
+Four consecutive gated runs at the final tree (11:47–11:50), each `2 passed`. (A reviewer then saw 2 failures in 4 runs of the same tree: a follow-up message that never left the composer. Superseded by "Finish review round 1", which measures the pass rate over 5 runs with a `send()` that proves each message left.)
 
 | Row | Positive | Negative control (in the same run) |
 |---|---|---|
 | CR-T02 (in-app) | switch on: `browser_observe`, `browser_select`, `browser_scroll`, `browser_hover`, `browser_reload` offered; both CR commands in the palette | switch off: none of the five tools and neither command; the existing `browser_navigate` and "HTML 미리보기" still found (instrument control) |
 | CR-T07 | five steps reach "주문이 완료되었어요" | planted disabled step 4 stops at 4 |
-| CR-T08 | planted console error reported once, at action 4 (flow step 3; the opening navigate is action 1) | clean and chatty (`console.log`/`info`) flows report none |
+| CR-T08 | planted console error reported once, at action 4 (flow step 3; the opening navigate is action 1; the CR-T08 row now states this definition) | clean and chatty (`console.log`/`info`) flows report none |
 | CR-T63 | orange outline in 36 of 93 frames sampled during the flow; a tool line was `running` during a step | the last 5 frames after the flow carry no outline; no running tool line after |
 | CR-T09 | pick of "주문 시작": chip `index.html:23`, crop attached, the next request starts with exactly the previewed text and carries the image; the pick did not press the button | a script-made element reads "소스 위치: 찾지 못함"; a removed element sends nothing and no image |
 | CR-T10 (app) | results read back as "현재 버전 · sha256:04cdec9f…"; 32 `blobs/` entries on the local record | after `index.html` changes the same results read "이전 버전" and none "현재 버전" |
@@ -239,6 +239,38 @@ The three product defects the earlier, visible in-app runs found are fixed in `6
 | CR-59, CR-60 | moved to `cr-e2e` (decision 9); not claimed here |
 
 **Claim for the PR.** Every requirement `cr-browser` owns after decision 9 has evidence at the layer its row names; the PR can close #1391. The completion record is written by the record-only PR after merge, with a reviewer other than the implementer.
+
+## Finish review round 1 (2026-10-01)
+
+Fixes for the review of `b306e646`, in one commit after merging `origin/main` (`dda50ad7`, the idle gate).
+
+- **CR-10 bytes have an owner and a lifecycle.** They no longer count against the local review's MC-35 limit; they have their own bound (`DEFAULT_BLOB_MAX_BYTES`, 64 MB, oldest removed first, age kept in `blob-order/` keys so no screenshot is read to find it). `deleteTask` removes the bytes the task's observations name (`removed.browser_result_bytes`), and `DELETE_NOT_COVERED` names the rest (`browser_result_bytes_not_named_by_the_task`). `deleteBlobs` deletes all or named bytes; the results command lists "저장된 화면·동작 기록 지우기" with a count and a confirmation. `records()` reports `browser_results` (count, bytes, bound).
+- **No bytes without the event that names them.** The proxy and pick paths get a sink only when the turn has a recorder; the SDK path stores nothing at inspect time and only stores when the matching `tool_result` is recorded.
+- **Write cost.** One lock per result (screenshot and trace together). `FileRecordStorage` keeps what it has read per file and re-reads only files whose size or mtime changed, so a lock no longer re-reads every screenshot. Two writers in one extension host wait for each other instead of the second failing `storage_busy`; a call made from inside a held lock still fails closed. Measured with 150 KB images through `exclusive(putBlob)`, one process: 48 ms at 0 stored, 35–51 ms from 50 to 450 stored (was 35 ms → 421 ms at 400), bound reached at 335 blobs (67 MB) with review usage 0.
+- **CR-08 across requests.** `CrExecutor.newTurn()` also starts a new request in the event logs: records captured before it lose their step and read "이전 요청", and `failuresOf` skips them. Smoke: turn 1 error at step 3, turn 2 clicks without navigating; turn 2 reports no failure and the line reads "이전 요청 turn1-step3-error". Planted revert (`turn++` removed): RED with "단계 3 turn1-step3-error".
+- **CR-T08 numbering.** The row now defines the step as the Nth agent action of the request, the opening navigate counted; the in-app spec asserts step 4 directly. The scripted agent's answer names flow steps only ("3단계 planted-step3-error", "4단계에서 멈췄어요"), so its two numbers no longer disagree.
+- **In-app send.** `send()` waits for the idle composer and fails at once, with the composer's state, if the student's bubble does not appear in 15 s.
+
+Gates at the fix commit (exit codes): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 (first run 1: `local-review-recovery` nests a lock call inside a held lock, which the new in-process chain made wait; fixed to fail closed as before, then 0) · `webview-ui` tsc 0 · `e2e` real Chromium 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
+
+Planted defects, one at a time (scratch runner):
+
+| Planted defect | Test | Result |
+|---|---|---|
+| review usage counts browser-result bytes | cr-browser-refs (port-count variant) | RED (the first run survived: the test port had no `usageBytes`; the test now runs on both port kinds) |
+| no eviction of the oldest bytes | cr-browser-refs | RED |
+| `deleteTask` leaves the bytes its observations name | cr-browser-refs | RED |
+| `records()` hides stored bytes | cr-browser-refs | RED |
+| `deleteBlobs` ignores the named digests | cr-browser-refs | RED |
+| SDK result stores its bytes at inspect time | cr-host | RED (after the check waits for pending writes) |
+| provider passes the sink without a recorder | cr-host | RED |
+| one lock per blob instead of per result | cr-host | RED |
+| same-process writers fail `storage_busy` | local-record-file | RED |
+| earlier-request records keep their step | experiment-browser | RED |
+| failure rule counts earlier-request records | experiment-browser | RED |
+| malformed version accepted by `browserResultParts` | cr-host | GREEN: `browserResultEventText` refuses the same id before any byte reaches the sink, so the refusal and "no sink call" hold either way; the check is defence in depth |
+
+In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with the fix build injected (4 bundle hashes match), `scripts/prep-test-app.sh`, `GATE=idle HPS_APP_PATH=… bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts`: **5 of 5 runs `2 passed`** (12:32–12:35), no message lost (no `send-lost` entry). Each run: CR-T08 planted error at step 4 once, disabled flow stops at 4, chatty and clean flows none; CR-T10 results read "현재 버전" then "이전 버전", 32 `blobs/` entries. The reviewer's lost message did not recur and its cause was not determined; if it happens again the run now stops at that send with the composer's draft, placeholder, parked text and notices.
 
 ## NOT RUN
 
@@ -275,6 +307,8 @@ The three product defects the earlier, visible in-app runs found are fixed in `6
 - An id-less `Log` entry that arrives within 1 s of a main-frame commit is dropped rather than attributed (it may be the previous document's).
 - The artifact version's file set holds static references only (HTML, CSS, JS imports). Files a page loads dynamically (`fetch('menu.json')`, an image `src` built in script) are not in it, so editing only such a file does not produce a new version, and results before and after the edit carry the same version (recon R4's definition; partial coverage of CR-10's "marked as belonging to the earlier version").
 - Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later. (Fixed in the finish: the bytes are `blobs/` entries of the same local record, `LocalRecord.putBlob`.)
+- Browser-result bytes live in the App's global storage, their events in the workspace's observation batch: clearing or moving a workspace leaves the bytes until the bound removes them or the student deletes them from the results command. Deleting bytes leaves the events, which then resolve to no stored screen.
+- The browser-result history's error count reads a stored result's records as they were; a record marked "이전 요청" in the model text is stored without that mark.
 - CR-10 persistence needs an observation recorder, which the App builds only when the profile names `observation.format`. The validator now fails a profile with the switch on and no format (`cr_without_observation_format`); a profile that bypassed the validator would still drop browser results silently.
 - The page-level indicator is the overlay outline; the chat-panel half is the tool-log line (`browserToolLogLine`, now labelled for the five CR tools). `CrHooks.onIndicator` is not wired in the product.
 - The artifact version re-reads the file set on every observation (no cache).
