@@ -120,15 +120,16 @@ export async function waitRun(svc: Service, key: string, win: Page, sample?: (ru
 }
 
 /** Main-process sampler: does the preview's painted frame carry the orange automation outline? */
-export async function startOutlineSampler(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ webContents }) => {
+export async function startOutlineSampler(app: ElectronApplication, urlPattern = "^http://127\\.0\\.0\\.1:\\d+/index\\.html"): Promise<void> {
+  // cr-verify passes a pattern that also matches the preview root ("/"), where the runner starts.
+  await app.evaluate(({ webContents }, pattern) => {
     const g = globalThis as unknown as { __crOutline?: { samples: Array<{ at: number; orange: number }>; stop?: boolean } };
     g.__crOutline = { samples: [] };
     const tick = async () => {
       const s = g.__crOutline!;
       if (s.stop) return;
       try {
-        const wc = webContents.getAllWebContents().find((w) => /^http:\/\/127\.0\.0\.1:\d+\/index\.html/.test(w.getURL()));
+        const wc = webContents.getAllWebContents().find((w) => new RegExp(pattern).test(w.getURL()));
         if (wc) {
           const img = await wc.capturePage();
           const { width, height } = img.getSize();
@@ -144,7 +145,7 @@ export async function startOutlineSampler(app: ElectronApplication): Promise<voi
       setTimeout(tick, 25);
     };
     void tick();
-  });
+  }, urlPattern);
 }
 export async function stopOutlineSampler(app: ElectronApplication): Promise<Array<{ at: number; orange: number }>> {
   return app.evaluate(() => {

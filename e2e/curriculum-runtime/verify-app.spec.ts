@@ -58,6 +58,12 @@ test.afterAll(() => {
   fs.writeFileSync(out, JSON.stringify(record, null, 2));
 });
 
+/** The unified chat is an editor tab and the preview can cover it; bring it forward (as send() does). */
+async function focusChat(): Promise<void> {
+  const tab = ctx!.win.locator(".tabs-container .tab", { hasText: "AI와 작업" }).first();
+  if ((await tab.count()) > 0) await tab.click().catch(() => undefined);
+}
+
 /** Launch with the switch on, the kiosk fixture in the workspace and its preview open. */
 async function openKiosk(): Promise<{ win: Page; chat: FrameLocator }> {
   await svc.start(true);
@@ -77,6 +83,7 @@ async function openKiosk(): Promise<{ win: Page; chat: FrameLocator }> {
   await runCommand(win, PREVIEW);
   await expect.poll(() => previewUrl(app), { timeout: 30_000 }).not.toBeNull();
   await runCommand(win, TEST);
+  await focusChat();
   const chat = await chatFrame(win);
   await expect(chat.locator('[data-testid="verify-panel"]')).toBeVisible({ timeout: 20_000 });
   return { win, chat };
@@ -84,8 +91,11 @@ async function openKiosk(): Promise<{ win: Page; chat: FrameLocator }> {
 
 /** Replace the panel's criteria with `texts` (typed by the student). */
 async function typeCriteria(chat: FrameLocator, texts: string[]): Promise<void> {
+  await focusChat();
   const inputs = chat.locator('[data-testid="verify-criterion-input"]');
-  while ((await inputs.count()) > 1) await chat.locator('button[aria-label="이 조건 빼기"]').last().click();
+  // Every earlier row goes, a coach proposal included (typing a proposal's own text again
+  // does not confirm it: an unchanged input fires no change).
+  while ((await inputs.count()) > 0) await chat.locator('button[aria-label="이 조건 빼기"]').last().click();
   while ((await inputs.count()) < texts.length) await chat.locator("button", { hasText: "조건 더하기" }).click();
   for (let i = 0; i < texts.length; i++) await inputs.nth(i).fill(texts[i]);
 }
@@ -95,7 +105,23 @@ async function startRun(chat: FrameLocator, texts: string[]): Promise<{ run: str
   const before = (await verifyLog()).length;
   await typeCriteria(chat, texts);
   await chat.locator('[data-testid="verify-start"]').click();
-  await expect.poll(async () => (await verifyLog()).slice(before).filter((e) => e.kind === "result").length, { timeout: 120_000 }).toBe(texts.length);
+  try {
+    await expect.poll(async () => (await verifyLog()).slice(before).filter((e) => e.kind === "result").length, { timeout: 120_000 }).toBe(texts.length);
+  } catch (e) {
+    const diag = {
+      texts,
+      error: await chat.locator('[data-testid="verify-error"]').allInnerTexts().catch(() => []),
+      ai: await chat.locator('[data-testid="verify-ai-badge"]').allInnerTexts().catch(() => []),
+      log: (await verifyLog()).slice(before),
+      lastRequests: (await svc.state()).requests.slice(-3).map((r) => r.userText.slice(0, 400)),
+      bubbles: await chat.locator(".hps-msg-user .hps-msg-body").allInnerTexts().catch(() => []),
+      notices: await chat.locator(".hps-page-notice").allInnerTexts().catch(() => []),
+    };
+    // Written straight away: Playwright restarts the worker after a failure, so `record` is lost.
+    fs.mkdirSync(path.join(repo, "e2e/test-results/cr-app"), { recursive: true });
+    fs.writeFileSync(path.join(repo, `e2e/test-results/cr-app/verify-start-diag-${Date.now()}.json`), JSON.stringify(diag, null, 2));
+    throw e;
+  }
   const report = chat.locator('[data-testid="verify-report"]');
   await expect(report.locator('[data-testid="verify-result"]')).toHaveCount(texts.length, { timeout: 30_000 });
   await expect(chat.locator('[data-testid="verify-running"]')).toHaveCount(0, { timeout: 30_000 });
@@ -104,6 +130,7 @@ async function startRun(chat: FrameLocator, texts: string[]): Promise<{ run: str
 const statuses = async (chat: FrameLocator) => chat.locator('[data-testid="verify-result"]').evaluateAll((els) => els.map((e) => [e.getAttribute("data-status"), e.getAttribute("data-test-kind")]));
 const state = async (chat: FrameLocator) => chat.locator('[data-testid="verify-status"]').getAttribute("data-state");
 async function retest(chat: FrameLocator, previousRun: string): Promise<{ run: string; ms: number }> {
+  await focusChat();
   const t0 = Date.now();
   await chat.locator('[data-testid="verify-retest"]').click();
   await expect.poll(async () => chat.locator('[data-testid="verify-report"]').getAttribute("data-run"), { timeout: 120_000 }).not.toBe(previousRun);
@@ -132,11 +159,13 @@ test("CR-T12, CR-T63, CR-T76, CR-T14 positive and CR-T57 timing in-app", async (
   const { app } = ctx!;
 
   // ── CR-T12 negative: zero criteria, and an unconfirmed coach proposal ──────
+  await focusChat();
   await chat.locator('button[aria-label="이 조건 빼기"]').click();
   await chat.locator('[data-testid="verify-start"]').click();
   await expect(chat.locator('[data-testid="verify-error"]')).toContainText("1개에서 5개");
   await send(ctx!.win, "[cr:propose] 테스트할 조건 하나 제안해 줘");
   await expect(chat.locator('[data-testid="verify-proposal"]')).toHaveCount(1, { timeout: 60_000 });
+  await focusChat();
   await chat.locator('[data-testid="verify-proposal"]').click();
   await expect(chat.locator('[data-testid="verify-ai-badge"]')).toContainText("확인 필요");
   const requestsBefore = (await svc.state()).requests.length;
@@ -147,7 +176,7 @@ test("CR-T12, CR-T63, CR-T76, CR-T14 positive and CR-T57 timing in-app", async (
   expect(afterRefusal.filter((r) => /\[Studio 제품 테스트/.test(r.userText)), "CR-T12 negative: an unconfirmed proposal starts no run").toEqual([]);
 
   // ── CR-T12 positive + CR-T63 + CR-T76: three typed criteria ───────────────
-  await startOutlineSampler(app);
+  await startOutlineSampler(app, "^http://127\\.0\\.0\\.1:\\d+/(index\\.html)?([?#].*)?$");
   const t0 = Date.now();
   let sawRunning = false;
   const watch = (async () => {
@@ -164,6 +193,8 @@ test("CR-T12, CR-T63, CR-T76, CR-T14 positive and CR-T57 timing in-app", async (
   record["CR-T12"] = { asked: asked?.userText.slice(0, 1200), statuses: await statuses(chat) };
   record["CR-T63-runner"] = { samples: samples.length, withOutline: samples.filter((s) => s.orange > 5).length, after: samples.slice(-5), sawRunning };
   expect(asked, "CR-T12: the run reached the coach with its criteria").toBeTruthy();
+  // Two chat views receive every post; only the panel that asked sends the sentence (once).
+  expect((await verifyLog()).filter((e) => e.kind === "start").length, "the run's sentence went to the coach once").toBe(1);
   expect(await statuses(chat)).toEqual([["pass", "test_observed"], ["pass", "test_observed"], ["pass", "test_observed"]]);
   expect(await state(chat), "CR-T76 app: all pass on this version shows 검증됨").toBe("verified");
   await expect(chat.locator('[data-testid="verify-status"]')).toContainText("검증됨");
@@ -180,6 +211,7 @@ test("CR-T12, CR-T63, CR-T76, CR-T14 positive and CR-T57 timing in-app", async (
   // ── CR-T57 (Studio half): ten re-tests of the five-step order criterion ───
   await chat.locator('[data-testid="verify-close"], button[aria-label="테스트 창 닫기"]').first().click();
   await runCommand(ctx!.win, TEST);
+  await focusChat();
   const order = await startRun(chat, ["주문하면 주문이 완료되었어요가 보인다"]);
   const timings: number[] = [];
   let run = order.run;
@@ -223,18 +255,21 @@ test("CR-T14 negative, CR-T16, CR-T76 recheck and CR-T11 runner in-app", async (
   const c2 = (await chat.locator('[data-testid="verify-result"]').nth(1).getAttribute("data-criterion"))!;
   const v0 = (await chat.locator('[data-testid="verify-report"]').getAttribute("data-version"))!;
   const fixesBefore = (await verifyLog()).filter((e) => e.kind === "fix").length;
+  await focusChat();
   await chat.locator('[data-testid="verify-fix-text"]').fill("주문하면 결제 완료 문구도 보이게 고쳐 주세요");
   await chat.locator('[data-testid="verify-fix"]').click();
   await expect.poll(async () => (await verifyLog()).filter((e) => e.kind === "fix").length, { timeout: 60_000 }).toBe(fixesBefore + 1);
   const fix = (await verifyLog()).filter((e) => e.kind === "fix").at(-1)!;
-  const fixJson = JSON.parse(fix.text!.slice(fix.text!.indexOf("{")));
-  record["CR-T16-fix"] = { student: fix.text!.split("\n")[0], report: fixJson.report, criterion: fixJson.criterion, version: fixJson.artifact_version };
-  expect(fix.text!.startsWith("주문하면 결제 완료 문구도 보이게 고쳐 주세요"), "the student's own words go first").toBe(true);
+  // What the model received: the structured context (one JSON line), then the student's own sentence.
+  const fixJson = JSON.parse(fix.text!.split("\n").find((l) => l.startsWith("{"))!);
+  record["CR-T16-fix"] = { report: fixJson.report, criterion: fixJson.criterion, version: fixJson.artifact_version };
+  expect(fix.text!, "the student's own words go with it").toContain("주문하면 결제 완료 문구도 보이게 고쳐 주세요");
   expect([fixJson.report, fixJson.criterion.id, fixJson.artifact_version], "CR-T16: report, criterion 2 and v0").toEqual([failing.run, c2, v0]);
   // The coach's fix, applied to the workspace file (the scripted agent cannot write files).
   const indexPath = path.join(wsDir, "index.html");
   fs.writeFileSync(indexPath, fs.readFileSync(indexPath, "utf8").replace("<h2>주문이 완료되었어요</h2>", "<h2>주문이 완료되었어요</h2>\n    <p>결제 완료</p>"));
   await runCommand(ctx!.win, TEST);
+  await focusChat();
   await expect.poll(() => state(chat), { timeout: 20_000 }).toBe("needs_recheck");
   await expect(chat.locator('[data-testid="verify-report"]')).toContainText("이전 버전의 테스트 결과");
   await retest(chat, failing.run);

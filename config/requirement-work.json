@@ -3036,7 +3036,8 @@
         "e2e/curriculum-runtime/app-helpers.ts",
         "e2e/curriculum-runtime/app-service.mjs",
         "e2e/curriculum-runtime/playwright.config.ts",
-        "e2e/curriculum-runtime/fixtures/kiosk-practice"
+        "e2e/curriculum-runtime/fixtures/kiosk-practice",
+        "docs/testing/curriculum-runtime-2026-10-01-evidence.md"
       ]
     },
     {

@@ -85,7 +85,7 @@ function agent(body) {
   // cr-verify (#1392): a run started from the "내 제품 테스트" panel, a fix request, a proposal.
   if (/\[Studio 제품 테스트 [^\]]+\]/.test(userText)) return verifyRun(userText, msgs.slice(start + 1));
   if (/\[hps-fix-request\/1\]/.test(userText)) {
-    state.verify.push({ kind: "fix", text: userText.slice(0, 4000) });
+    state.verify.push({ kind: "fix", text: userText.slice(0, 30000) });
     return { text: "[로컬 시험 응답] 그 결과를 보고 고칠게요." };
   }
   if (/\[cr:propose\]/.test(userText)) return propose(msgs.slice(start + 1));
@@ -170,6 +170,7 @@ function verifyRun(userText, after) {
   const criteria = [...userText.matchAll(/^- ([0-9a-f-]{36}): (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
   const round = after.filter((m) => m.role === "assistant").length;
   const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  if (round === 0) state.verify.push({ kind: "start", at: Date.now() });
   if (round > 0) state.verify.push({ kind: "result", round, isError: last?.is_error === true, text: textOf(last?.content).slice(0, 2000) });
   if (round < criteria.length) {
     const c = criteria[round];
