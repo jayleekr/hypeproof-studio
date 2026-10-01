@@ -12,12 +12,21 @@ import type { TeacherState } from "./learning-events.ts";
 export const LOCAL_RECORD_FORMAT = "hps-local-record/1";
 /** Provisional local capacity (MC-35). Exposed, never enforced by deleting data; fixed with host evidence later. */
 export const DEFAULT_LOCAL_MAX_BYTES = 256 * 1024 * 1024;
-/** What task deletion cannot reach, reported instead of claimed (MC-31). */
-export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user"] as const;
+/**
+ * What task deletion cannot reach, reported instead of claimed (MC-31). Browser-result
+ * bytes (CR-10) that no observation of the task names are not the task's: they are
+ * removed by `deleteBlobs` (the results command's "저장된 화면·동작 기록 지우기" row),
+ * never by `deleteTask`. In Studio today no local-record observation names them at all:
+ * the events that do live in the workspace's native observation batch, so `deleteTask`
+ * removes browser-result bytes only for a future import that carries the digests.
+ */
+export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user", "browser_result_bytes_not_named_by_the_task"] as const;
 
 export interface StoragePort {
   /** Optional exact character usage; must include durable writes and never cache receipt reads. */
   usageBytes?(): Promise<number>;
+  /** Optional exact character usage of the keys under one prefix (same rules as `usageBytes`). */
+  usageOf?(prefix: string): Promise<number>;
   read(key: string): Promise<string | null>;
   /** Resolves only once durable. With `ifAbsent`, atomically rejects with Error("exists") if the key is taken. */
   write(key: string, value: string, options?: { ifAbsent?: boolean }): Promise<void>;
@@ -49,6 +58,67 @@ export function canonicalJson(value: unknown): string {
 /** Content digest. Integrity of a local copy only — not an identity or third-party guarantee (MC-25). */
 export async function digestOf(value: unknown): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(value)));
+  return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// ── Content-addressed bytes (CR-10) ───────────────────────────────────────────
+// The bytes an observation event names by digest (a browser result's screenshot and
+// action trace), kept on this record next to the events instead of in a store of their
+// own (SX-48). Keyed by digest, so the same bytes are stored once. A digest resolved
+// when it was handed out (putBlob reads the bytes back first); the bytes can later be
+// evicted by the bound or deleted by the person, and the digest then resolves to nothing.
+export const BLOB_MEDIA_TYPES = ["image/jpeg", "image/png", "application/json"] as const;
+export type BlobMediaType = (typeof BLOB_MEDIA_TYPES)[number];
+/** Provisional, like DEFAULT_LOCAL_MAX_BYTES (MC-35): one screenshot or trace, decoded. */
+export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
+/**
+ * Provisional bound on all stored browser-result bytes (CR-10), kept apart from
+ * DEFAULT_LOCAL_MAX_BYTES: screenshots never count against, or crowd out, the review
+ * data MC-35 protects. When a new capture does not fit, the OLDEST captures are removed
+ * first, silently. A capture of an earlier artifact version cannot be taken again once the
+ * files changed, so eviction does lose what the person could otherwise still look at; the
+ * bound keeps a student's disk from filling with screenshots instead. The events that named
+ * evicted bytes stay, and the results list then finds no stored screen for them.
+ */
+export const DEFAULT_BLOB_MAX_BYTES = 64 * 1024 * 1024;
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const BLOB_PREFIX = "blobs/";
+/** Age order of stored bytes: `blob-order/<at, zero-padded>-<hex>` → { size }. Listing is enough to find the oldest. */
+const BLOB_ORDER_PREFIX = "blob-order/";
+const blobKey = (digest: string) => `${BLOB_PREFIX}${digest.slice("sha256:".length)}`;
+const blobOrderKey = (at: number, digest: string) => `${BLOB_ORDER_PREFIX}${String(Math.max(0, Math.floor(at))).padStart(15, "0")}-${digest.slice("sha256:".length)}`;
+/**
+ * Who stored which bytes: `blob-owners/<owner>/<hex>` → { at }. An owner is an opaque id the
+ * host derives from the signed-in identity (a digest, never the identity itself), so on a
+ * shared PC one person's count and delete never reach what another person stored. Bytes two
+ * owners stored are kept until both have deleted them.
+ */
+const BLOB_OWNER_PREFIX = "blob-owners/";
+const OWNER = /^[A-Za-z0-9._-]{1,80}$/;
+const blobOwnerKey = (owner: string, hex: string) => `${BLOB_OWNER_PREFIX}${owner}/${hex}`;
+const isBlobKey = (key: string) => key.startsWith(BLOB_PREFIX) || key.startsWith(BLOB_ORDER_PREFIX) || key.startsWith(BLOB_OWNER_PREFIX);
+
+interface BlobRecord {
+  format: typeof LOCAL_RECORD_FORMAT;
+  kind: "blob";
+  digest: string;
+  media_type: BlobMediaType;
+  bytes: number;
+  /** When these bytes were first stored (age order for the bound). */
+  at?: number;
+  /** base64 of exactly the bytes `digest` names. */
+  data: string;
+}
+
+const fromBase64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+function toBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+async function sha256Of(bytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
   return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
@@ -388,6 +458,8 @@ export interface MyRecords {
   unassigned_observations: number;
   gaps: Array<{ host: string; scope: string; session: string; missing: number[]; incomplete: boolean }>;
   deleted_tasks: string[];
+  /** CR-10 — stored browser-result bytes (screenshots, action traces): shown, not hidden (MC-27). */
+  browser_results: { stored: number; bytes: number; max_bytes: number };
 }
 
 /** Source-aware identity (MC-08/34): the same scope, session and event id from two hosts are two records. */
@@ -400,10 +472,12 @@ const receiptKey = (ref: { id: string; revision: number }) => `receipts/${enc(re
 export class LocalRecord {
   readonly #store: StoragePort;
   readonly #maxBytes: number;
+  readonly #maxBlobBytes: number;
 
-  constructor(store: StoragePort, options: { maxBytes?: number } = {}) {
+  constructor(store: StoragePort, options: { maxBytes?: number; maxBlobBytes?: number } = {}) {
     this.#store = store;
     this.#maxBytes = options.maxBytes ?? DEFAULT_LOCAL_MAX_BYTES;
+    this.#maxBlobBytes = options.maxBlobBytes ?? DEFAULT_BLOB_MAX_BYTES;
   }
 
   // Every port failure is reported as a named failure, never as success (MC-35).
@@ -430,13 +504,38 @@ export class LocalRecord {
     }
   }
 
-  async usage(): Promise<{ bytes: number; max_bytes: number }> {
-    if (this.#store.usageBytes) {
-      try { return { bytes: await this.#store.usageBytes(), max_bytes: this.#maxBytes }; }
+  /** Characters stored under one prefix, through the port's exact count when it has one. */
+  async #usageOf(prefix: string): Promise<number> {
+    if (this.#store.usageOf) {
+      try { return await this.#store.usageOf(prefix); }
       catch { throw new Error("storage_failure"); }
     }
     let bytes = 0;
+    for (const key of await this.#keys(prefix)) {
+      try {
+        bytes += (await this.#store.read(key))?.length ?? 0;
+      } catch {
+        throw new Error("storage_failure");
+      }
+    }
+    return bytes;
+  }
+
+  async #blobUsage(): Promise<number> {
+    return (await this.#usageOf(BLOB_PREFIX)) + (await this.#usageOf(BLOB_ORDER_PREFIX)) + (await this.#usageOf(BLOB_OWNER_PREFIX));
+  }
+
+  /** The review data's usage against MC-35's limit. Browser-result bytes have their own bound (DEFAULT_BLOB_MAX_BYTES). */
+  async usage(): Promise<{ bytes: number; max_bytes: number }> {
+    if (this.#store.usageBytes) {
+      let total: number;
+      try { total = await this.#store.usageBytes(); }
+      catch { throw new Error("storage_failure"); }
+      return { bytes: total - (await this.#blobUsage()), max_bytes: this.#maxBytes };
+    }
+    let bytes = 0;
     for (const key of await this.#keys("")) {
+      if (isBlobKey(key)) continue;
       try {
         bytes += (await this.#store.read(key))?.length ?? 0;
       } catch {
@@ -446,8 +545,13 @@ export class LocalRecord {
     return { bytes, max_bytes: this.#maxBytes };
   }
 
-  /** false when `ifAbsent` found the key taken. Never evicts anything to make room. */
-  async #write(key: string, value: unknown, ifAbsent: boolean): Promise<boolean> {
+  /**
+   * false when `ifAbsent` found the key taken. Never evicts review data to make room;
+   * browser-result bytes are checked against their own bound (`quota: "blob"`). An owner
+   * marker (`quota: "none"`, a few characters) is not checked: refusing it would leave bytes
+   * their owner cannot count or delete.
+   */
+  async #write(key: string, value: unknown, ifAbsent: boolean, quota: "review" | "blob" | "none" = "review"): Promise<boolean> {
     // Last line of MC-30: no known secret format reaches storage, whichever field carries it.
     const raw = canonicalJson(redactDeep(value));
     let existing: string | null;
@@ -459,8 +563,10 @@ export class LocalRecord {
     // An existing record answers an ifAbsent write before any quota check, so an identical
     // retry stays idempotent when storage is full (MC-25/35). The port write itself stays atomic.
     if (ifAbsent && existing !== null) return false;
-    const { bytes } = await this.usage();
-    check(bytes - (existing?.length ?? 0) + raw.length <= this.#maxBytes, "capacity_exceeded");
+    if (quota !== "none") {
+      const [bytes, max] = quota === "blob" ? [await this.#blobUsage(), this.#maxBlobBytes] : [(await this.usage()).bytes, this.#maxBytes];
+      check(bytes - (existing?.length ?? 0) + raw.length <= max, "capacity_exceeded");
+    }
     try {
       await this.#store.write(key, raw, { ifAbsent });
       return true;
@@ -572,6 +678,164 @@ export class LocalRecord {
     }
     await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
     return { task, stored, duplicates, refused_deleted: refusedDeleted, exclusions, missing };
+  }
+
+  // ── Content-addressed bytes (CR-10) ─────────────────────────────────────────
+  /**
+   * Store bytes an event names by digest and return that digest. JSON is stored as the
+   * canonical JSON of its MC-30-redacted value, so no known secret format reaches storage
+   * through it, and its digest equals `digestOf(redactDeep(json))`. Images are stored as
+   * given. Storing the same bytes again is a no-op that returns the same digest. When the
+   * bytes do not fit DEFAULT_BLOB_MAX_BYTES the oldest stored bytes are removed first; review
+   * data is never touched to make room (MC-35). With `owner`, the bytes are also recorded as
+   * that owner's (`blobCount`/`deleteBlobs` with the same owner see only those).
+   */
+  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }, options: { at?: number; owner?: string } = {}): Promise<string> {
+    check(isObj(input) && (BLOB_MEDIA_TYPES as readonly string[]).includes(String(input.media_type)), "invalid_blob");
+    check(options.owner === undefined || (typeof options.owner === "string" && OWNER.test(options.owner)), "invalid_owner");
+    let bytes: Uint8Array;
+    if (input.media_type === "application/json") {
+      check(input.json !== undefined && input.base64 === undefined, "invalid_blob");
+      bytes = new TextEncoder().encode(canonicalJson(redactDeep(input.json)));
+    } else {
+      check(typeof input.base64 === "string" && input.json === undefined && BASE64.test(input.base64), "invalid_blob");
+      bytes = fromBase64(input.base64);
+    }
+    check(bytes.length > 0, "invalid_blob");
+    check(bytes.length <= MAX_BLOB_BYTES, "blob_too_large");
+    const digest = await sha256Of(bytes);
+    let present: string | null;
+    try {
+      present = await this.#store.read(blobKey(digest));
+    } catch {
+      throw new Error("storage_failure");
+    }
+    const at = Number.isFinite(options.at) ? Number(options.at) : Date.now();
+    // The owner marker goes before the bytes: a crash between them leaves a marker that
+    // names nothing (never counted, cleared by the next delete), never bytes their owner
+    // cannot count or delete.
+    if (options.owner !== undefined) await this.#write(blobOwnerKey(options.owner, digest.slice("sha256:".length)), { at }, false, "none");
+    if (present === null) {
+      const record: BlobRecord = { format: LOCAL_RECORD_FORMAT, kind: "blob", digest, media_type: input.media_type, bytes: bytes.length, at, data: toBase64(bytes) };
+      const size = canonicalJson(redactDeep(record)).length;
+      const marker = { size };
+      const need = size + canonicalJson(marker).length;
+      check(need <= this.#maxBlobBytes, "capacity_exceeded");
+      await this.#evictBlobsFor(need);
+      // The age marker goes first: a crash between the two leaves a marker without bytes
+      // (removed by the next eviction), never bytes that no bound or delete can find.
+      await this.#write(blobOrderKey(at, digest), marker, false, "blob");
+      await this.#write(blobKey(digest), record, true, "blob");
+    }
+    // Read back before handing the digest out: a port that loses or alters the bytes (or
+    // a redaction pattern that happened to match inside the base64) must not leave a
+    // digest on an event that resolves to nothing.
+    check((await this.getBlob(digest)) !== null, "storage_failure");
+    return digest;
+  }
+
+  /** Remove the oldest stored bytes until `need` more characters fit the bound. */
+  async #evictBlobsFor(need: number): Promise<void> {
+    let used = await this.#blobUsage();
+    if (used + need <= this.#maxBlobBytes) return;
+    const owners = await this.#keys(BLOB_OWNER_PREFIX);
+    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
+      if (used + need <= this.#maxBlobBytes) return;
+      const key = BLOB_PREFIX + order.slice(-64);
+      let sizes: number;
+      try {
+        sizes = ((await this.#store.read(key))?.length ?? 0) + ((await this.#store.read(order))?.length ?? 0);
+      } catch {
+        throw new Error("storage_failure");
+      }
+      await this.#remove(key);
+      await this.#remove(order);
+      for (const o of owners) if (o.endsWith(`/${order.slice(-64)}`)) await this.#remove(o);
+      used -= sizes;
+    }
+  }
+
+  /**
+   * How many stored browser-result bytes there are: all of them, or those `owner` stored.
+   * Reads keys only, never a review record, so an unrelated corrupt task or review cannot
+   * hide stored screenshots (MC-27).
+   */
+  async blobCount(options: { owner?: string } = {}): Promise<number> {
+    const stored = (await this.#keys(BLOB_PREFIX)).map((k) => k.slice(BLOB_PREFIX.length));
+    if (options.owner === undefined) return stored.length;
+    check(typeof options.owner === "string" && OWNER.test(options.owner), "invalid_owner");
+    const present = new Set(stored);
+    return (await this.#keys(`${BLOB_OWNER_PREFIX}${options.owner}/`)).filter((k) => present.has(k.slice(-64))).length;
+  }
+
+  /**
+   * Delete stored browser-result bytes, all of them or the named digests, at the person's
+   * request (the results command's "저장된 화면·동작 기록 지우기" row). The events that named
+   * them stay. Each blob goes before its age marker, as in eviction: an interruption leaves
+   * a marker without bytes (cleared by the next eviction or delete), never bytes no bound
+   * or delete can find.
+   *
+   * With `owner`, only what that owner stored is deleted, and `removed` counts it: their
+   * owner markers go, and the bytes go unless another owner stored the same bytes too.
+   */
+  async deleteBlobs(input: { by: "user"; at: number; digests?: readonly string[]; owner?: string }): Promise<{ removed: number }> {
+    check(isObj(input) && input.by === "user", "delete_requires_user");
+    let wanted: Set<string> | null = null;
+    if (input.digests !== undefined) {
+      check(Array.isArray(input.digests) && input.digests.every((d) => typeof d === "string" && DIGEST.test(d)), "invalid_digest");
+      wanted = new Set(input.digests.map((d) => d.slice("sha256:".length)));
+    }
+    const owners = await this.#keys(BLOB_OWNER_PREFIX);
+    if (input.owner !== undefined) {
+      check(typeof input.owner === "string" && OWNER.test(input.owner), "invalid_owner");
+      const mine = `${BLOB_OWNER_PREFIX}${input.owner}/`;
+      const present = new Set((await this.#keys(BLOB_PREFIX)).map((k) => k.slice(BLOB_PREFIX.length)));
+      const scope = new Set(owners.filter((k) => k.startsWith(mine)).map((k) => k.slice(-64)).filter((h) => !wanted || wanted.has(h)));
+      let removed = 0;
+      for (const hex of scope) {
+        await this.#remove(blobOwnerKey(input.owner, hex));
+        if (present.has(hex)) removed++;
+      }
+      const others = new Set(owners.filter((k) => !k.startsWith(mine)).map((k) => k.slice(-64)));
+      const orphaned = [...scope].filter((h) => !others.has(h));
+      if (orphaned.length) await this.#removeBlobs(new Set(orphaned), []);
+      return { removed };
+    }
+    return { removed: await this.#removeBlobs(wanted, owners) };
+  }
+
+  /** Remove stored bytes (all, or the named hex digests) with their age and owner markers. */
+  async #removeBlobs(wanted: Set<string> | null, owners: readonly string[]): Promise<number> {
+    const markers = new Map<string, string[]>();
+    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
+      const hex = order.slice(-64);
+      if (wanted && !wanted.has(hex)) continue;
+      markers.set(hex, [...(markers.get(hex) ?? []), order]);
+    }
+    let removed = 0;
+    for (const key of await this.#keys(BLOB_PREFIX)) {
+      const hex = key.slice(BLOB_PREFIX.length);
+      if (wanted && !wanted.has(hex)) continue;
+      await this.#remove(key);
+      removed++;
+      for (const order of markers.get(hex) ?? []) await this.#remove(order);
+      markers.delete(hex);
+    }
+    // Markers whose bytes were already gone (an earlier interruption).
+    for (const orders of markers.values()) for (const order of orders) await this.#remove(order);
+    for (const o of owners) if (!wanted || wanted.has(o.slice(-64))) await this.#remove(o);
+    return removed;
+  }
+
+  /** The bytes a digest names, checked against it; null when they are not stored. */
+  async getBlob(digest: string): Promise<{ media_type: BlobMediaType; bytes: Uint8Array } | null> {
+    check(typeof digest === "string" && DIGEST.test(digest), "invalid_digest");
+    const record = await this.#read<BlobRecord>(blobKey(digest));
+    if (!record) return null;
+    check(record.kind === "blob" && record.digest === digest && typeof record.data === "string" && BASE64.test(record.data), "corrupt_record");
+    const bytes = fromBase64(record.data);
+    check((await sha256Of(bytes)) === digest, "corrupt_record");
+    return { media_type: record.media_type, bytes };
   }
 
   /** A wrong attribution is corrected by the person, with a reason, keeping the earlier assignment (MC-08). */
@@ -824,11 +1088,18 @@ export class LocalRecord {
   async deleteTask(taskId: string, input: { by: "user"; at: number }): Promise<{ removed: Record<string, number>; not_covered: readonly string[] }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
     await this.getTask(taskId);
-    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0 };
+    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0 };
     const evidence: string[] = [];
+    // CR-10 — the stored bytes this task's observations name go with them.
+    const named = new Set<string>();
+    const namesOf = (o: ObservationRecord | null): string[] =>
+      (["screenshot_digest", "trace_digest"] as const)
+        .map((k) => (o?.event as Record<string, unknown> | undefined)?.[k])
+        .filter((d): d is string => typeof d === "string" && DIGEST.test(d));
     for (const aKey of await this.#keys("assignments/")) {
       if ((await this.#read<Assignment>(aKey))?.task !== taskId) continue;
       const oKey = `observations/${aKey.slice("assignments/".length)}`;
+      for (const d of namesOf(await this.#read<ObservationRecord>(oKey))) named.add(d);
       await this.#remove(oKey);
       await this.#remove(aKey);
       evidence.push(oKey);
@@ -861,6 +1132,11 @@ export class LocalRecord {
       if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
       await this.#remove(k);
       removed.sessions++;
+    }
+    if (named.size) {
+      // Bytes another remaining observation still names stay (content-addressed, shared).
+      for (const k of await this.#keys("observations/")) for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.delete(d);
+      removed.browser_result_bytes = (await this.deleteBlobs({ by: "user", at: input.at, digests: [...named] })).removed;
     }
     // Keys only, no content: lets later collection and reinterpretation refuse the deleted evidence.
     await this.#write(`deleted/${taskId}`, { task: taskId, at: input.at, evidence }, false);
@@ -949,7 +1225,8 @@ export class LocalRecord {
       if (g && (g.missing.length > 0 || g.incomplete)) gaps.push(g);
     }
     const deleted = (await this.#keys("deleted/")).map((k) => k.slice("deleted/".length));
-    return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted };
+    const browser_results = { stored: await this.blobCount(), bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
+    return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted, browser_results };
   }
 }
 

@@ -22,12 +22,18 @@
 // carrying the format it arrived with. Which one a cohort sends is decided by the
 // profile's `observation.format`, not here.
 //
+// /1 and /2 both accept three OPTIONAL keys on a `tool_result` event: the artifact
+// references of an Experiment Browser result (CR-10, BROWSER_RESULT_REF_KEYS in
+// ./learning-events.ts). Jay's decision 8 (2026-10-01) allows additive keys like these
+// as long as every earlier record still reads unchanged; no format version moves.
+//
 // The /2 table (kinds, enums, per-kind required fields, defaults) lives in
 // ./learning-events.ts so the gates and the session-design schema read the same
 // list. This file stays the one place that decides whether a batch is valid.
 import { CANDIDATE_CAPABILITY_V1, LEGACY_SEVEN_ASSETS } from "./capability-models.ts";
 import {
   ARTIFACT_REF_KEYS,
+  BROWSER_RESULT_REF_KEYS,
   EVIDENCE_TYPES,
   LEARNING_EVENT_KEYS,
   LEARNING_EVENT_KINDS,
@@ -87,6 +93,10 @@ export interface ObservationEvent {
   actor?: ObservationActor;
   sha256?: string;
   assistance: "unknown" | "assisted" | "independent";
+  // ── CR-10 browser result references, /1 and /2, `tool_result` only (BROWSER_RESULT_REF_KEYS). ──
+  artifact_version?: string;
+  screenshot_digest?: string;
+  trace_digest?: string;
   // ── /2 only (SX-44). Absent on every /1 event, which is why /1 is untouched. ──
   context?: { week: number; step_id: string; task: string; module_version: string };
   evidence_type?: EvidenceType;
@@ -228,6 +238,21 @@ function checkLearningFields(e: Record<string, unknown>): void {
   }
 }
 
+const DIGEST_REF = /^sha256:[a-f0-9]{64}$/;
+
+/**
+ * CR-10 browser result references (BROWSER_RESULT_REF_KEYS). Optional on every format;
+ * when present: only on a `tool_result`, each a `sha256:<hex>` digest, and the two byte
+ * digests only next to the version they were taken against.
+ */
+function checkBrowserResultRefs(e: Record<string, unknown>): void {
+  const present = BROWSER_RESULT_REF_KEYS.filter((k) => e[k] !== undefined);
+  if (!present.length) return;
+  check(e.kind === "tool_result", "invalid_artifact_reference");
+  for (const k of present) check(typeof e[k] === "string" && DIGEST_REF.test(e[k] as string), "invalid_artifact_reference");
+  check(e.artifact_version !== undefined, "invalid_artifact_reference");
+}
+
 export function validateObservation(value: unknown): {
   batch: ObservationBatch;
   missing: number[];
@@ -263,6 +288,9 @@ export function validateObservation(value: unknown): {
     "actor",
     "sha256",
     "assistance",
+    // Decision 8 (2026-10-01): additive optional keys, /1 included. Absent on every
+    // record written before them, so those read exactly as they did.
+    ...BROWSER_RESULT_REF_KEYS,
     ...(v2 ? LEARNING_EVENT_KEYS : []),
   ];
   for (const e of value.events) {
@@ -292,6 +320,7 @@ export function validateObservation(value: unknown): {
       "invalid_event_text",
     );
     if (v2) checkLearningFields(e);
+    checkBrowserResultRefs(e);
     if (["tool_request", "approval", "tool_result"].includes(String(e.kind)))
       check(str(e.tool_id), "missing_tool_id");
     if (e.kind === "approval")

@@ -149,6 +149,22 @@
       {
         "command": "hypeproof-chat.classroomApproveArtifact",
         "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소"
+      },
+      {
+        "command": "hypeproof-chat.pickElement",
+        "title": "HypeProof: 화면에서 요소 골라 코치에게 묻기",
+        "icon": "$(inspect)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.browserResults",
+        "title": "HypeProof: 실험 브라우저 결과 기록 보기",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.clearBrowserResultBytes",
+        "title": "HypeProof: 저장된 실험 브라우저 화면 지우기",
+        "enablement": "hypeproof-chat.crBrowserBytesStored"
       }
     ],
     "menus": {
@@ -172,6 +188,11 @@
           "command": "hypeproof-chat.localReview",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@4"
+        },
+        {
+          "command": "hypeproof-chat.pickElement",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
@@ -192,6 +213,18 @@
         {
           "command": "hypeproof-chat.diagnoseVoiceCapability",
           "when": "false"
+        },
+        {
+          "command": "hypeproof-chat.pickElement",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.browserResults",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.clearBrowserResultBytes",
+          "when": "hypeproof-chat.crBrowserBytesStored"
         }
       ]
     },

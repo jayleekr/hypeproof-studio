@@ -168,6 +168,8 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, spool);
   providerRef = provider;
+  // CR-10 — show the delete command when an earlier session stored browser-result bytes.
+  void provider.refreshCrBytesContext();
   registerLocalReview(context, (webview, dist) => provider.renderHtml(webview, dist));
   const startPage = new StartPage(context, provider, async (profile, commit) => {
     return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
@@ -532,6 +534,17 @@ export async function activate(context: vscode.ExtensionContext) {
       // here: a visible toast pauses the integrated browser ("Paused due to
       // Notification"), which broke every capture in the workshop.
     }),
+
+    // CR-09 (cr-browser) — pick an element in the Experiment Browser and ask the coach
+    // about it. Gated by the CR switch in package.json AND re-checked inside
+    // pickElement(), because a command can be executed without its menu (recon R3).
+    vscode.commands.registerCommand("hypeproof-chat.pickElement", () => provider.pickElement()),
+    // CR-10 (cr-browser) — the stored browser results, labelled by artifact version. Same
+    // gate: the manifest hides it with the switch off and showBrowserResults() re-checks.
+    vscode.commands.registerCommand("hypeproof-chat.browserResults", () => provider.showBrowserResults()),
+    // CR-10 — delete the stored browser-result bytes. Gated on "bytes are stored", NOT on
+    // the CR switch: what an earlier switch-on stored stays deletable after it goes off.
+    vscode.commands.registerCommand("hypeproof-chat.clearBrowserResultBytes", () => provider.clearStoredBrowserResults()),
 
     // #384 — "drag a screenshot in" that survives VS Code. Dropping a file on
     // the editor makes VS Code open it as a tab (it intercepts the drop before

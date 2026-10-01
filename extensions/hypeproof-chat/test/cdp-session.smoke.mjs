@@ -102,4 +102,36 @@ const HANDSHAKE = (msg) => {
   console.log("✓ CdpSession: a CDP error response rejects the send");
 }
 
+// ─── CR-05 (cr-browser): events of the attached session reach onEvent, nothing else does ───
+{
+  const listeners = new Set();
+  const mock = makeMock((msg) => HANDSHAKE(msg) ?? { result: {} });
+  const raw = mock.onDidReceiveMessage.bind(mock);
+  // Keep a handle on every listener so the test can inject events.
+  mock.onDidReceiveMessage = (fn) => { listeners.add(fn); const d = raw(fn); return { dispose: () => { listeners.delete(fn); d.dispose(); } }; };
+  const session = await CdpSession.attach({ startCDPSession: async () => mock });
+  const seen = [];
+  const sub = session.onEvent((e) => seen.push(e.method));
+  const push = (m) => { for (const fn of [...listeners]) fn(m); };
+  push({ method: "Runtime.consoleAPICalled", params: { type: "error" }, sessionId: "S1" });
+  push({ method: "Runtime.consoleAPICalled", params: {}, sessionId: "OTHER" }); // another session
+  push({ method: "Target.targetCreated", params: {} }); // root session
+  push({ id: 999, result: {}, sessionId: "S1" }); // a response, not an event
+  assert.deepEqual(seen, ["Runtime.consoleAPICalled"], "only the attached page session's events are delivered");
+  // Negative control for the instrument: a listener that throws does not starve another.
+  const other = [];
+  const bad = session.onEvent(() => { throw new Error("listener bug"); });
+  const good = session.onEvent((e) => other.push(e.method));
+  push({ method: "Network.loadingFailed", params: {}, sessionId: "S1" });
+  assert.deepEqual(other, ["Network.loadingFailed"]);
+  sub.dispose(); bad.dispose(); good.dispose();
+  push({ method: "Log.entryAdded", params: {}, sessionId: "S1" });
+  assert.equal(seen.length, 2, "a disposed listener hears nothing more");
+  // send() still correlates by id with a subscriber attached.
+  session.onEvent(() => {});
+  const res = await session.send("Runtime.evaluate", {});
+  assert.deepEqual(res, {}, "responses still resolve send()");
+  console.log("✓ CdpSession.onEvent: attached-session events only; sends unaffected");
+}
+
 console.log("All cdp-session smoke tests passed.");
