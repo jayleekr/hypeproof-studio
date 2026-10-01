@@ -86,7 +86,9 @@ test("MC-T02 core imports only its own files (no VS Code, Worker, Chalk, node or
   // hps-observation/2 (P1-A). A new file here is a deliberate act, so it is named
   // here or the suite fails. verification.ts joined with cr-verify (#1392): the
   // hps-verification/1 report is a view over the record's events, not a store (SX-48).
-  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "learning-events.ts", "legacy-observation.ts", "local-record.ts", "normalize.ts", "verification.ts"]);
+  // participant-evidence.ts joined with cr-evidence (#1394): returns, per-variant results and
+  // the review input are views over the participant events and notes, not a store or a scorer.
+  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "learning-events.ts", "legacy-observation.ts", "local-record.ts", "normalize.ts", "participant-evidence.ts", "verification.ts"]);
   for (const f of files) {
     const src = readFileSync(new URL(f, CORE_DIR), "utf8");
     const specs = [...src.matchAll(/(?:import|export)[^'"]*?from\s+["']([^"']+)["']/g)].map((m) => m[1]);

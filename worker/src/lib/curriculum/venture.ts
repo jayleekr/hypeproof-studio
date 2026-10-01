@@ -69,6 +69,8 @@ export interface Experiment {
   product_version_id: string;
   status: ExperimentStatus;
   declarations?: ExperimentDeclarations;
+  /** When the experiment's test data was deleted (cr-evidence, CR-69); absent until then. */
+  data_deleted_at?: number;
   created_at: number;
 }
 
@@ -203,7 +205,7 @@ export function publishPathProblem(p: unknown): string | null {
 }
 
 /** A Service-made id: prefix + 16 random hex characters, also a DNS label. */
-export function newVentureId(prefix: "prj" | "hyp" | "exp"): string {
+export function newVentureId(prefix: "prj" | "hyp" | "exp" | "drf" | "note"): string {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
   return `${prefix}-${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;

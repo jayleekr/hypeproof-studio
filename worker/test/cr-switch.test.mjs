@@ -162,6 +162,7 @@ await test("/v1/profile serves curriculum_runtime.enabled=false by default and t
 async function unknownRouteProblems(fetcher, origin, route, token) {
   const [method, path] = route.split(" ");
   if (path.startsWith("<test-origin>")) return testOriginProblems(fetcher, route);
+  if (path.startsWith("/admin/")) return adminProblems(fetcher, origin, route, token);
   const res = await fetcher(origin + path, { method, headers: { authorization: "Bearer " + token } });
   const body = await res.json().catch(() => null);
   const problems = [];
@@ -174,6 +175,25 @@ async function unknownRouteProblems(fetcher, origin, route, token) {
 }
 
 const headerShape = (res) => JSON.stringify([...res.headers].filter(([k]) => k !== "x-request-id").sort());
+
+/**
+ * An /admin route (cr-evidence: the cohort controls, CR-70) sits behind the admin gate, so its
+ * "unknown route" is whatever an unregistered /admin path answers with the same credentials:
+ * the gate's refusal without them, app.notFound with them. Status, body and headers must match.
+ */
+async function adminProblems(fetcher, origin, route, token) {
+  const [method, path] = route.split(" ");
+  const problems = [];
+  for (const headers of [{ authorization: "Bearer " + token }, { authorization: "Basic " + btoa("admin:cr-switch-admin") }]) {
+    const res = await fetcher(origin + path, { method, headers });
+    const unknown = await fetcher(origin + "/admin/cr-never-registered", { method, headers });
+    const body = (await res.text()).replace(path, "<path>");
+    const ubody = (await unknown.text()).replace("/admin/cr-never-registered", "<path>");
+    if (res.status !== unknown.status || body.replace(/"request_id":"[^"]*"/, "") !== ubody.replace(/"request_id":"[^"]*"/, "")) problems.push(`${route}: ${res.status} differs from an unknown admin path's ${unknown.status}`);
+    if (headerShape(res) !== headerShape(unknown)) problems.push(`${route}: headers differ from an unknown admin path's`);
+  }
+  return problems;
+}
 
 /**
  * A published-runtime route (cr-publish) lives on a test origin, whose unknown-path answer
@@ -193,6 +213,8 @@ async function testOriginProblems(fetcher, route) {
 await test("switch OFF: every inventoried CR Worker route answers as an unknown route (cr-browser and cr-verify add none; cr-publish adds the curriculum routes)", async () => {
   const { local } = await profileJson(COPYCLONE.id);
   local.env.HPS_TEST_ORIGIN = "http://{project}.test.invalid";
+  // cr-evidence: the admin controls are checked with and without the admin credential.
+  local.env.HPS_ADMIN_PASSWORD = "cr-switch-admin";
   const { token } = await issue({ u: "student", c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
   // Instrument positive control: a path nobody registered passes the check.
   assert.deepEqual(await unknownRouteProblems(local.fetcher, local.origin, "GET /v1/cr-never-registered", token), []);

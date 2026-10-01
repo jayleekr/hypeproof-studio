@@ -3046,13 +3046,38 @@
       ]
     },
     {
+      "id": "ST-IMP-CR-EVIDENCE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-PUBLISH"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/measurement-core/participant-evidence.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/retention.ts"
+        },
+        {
+          "path": "worker/src/routes/curriculum-admin.ts"
+        },
+        {
+          "path": "worker/migrations/0033-curriculum-runtime-evidence.sql"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CR",
       "stage": "test",
       "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-CR",
         "ST-DES-CR",
-        "ST-IMP-CR-PUBLISH"
+        "ST-IMP-CR-PUBLISH",
+        "ST-IMP-CR-EVIDENCE"
       ],
       "sources": [
         {
@@ -3099,6 +3124,9 @@
         },
         {
           "path": "e2e/curriculum-runtime/publish-runtime.real.mjs"
+        },
+        {
+          "path": "worker/test/cr-evidence.test.mjs"
         }
       ]
     },

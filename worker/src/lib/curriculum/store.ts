@@ -326,3 +326,128 @@ export async function channelCountsOfProject(db: DB, projectId: string): Promise
   for (const r of rows.results ?? []) addCount((out[r.experiment_id] ??= { channels: {}, unlabelled: 0, unknown: 0 }), r);
   return out;
 }
+
+// ── cr-evidence (#1394): rate windows, test-data deletion, cohort controls ─────
+
+/**
+ * Admit one more `kind` (`open` or `event`) on a link in its fixed window, atomically and in
+ * one statement: false when the window already holds `max` (the request answers 429 and
+ * writes nothing). A rate state, never a log of what was sent.
+ */
+export async function admitLinkRate(db: DB, linkId: string, kind: "open" | "event", now: number, windowMs: number, max: number): Promise<boolean> {
+  const r = await db
+    .prepare(
+      "INSERT INTO cr_link_rates (link_id, kind, window_start, count) VALUES (?, ?, ?, 1) ON CONFLICT(link_id, kind) DO UPDATE SET " +
+        "count = CASE WHEN ? - cr_link_rates.window_start >= ? THEN 1 ELSE cr_link_rates.count + 1 END, " +
+        "window_start = CASE WHEN ? - cr_link_rates.window_start >= ? THEN ? ELSE cr_link_rates.window_start END " +
+        "WHERE ? - cr_link_rates.window_start >= ? OR cr_link_rates.count < ?",
+    )
+    .bind(linkId, kind, now, now, windowMs, now, windowMs, now, now, windowMs, max)
+    .run();
+  return Number(r.meta?.changes ?? 0) > 0;
+}
+
+/** The experiment's links (for deletion: revoke, recompute counters). */
+export async function linksOfExperiment(db: DB, experimentId: string): Promise<TestLink[]> {
+  const rows = await db.prepare("SELECT doc, revoked_at FROM cr_test_links WHERE experiment_id = ? ORDER BY created_at").bind(experimentId).all<{ doc: string; revoked_at: number | null }>();
+  return (rows.results ?? []).map((r) => {
+    const l = parse<TestLink>(r);
+    return l && r.revoked_at !== null && r.revoked_at !== undefined ? { ...l, revoked_at: r.revoked_at } : l;
+  }).filter((l): l is TestLink => !!l);
+}
+
+/**
+ * After an experiment's test data is deleted (CR-69): every link is revoked (no new session
+ * can bring data back), its session counter is set to what the record now holds (none), and
+ * the experiment is closed with the time its data was deleted. The Experiment record itself
+ * stays: it is Venture Memory, and cr-memory reads it (CR-35, CR-39).
+ */
+export async function closeExperimentAfterDeletion(db: DB, experiment: Experiment, now: number): Promise<Experiment> {
+  await db.prepare("UPDATE cr_test_links SET revoked_at = ? WHERE experiment_id = ? AND revoked_at IS NULL").bind(now, experiment.id).run();
+  await db.prepare("UPDATE cr_test_links SET sessions_opened = 0 WHERE experiment_id = ?").bind(experiment.id).run();
+  const next: Experiment = { ...experiment, status: "closed", data_deleted_at: now };
+  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, open_start_key = NULL, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
+  return next;
+}
+
+/** One session key removed by a session erase: its link's counter follows the record (store.ts `reserveSession`). */
+export const releaseErasedSession = releaseSession;
+
+/**
+ * Experiments whose test data is due for deletion (Jay's decision 6): every link of the
+ * experiment has ended (revoked, or past its expiry) at least `afterMs` ago, per the cohort's
+ * period, and the data has not been deleted yet. An experiment with no link has no
+ * participant data and is not listed.
+ */
+export async function experimentsDueForDeletion(db: DB, now: number, periodFor: (cohortId: string) => number): Promise<Array<{ experiment: Experiment; project: Project; ended_at: number }>> {
+  const rows = await db
+    .prepare(
+      "SELECT e.doc AS doc, p.doc AS project_doc, MAX(COALESCE(l.revoked_at, l.expires_at)) AS ended_at, MAX(CASE WHEN l.revoked_at IS NULL AND l.expires_at > ? THEN 1 ELSE 0 END) AS live " +
+        "FROM cr_experiments e JOIN cr_projects p ON p.id = e.project_id JOIN cr_test_links l ON l.experiment_id = e.id GROUP BY e.id",
+    )
+    .bind(now)
+    .all<{ doc: string; project_doc: string; ended_at: number; live: number }>();
+  const out: Array<{ experiment: Experiment; project: Project; ended_at: number }> = [];
+  for (const r of rows.results ?? []) {
+    if (Number(r.live) > 0) continue;
+    const experiment = parse<Experiment>(r);
+    const project = parse<Project>({ doc: r.project_doc });
+    if (!experiment || !project || experiment.data_deleted_at !== undefined) continue;
+    if (now - Number(r.ended_at) >= periodFor(project.cohort_id)) out.push({ experiment, project, ended_at: Number(r.ended_at) });
+  }
+  return out;
+}
+
+// CR-70 — per-cohort data controls and team ceilings, set by the admin.
+export interface CohortControls {
+  schema: typeof VENTURE_SCHEMA;
+  kind: "cohort_controls";
+  cohort_id: string;
+  /** Days after an experiment ends before its test data is deleted (decision 6: 30 by default). */
+  retention_days_after_end: number;
+  /** May an experiment of this cohort declare raw-input retention (CR-67)? Declared input is kept for the retention above, no longer. */
+  raw_input_allowed: boolean;
+  /** The link expiry the publish panel offers first, in days; null = the student must choose (CR-19). */
+  link_expiry_default_days: number | null;
+  /** May students delete their experiment's test data themselves (CR-69)? Directors and admins always may. */
+  student_deletion: boolean;
+  /** Budget ceilings per team (Project), by meter; enforced on the gateway path by cr-gateway (CR-34). */
+  team_ceilings: Record<string, Record<string, number>>;
+  revision: number;
+  updated_at: number;
+  updated_by: string;
+}
+
+/** Decision 6 (2026-10-01): participant records are deleted 30 days after the experiment ends. */
+export const DEFAULT_RETENTION_DAYS = 30;
+
+export function defaultCohortControls(cohortId: string): CohortControls {
+  return { schema: VENTURE_SCHEMA, kind: "cohort_controls", cohort_id: cohortId, retention_days_after_end: DEFAULT_RETENTION_DAYS, raw_input_allowed: true, link_expiry_default_days: null, student_deletion: true, team_ceilings: {}, revision: 0, updated_at: 0, updated_by: "default" };
+}
+
+export async function getCohortControls(db: DB, cohortId: string): Promise<CohortControls> {
+  return parse<CohortControls>(await db.prepare("SELECT doc FROM cr_cohort_controls WHERE cohort_id = ?").bind(cohortId).first()) ?? defaultCohortControls(cohortId);
+}
+
+export async function allCohortControls(db: DB): Promise<Map<string, CohortControls>> {
+  const rows = await db.prepare("SELECT doc FROM cr_cohort_controls").all<{ doc: string }>();
+  const out = new Map<string, CohortControls>();
+  for (const r of rows.results ?? []) {
+    const c = parse<CohortControls>(r);
+    if (c) out.set(c.cohort_id, c);
+  }
+  return out;
+}
+
+/**
+ * Write the cohort's controls at `expected_revision` (0 for the first write): one statement
+ * decides, so two admins editing at the same time cannot both win (a revision conflict, AB-04).
+ */
+export async function putCohortControls(db: DB, next: CohortControls, expectedRevision: number): Promise<CohortControls | null> {
+  const doc = JSON.stringify(next);
+  const r =
+    expectedRevision === 0
+      ? await db.prepare("INSERT OR IGNORE INTO cr_cohort_controls (cohort_id, doc, revision, updated_by, updated_at) VALUES (?, ?, 1, ?, ?)").bind(next.cohort_id, doc, next.updated_by, next.updated_at).run()
+      : await db.prepare("UPDATE cr_cohort_controls SET doc = ?, revision = revision + 1, updated_by = ?, updated_at = ? WHERE cohort_id = ? AND revision = ?").bind(doc, next.updated_by, next.updated_at, next.cohort_id, expectedRevision).run();
+  return Number(r.meta?.changes ?? 0) > 0 ? next : null;
+}

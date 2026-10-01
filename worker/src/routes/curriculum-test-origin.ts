@@ -31,9 +31,9 @@ import type { Env } from "../env";
 import { resolveProfile } from "../lib/modules";
 import { curriculumRuntimeAllowed } from "../lib/moderation";
 import { LINK_ID, linkState, pinnedVersion } from "../lib/curriculum/venture";
-import { getExperiment, getLink, getProject, getVersion, releaseSession, reserveSession } from "../lib/curriculum/store";
+import { admitLinkRate, getExperiment, getLink, getProject, getVersion, releaseSession, reserveSession } from "../lib/curriculum/store";
 import { matchTestOrigin, parseTestOrigin, projectLabel } from "../lib/curriculum/test-origin";
-import { PUBLISHED_HOST, openParticipantSession, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
+import { EVIDENCE_LIMITS, PUBLISHED_HOST, appendParticipantEvents, openParticipantSession, participantEvents, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
 import { newSessionId, signSessionToken, verifySessionToken } from "../lib/curriculum/session-token";
 import { injectSnippet } from "../lib/curriculum/participant-snippet";
 import { PUBLISH_LIMITS, testFileKey } from "./curriculum";
@@ -156,7 +156,8 @@ async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
   const headers = { ...pageHeaders(devices), "content-type": typeOf(path) };
   if (!/\.html?$/i.test(path)) return new Response(await object.arrayBuffer(), { status: 200, headers });
   const html = await object.text();
-  const cfg = { link: link.id, experiment: experiment.id, repeated_use: experiment.declarations?.repeated_use === true, link_expires_at: link.expires_at };
+  const rawInput = experiment.declarations?.raw_input?.fields;
+  const cfg = { link: link.id, experiment: experiment.id, repeated_use: experiment.declarations?.repeated_use === true, link_expires_at: link.expires_at, ...(rawInput?.length ? { raw_input: rawInput } : {}) };
   if (path !== version.entry_html) return new Response(injectSnippet(html, cfg), { status: 200, headers });
   // The entry page offers a candidate session (random id, signed token) and records nothing:
   // the snippet keeps the visit's existing session when it has one, and opens a new one with
@@ -176,21 +177,31 @@ async function openSession(c: Ctx, linkId: string): Promise<Response> {
   if (live instanceof Response) return live;
   const { link, project, experiment, now } = live;
   let token: unknown;
+  let pseudonym: unknown;
   try {
     const raw = await c.req.text();
     if (raw.length > 2048) return absent();
-    token = (JSON.parse(raw) as { token?: unknown })?.token;
+    const body = JSON.parse(raw) as { token?: unknown; pseudonym?: unknown };
+    token = body?.token;
+    pseudonym = body?.pseudonym;
   } catch {
     return absent();
   }
+  // cr-evidence (CR-65): the visit's pseudonym, random and made in the browser. Optional (a
+  // page loaded before the event half shipped sends none); any other shape is refused.
+  if (pseudonym !== undefined && pseudonym !== null && !(typeof pseudonym === "string" && /^pp-[0-9a-f]{32}$/.test(pseudonym))) return absent();
   const claims = await verifySessionToken(token, link.id, now, c.env.HPS_SIGNING_SECRET);
   if (!claims) return new Response(null, { status: 403, headers: baseHeaders() });
   const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
   if ((await record.taskForSession(PUBLISHED_HOST, claims.session)) !== null) return new Response(null, { status: 204, headers: baseHeaders() });
+  // cr-evidence (recon §6): opens per link and window, so a scripted client cannot fill the
+  // link's session bound for real participants (cr-publish follow-up). Checked after the token,
+  // so only pages the link really served count.
+  if (!(await admitLinkRate(c.env.HPS_DB, link.id, "open", now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.opensPerWindow))) return new Response(null, { status: 429, headers: baseHeaders() });
   if (!(await reserveSession(c.env.HPS_DB, link.id, PUBLISH_LIMITS.maxSessionsPerLink))) return new Response(null, { status: 429, headers: baseHeaders() });
   let opened: Awaited<ReturnType<typeof openParticipantSession>>;
   try {
-    opened = await openParticipantSession(record, { link, experiment, sessionId: claims.session, at: now });
+    opened = await openParticipantSession(record, { link, experiment, sessionId: claims.session, at: now, ...(typeof pseudonym === "string" ? { pseudonym } : {}) });
   } catch (e) {
     // Hand the reservation back only when a read confirms the session key is absent: a failure
     // after a successful write must not leave a recorded session uncounted, and when the read
@@ -208,7 +219,57 @@ async function openSession(c: Ctx, linkId: string): Promise<Response> {
   return new Response(null, { status: 204, headers: baseHeaders() });
 }
 
+/**
+ * A refusal on the events route: a status, and its code in a header, with no body. A test origin
+ * serves no JSON API, and an empty body leaves nothing for a `keepalive` fetch to hold open.
+ */
+const refused = (status: 400 | 403 | 409 | 413 | 429, code: string) => new Response(null, { status, headers: { ...baseHeaders(), "x-hp-refusal": code } });
+
+/**
+ * Participant events (cr-evidence #1394; recon §6 `POST <test-origin>/l/:link/events`; CR-21,
+ * CR-23, CR-65, CR-67, CR-74). The link's state is read on every request: a revoked or expired
+ * link answers 410 and writes nothing, whatever the session token's own expiry (CR-19). Then:
+ * a valid session token of this link (403 otherwise), the session opened on the Service for
+ * this link and experiment (409 until the snippet's open landed), the session's version still
+ * the one the link serves (an unpublished or replaced version is refused), the link's rate
+ * window (429), and the events themselves (`participantEvents`: no identity field, a variant in
+ * a comparison experiment, a typed value only for a declared field). Stored in the
+ * experiment's measurement-core record, nowhere else (SX-48).
+ */
+async function recordEvents(c: Ctx, linkId: string): Promise<Response> {
+  const live = await liveLink(c, linkId);
+  if (live instanceof Response) return live;
+  const { link, project, experiment, version, now } = live;
+  let body: { token?: unknown; events?: unknown };
+  try {
+    const raw = await c.req.text();
+    if (raw.length > 65_536) return refused(413, "too_large");
+    body = JSON.parse(raw);
+  } catch {
+    return refused(400, "invalid_json");
+  }
+  const claims = await verifySessionToken(body?.token, link.id, now, c.env.HPS_SIGNING_SECRET);
+  if (!claims) return refused(403, "invalid_session_token");
+  const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+  const session = await record.sessionLink(PUBLISHED_HOST, claims.session);
+  if (!session || session.task !== experiment.id || !session.attribution || session.attribution.link !== link.id) return refused(409, "session_not_open");
+  if (session.attribution.product_version !== version.id) return refused(409, "session_version_mismatch");
+  if (!(await admitLinkRate(c.env.HPS_DB, link.id, "event", now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerWindow))) return refused(429, "rate_limited");
+  const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now });
+  if (!built.ok) return refused(built.code === "session_event_limit" || built.code === "too_many_events" ? 413 : 400, built.code);
+  try {
+    await appendParticipantEvents(record, experiment.id, claims.session, built.events);
+  } catch (e) {
+    const code = e instanceof Error ? e.message : "";
+    if (code === "conflicting_event" || code === "conflicting_sequence") return refused(409, code);
+    if (/^(invalid_|missing_|identity_field|unsupported_)/.test(code)) return refused(400, code);
+    throw e;
+  }
+  return new Response(null, { status: 204, headers: baseHeaders() });
+}
+
 testOriginApp.post("/l/:link/__hp/session", (c) => openSession(c, c.req.param("link")));
+testOriginApp.post("/l/:link/__hp/events", (c) => recordEvents(c, c.req.param("link")));
 testOriginApp.get("/l/:link", (c) => serve(c, c.req.param("link"), ""));
 testOriginApp.get("/l/:link/", (c) => serve(c, c.req.param("link"), ""));
 testOriginApp.get("/l/:link/*", (c) => {

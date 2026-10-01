@@ -6,7 +6,7 @@
 // resolve only after the value is durable; `submit` still reads every submission back
 // before it issues a receipt, so a port that loses or truncates data cannot fake one.
 import { validateObservation, type ObservationEvent } from "./legacy-observation.ts";
-import { validateInterpretation, type Interpretation } from "./interpretation.ts";
+import { draftRefusals, validateEvidenceDraftShape, validateInterpretation, type DraftRefusal, type EvidenceDraft, type Interpretation, type RefResolution } from "./interpretation.ts";
 import type { TeacherState } from "./learning-events.ts";
 
 export const LOCAL_RECORD_FORMAT = "hps-local-record/1";
@@ -82,6 +82,7 @@ export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
  */
 export const DEFAULT_BLOB_MAX_BYTES = 64 * 1024 * 1024;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const PSEUDONYM = /^pp-[0-9a-f]{32}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const BLOB_PREFIX = "blobs/";
 /** Age order of stored bytes: `blob-order/<at, zero-padded>-<hex>` → { size }. Listing is enough to find the oldest. */
@@ -365,7 +366,7 @@ interface Assignment {
   history: Array<{ from: string | null; to: string | null; by: Actor; reason: string; at: number }>;
 }
 
-interface ObservationRecord {
+export interface ObservationRecord {
   format: typeof LOCAL_RECORD_FORMAT;
   kind: "observation";
   key: string;
@@ -491,6 +492,11 @@ export interface MyRecords {
 const observationBase = (host: string, scope: string, session: string) => `observations/${enc(host)}/${enc(scope)}/${enc(session)}/`;
 const assignmentKey = (observationKey: string) => `assignments/${observationKey.slice("observations/".length)}`;
 const interpretationKey = (task: string, ref: { id: string; revision: number }) => `interpretations/${task}/${enc(ref.id)}@${ref.revision}`;
+const draftKey = (task: string, ref: { id: string; revision: number }) => `drafts/${task}/${enc(ref.id)}@${ref.revision}`;
+/** Where participant sessions and their events are recorded (cr-publish, cr-evidence). */
+export const PARTICIPANT_HOST = "published";
+/** Where the student's manual records of an experiment are recorded: one session per task, its id the task id (cr-evidence). */
+export const NOTES_HOST = "notes";
 const submissionKey = (ref: { id: string; revision: number }) => `submissions/${enc(ref.id)}@${ref.revision}`;
 const receiptKey = (ref: { id: string; revision: number }) => `receipts/${enc(ref.id)}@${ref.revision}`;
 
@@ -673,14 +679,17 @@ export class LocalRecord {
    * session (`taskForSession`, `sessionAttribution`, `sessionLinks`) uses this key.
    * `created` is false when the session was already linked to this task (an idempotent retry).
    */
-  async linkSessionKey(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution: SessionAttribution }): Promise<{ created: boolean }> {
+  async linkSessionKey(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution: SessionAttribution; pseudonym?: string }): Promise<{ created: boolean }> {
     check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    // cr-evidence (CR-65): the participant's random per-experiment pseudonym, an additive key
+    // (decision 8). Never derived from identity or device data; the page makes it.
+    check(link.pseudonym === undefined || PSEUDONYM.test(String(link.pseudonym)), "invalid_session_link");
     checkAttribution(link.attribution);
     check(link.attribution.experiment === taskId, "invalid_session_attribution");
     const task = await this.getTask(taskId);
     check(task.project === link.attribution.project, "invalid_session_attribution");
     const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
-    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at }, true, "none")) return { created: true };
+    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) return { created: true };
     check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
     return { created: false };
   }
@@ -698,23 +707,35 @@ export class LocalRecord {
   }
 
   /** Every session linked on one host, from the per-session keys (cr-publish CR-73 channel reads). */
-  async sessionLinks(host: string): Promise<Array<{ session_id: string; task: string; attribution: SessionAttribution | null }>> {
+  async sessionLinks(host: string): Promise<Array<{ session_id: string; task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string }>> {
     check(text(host, 100), "invalid_host");
     const prefix = `sessions/${enc(host)}/`;
-    const out: Array<{ session_id: string; task: string; attribution: SessionAttribution | null }> = [];
+    const out: Array<{ session_id: string; task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string }> = [];
     for (const k of await this.#keys(prefix)) {
-      const v = await this.#read<{ task: string; attribution?: SessionAttribution }>(k);
+      const v = await this.#read<{ task: string; attribution?: SessionAttribution; at?: number; pseudonym?: string }>(k);
       if (!v) continue;
-      out.push({ session_id: decodeURIComponent(k.slice(prefix.length)), task: v.task, attribution: v.attribution ?? null });
+      out.push({
+        session_id: decodeURIComponent(k.slice(prefix.length)),
+        task: v.task,
+        attribution: v.attribution ?? null,
+        ...(typeof v.at === "number" ? { at: v.at } : {}),
+        ...(typeof v.pseudonym === "string" ? { pseudonym: v.pseudonym } : {}),
+      });
     }
     return out;
+  }
+
+  /** One session's link record (task, attribution, open time, pseudonym), or null. */
+  async sessionLink(host: string, sessionId: string): Promise<{ task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string } | null> {
+    const v = await this.#read<{ task: string; attribution?: SessionAttribution; at?: number; pseudonym?: string }>(`sessions/${enc(host)}/${enc(sessionId)}`);
+    return v ? { task: v.task, attribution: v.attribution ?? null, ...(typeof v.at === "number" ? { at: v.at } : {}), ...(typeof v.pseudonym === "string" ? { pseudonym: v.pseudonym } : {}) } : null;
   }
 
   // ── Observations (MC-08/30/34) ──────────────────────────────────────────────
   async appendObservations(
     host: string,
     value: unknown,
-    options: { excludedPaths?: readonly string[] } = {},
+    options: { excludedPaths?: readonly string[]; quota?: "review" | "none"; gaps?: boolean } = {},
   ): Promise<{ task: string | null; stored: number; duplicates: number; refused_deleted: number; exclusions: ExclusionNote[]; missing: number[] }> {
     check(text(host, 100), "invalid_host");
     const { batch, missing } = validateObservation(value);
@@ -745,7 +766,10 @@ export class LocalRecord {
         event: redacted.event,
         exclusions: redacted.exclusions,
       };
-      if (await this.#write(key, record, true)) stored++;
+      // `quota: "none"` is for a caller that bounds its own writes (cr-evidence: events per
+      // participant session and notes per experiment are capped), so a write costs the same
+      // however much the record holds; the default checks the review quota (MC-35).
+      if (await this.#write(key, record, true, options.quota ?? "review")) stored++;
       else {
         // Duplicate delivery is fine; different content under the same id is never overwritten.
         const existing = await this.#read<ObservationRecord>(key);
@@ -753,9 +777,11 @@ export class LocalRecord {
         duplicates++;
       }
       const first: Assignment = { task, history: [{ from: null, to: task, by: "adapter_explicit", reason: task ? "session_link" : "no_session_link", at: raw.at }] };
-      await this.#write(assignmentKey(key), first, true);
+      await this.#write(assignmentKey(key), first, true, options.quota ?? "review");
     }
-    await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
+    // A caller that delivers one session in many small batches (the participant snippet)
+    // passes `gaps: false`: each batch's own numbering would report the earlier batches missing.
+    if (options.gaps !== false) await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
     return { task, stored, duplicates, refused_deleted: refusedDeleted, exclusions, missing };
   }
 
@@ -988,6 +1014,122 @@ export class LocalRecord {
     return review;
   }
 
+  // ── Participant evidence (cr-evidence #1394; CR-23–CR-27, CR-69) ─────────────
+  /** Every stored observation of one host and scope (an experiment's participant events or notes), oldest key first. */
+  async observationsOf(host: string, scope: string): Promise<ObservationRecord[]> {
+    check(text(host, 100) && text(scope, 200), "invalid_host");
+    const out: ObservationRecord[] = [];
+    for (const k of await this.#keys(`observations/${enc(host)}/${enc(scope)}/`)) {
+      const r = await this.#read<ObservationRecord>(k);
+      if (r) out.push(r);
+    }
+    return out;
+  }
+
+  /** The key a draft source reference names inside this task's record (interpretation.ts `EVIDENCE_REF`). */
+  evidenceRefKey(taskId: string, ref: string): string | null {
+    const m = /^(session|event|note):(.+)$/.exec(String(ref));
+    if (!m) return null;
+    if (m[1] === "session") return `sessions/${enc(PARTICIPANT_HOST)}/${enc(m[2]!)}`;
+    if (m[1] === "note") return `${observationBase(NOTES_HOST, taskId, taskId)}${enc(m[2]!)}`;
+    const slash = m[2]!.indexOf("/");
+    if (slash < 1) return null;
+    return `${observationBase(PARTICIPANT_HOST, taskId, m[2]!.slice(0, slash))}${enc(m[2]!.slice(slash + 1))}`;
+  }
+
+  /**
+   * Does a draft source reference resolve to a live record of THIS task (CR-25, CR-27)? A
+   * participant session must be linked to this task (`foreign` when it is another
+   * experiment's); a record removed by a deletion is `deleted` (CR-69), anything else absent
+   * is `missing`. Another project's ids are never in this record at all.
+   */
+  async resolveEvidenceRef(taskId: string, ref: string, deleted?: Set<string>): Promise<RefResolution> {
+    const key = this.evidenceRefKey(taskId, ref);
+    if (!key) return "missing";
+    if ((deleted ?? (await this.#deletedEvidence())).has(key)) return "deleted";
+    if (key.startsWith("sessions/")) {
+      const s = await this.#read<{ task: string }>(key);
+      return !s ? "missing" : s.task === taskId ? "ok" : "foreign";
+    }
+    return (await this.#read(key)) ? "ok" : "missing";
+  }
+
+  /**
+   * Store one revision of an Observed / Interpreted / Assumed / Next draft (CR-25, CR-26). Every
+   * reference must resolve to a live record of this task, or nothing is written and every
+   * refused item is named. A revision > 1 needs its predecessor; a stored revision is never
+   * rewritten (MC-22). `quota: "none"` for a caller that bounds drafts per task.
+   */
+  async saveEvidenceDraft(taskId: string, value: unknown, options: { quota?: "review" | "none" } = {}): Promise<{ ok: true; draft: EvidenceDraft } | { ok: false; refusals: DraftRefusal[] }> {
+    await this.getTask(taskId);
+    const draft = validateEvidenceDraftShape(value);
+    check(draft.experiment === taskId, "invalid_evidence_draft");
+    const deleted = await this.#deletedEvidence();
+    const refusals = await draftRefusals(draft, (ref) => this.resolveEvidenceRef(taskId, ref, deleted));
+    if (refusals.length) return { ok: false, refusals };
+    if (draft.revision > 1) check(await this.#read(draftKey(taskId, { id: draft.id, revision: draft.revision - 1 })), "missing_previous_revision");
+    const key = draftKey(taskId, draft);
+    if (!(await this.#write(key, draft, true, options.quota ?? "review"))) check(canonicalJson(await this.#read(key)) === canonicalJson(redactDeep(draft)), "revision_exists");
+    return { ok: true, draft };
+  }
+
+  /** Every stored draft revision of a task, by id then revision. */
+  async evidenceDrafts(taskId: string): Promise<EvidenceDraft[]> {
+    check(ID.test(String(taskId)), "invalid_task");
+    const out: EvidenceDraft[] = [];
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      const d = await this.#read<EvidenceDraft>(k);
+      if (d) out.push(d);
+    }
+    return out.sort((a, b) => a.id.localeCompare(b.id) || a.revision - b.revision);
+  }
+
+  /**
+   * Erase one session (CR-69; recon R6): its session link, every observation recorded in it
+   * with their assignments and gap note, every hps-interpretation/1 about it, and every draft
+   * (all revisions) that cites it, so no derived item keeps citing deleted records. Like
+   * `deleteTask`, it leaves a keys-only tombstone so a retried delivery and a later draft
+   * refuse the deleted evidence, and it reports what it removed and what it cannot reach.
+   */
+  async deleteSession(host: string, sessionId: string, input: { by: "user"; at: number }): Promise<{ task: string; removed: Record<string, number>; not_covered: readonly string[] }> {
+    check(isObj(input) && input.by === "user", "delete_requires_user");
+    check(text(host, 100) && text(sessionId, 200), "invalid_session_link");
+    const sessionKey = `sessions/${enc(host)}/${enc(sessionId)}`;
+    const link = await this.#read<{ task: string }>(sessionKey);
+    check(link, "unknown_session");
+    const taskId = link.task;
+    const removed = { observations: 0, interpretations: 0, drafts: 0, sessions: 0 };
+    const evidence: string[] = [sessionKey];
+    const sessionSeg = enc(sessionId);
+    for (const k of await this.#keys(`observations/${enc(host)}/`)) {
+      if (k.split("/")[3] !== sessionSeg) continue;
+      await this.#remove(k);
+      await this.#remove(assignmentKey(k));
+      evidence.push(k);
+      removed.observations++;
+    }
+    for (const k of await this.#keys(`gaps/${enc(host)}/`)) if (k.split("/")[3] === sessionSeg) await this.#remove(k);
+    for (const k of await this.#keys(`interpretations/${taskId}/`)) {
+      if ((await this.#read<InterpretationRecord>(k))?.interpretation.batch.session !== sessionId) continue;
+      await this.#remove(k);
+      removed.interpretations++;
+    }
+    const cites = (ref: string) => ref === `session:${sessionId}` || ref.startsWith(`event:${sessionId}/`);
+    const doomed = new Set<string>();
+    for (const d of await this.evidenceDrafts(taskId)) if (d.items.some((i) => i.source_refs.some(cites))) doomed.add(d.id);
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      const id = decodeURIComponent(k.slice(`drafts/${taskId}/`.length).replace(/@\d+$/, ""));
+      if (!doomed.has(id)) continue;
+      await this.#remove(k);
+      removed.drafts++;
+    }
+    // Keys only, no content, under the deleted/ prefix every append and draft check reads.
+    await this.#write(`deleted/sessions/${enc(host)}/${sessionSeg}`, { task: taskId, session: sessionId, at: input.at, evidence }, false, "none");
+    await this.#remove(sessionKey);
+    removed.sessions = 1;
+    return { task: taskId, removed, not_covered: DELETE_NOT_COVERED };
+  }
+
   /**
    * Instructor confirmation state (SX-42): the newest teacher record about one observed event, or
    * `unreviewed` when there is none. Computed on read, never stored on the event.
@@ -1167,7 +1309,7 @@ export class LocalRecord {
   async deleteTask(taskId: string, input: { by: "user"; at: number }): Promise<{ removed: Record<string, number>; not_covered: readonly string[] }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
     await this.getTask(taskId);
-    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0 };
+    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0, drafts: 0 };
     const evidence: string[] = [];
     // CR-10 — the stored bytes this task's observations name go with them.
     const named = new Set<string>();
@@ -1191,6 +1333,11 @@ export class LocalRecord {
     for (const k of await this.#keys(`reviews/${taskId}/`)) {
       await this.#remove(k);
       removed.reviews++;
+    }
+    // cr-evidence (CR-69): the task's evidence drafts are derived from its records and go with them.
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      await this.#remove(k);
+      removed.drafts++;
     }
     for (const k of await this.#keys("submissions/")) {
       if ((await this.#read<{ payload: { task: { id: string } } }>(k))?.payload.task.id !== taskId) continue;
@@ -1303,7 +1450,8 @@ export class LocalRecord {
       const g = await this.#read<MyRecords["gaps"][number]>(k);
       if (g && (g.missing.length > 0 || g.incomplete)) gaps.push(g);
     }
-    const deleted = (await this.#keys("deleted/")).map((k) => k.slice("deleted/".length));
+    // Session tombstones (deleteSession) are not deleted tasks.
+    const deleted = (await this.#keys("deleted/")).filter((k) => !k.startsWith("deleted/sessions/")).map((k) => k.slice("deleted/".length));
     const browser_results = { stored: await this.blobCount(), bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
     return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted, browser_results };
   }

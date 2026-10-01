@@ -62,7 +62,10 @@ import {
 } from "../lib/curriculum/store";
 import { hypeproofTokensIn, judgeToken, scanFile, type ScanHit } from "../lib/curriculum/publish-scan";
 import { originFor, parseTestOrigin, shareUrl } from "../lib/curriculum/test-origin";
-import { ensureExperimentTask, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
+import { EVIDENCE_LIMITS, addNote, ensureExperimentTask, experimentEvidence, noteEvent, participantRecord, PUBLISHED_HOST, type R2Like } from "../lib/curriculum/participant-record";
+import { closeExperimentAfterDeletion, getCohortControls, releaseErasedSession } from "../lib/curriculum/store";
+import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
+import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
 
 type Ctx = Context<{ Bindings: Env; Variables: { requestId: string } }>;
 
@@ -395,6 +398,8 @@ curriculum.post("/experiments", async (c) => {
   if (!contract.ok) return refuse(c, 400, "invalid_experiment", { problems: contract.problems });
   const version = await getVersion(db, project.id, contract.value.product_version_id);
   if (!version) return refuse(c, 409, "version_unresolved");
+  // cr-evidence (CR-67, CR-70): the cohort's admin decides whether raw input may be declared at all.
+  if (contract.value.declarations?.raw_input && !(await getCohortControls(db, project.cohort_id)).raw_input_allowed) return refuse(c, 403, "raw_input_not_allowed");
   if (hypothesisId) {
     const h = await getHypothesis(db, hypothesisId);
     if (!h || h.project_id !== project.id) return refuse(c, 409, "hypothesis_unresolved");
@@ -470,14 +475,23 @@ curriculum.post("/experiments/:id/links", async (c) => {
     return refuse(c, 400, "invalid_json");
   }
   const now = Date.now();
-  // No default expiry exists until Jay sets one (CR-19): the student must choose it.
-  if (body.expires_at === undefined || body.expires_at === null) return refuse(c, 400, "expiry_required");
+  // No default expiry exists until one is set (CR-19): the student must choose it, unless the
+  // cohort's admin set a default (CR-70, cr-evidence).
+  if (body.expires_at === undefined || body.expires_at === null) {
+    const d = (await getCohortControls(c.env.HPS_DB, project.cohort_id)).link_expiry_default_days;
+    if (d === null) return refuse(c, 400, "expiry_required");
+    body.expires_at = now + d * 24 * 3600_000;
+  }
   const expires = body.expires_at;
   if (typeof expires !== "number" || !Number.isFinite(expires) || expires <= now || expires > now + PUBLISH_LIMITS.maxLinkLifetimeMs) return refuse(c, 400, "invalid_expiry");
   const channel = normalizeChannel(body.channel);
   if (channel === null) return refuse(c, 400, "invalid_channel", { max: CHANNEL_MAX });
   const variant = body.variant_id;
   if (variant !== undefined && !(typeof variant === "string" && experiment.declarations?.variants?.some((v) => v.id === variant))) return refuse(c, 400, "unknown_variant");
+  // cr-evidence (CR-74): in a comparison experiment every session carries exactly one variant,
+  // so a link must name one; an outside alternative is observed through notes, never served.
+  if (variant === undefined && (experiment.declarations?.variants?.length ?? 0) >= 2) return refuse(c, 400, "variant_required");
+  if (typeof variant === "string" && experiment.declarations?.variants?.find((v) => v.id === variant)?.alternative) return refuse(c, 400, "variant_is_alternative");
   if (experiment.status !== "running") return refuse(c, 409, "experiment_not_running");
   const origin = testOrigin(c.env);
   if (!origin.ok) return refuse(c, 503, "test_origin_unavailable", { problem: origin.problem });
@@ -508,6 +522,202 @@ curriculum.post("/links/:id/revoke", async (c) => {
   return c.json({ link: { ...after, state: linkState(after, now) } });
 });
 
+// ── Evidence (cr-evidence #1394; CR-24–CR-28, CR-69, CR-72, CR-74) ────────────
+
+/** An experiment a member may act on, with its Project and the Project's record, or the unknown-route answer. */
+async function memberExperiment(c: Ctx, s: Student, id: string) {
+  const experiment = isVentureId(id) ? await getExperiment(c.env.HPS_DB, id) : null;
+  if (!experiment) return unknownRoute(c);
+  const project = await memberProject(c, s, experiment.project_id);
+  if (project instanceof Response) return project;
+  return { experiment, project, record: participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id) };
+}
+
+/**
+ * The reader of an experiment's evidence: a member of its Project, or a director whose issuer
+ * scope covers the Project's cohort and profile (R5, CR-37). Anyone else, an id that does not
+ * exist, and every caller while the switch is off get the unknown-route answer.
+ */
+async function evidenceReader(c: Ctx, id: string) {
+  const raw = bearer(c.req.header("authorization"));
+  if (!raw) return unknownRoute(c);
+  let payload: TokenPayload;
+  try {
+    payload = await verify(raw, c.env.HPS_SIGNING_SECRET);
+  } catch {
+    return unknownRoute(c);
+  }
+  if (payload.role !== "issuer") {
+    const s = await student(c);
+    if (s instanceof Response) return s;
+    return memberExperiment(c, s, id);
+  }
+  // A director: no D1 read before the switch is known to be on for a profile this issuer serves (CR-02).
+  let anyOn = false;
+  for (const p of [...new Set((payload.scopes ?? []).flatMap((sc) => sc.profiles ?? []))]) {
+    const r = await resolveProfile(c.env, p);
+    if (r && curriculumRuntimeAllowed(r.profile)) {
+      anyOn = true;
+      break;
+    }
+  }
+  if (!anyOn || !isVentureId(id)) return unknownRoute(c);
+  const experiment = await getExperiment(c.env.HPS_DB, id);
+  const project = experiment ? await getProject(c.env.HPS_DB, experiment.project_id) : null;
+  if (!experiment || !project || !(payload.scopes ?? []).some((sc) => sc.cohort === project.cohort_id && (sc.profiles ?? []).includes(project.profile_id))) return unknownRoute(c);
+  const resolved = await resolveProfile(c.env, project.profile_id);
+  if (!resolved || !curriculumRuntimeAllowed(resolved.profile)) return unknownRoute(c);
+  noStore(c);
+  if (payload.jti && (await isTokenRevoked(c.env.HPS_KV, payload.jti))) return refuse(c, 401, "revoked");
+  return { experiment, project, record: participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id) };
+}
+
+curriculum.get("/experiments/:id/evidence", async (c) => {
+  const r = await evidenceReader(c, c.req.param("id"));
+  if (r instanceof Response) return r;
+  return c.json({ evidence: await experimentEvidence(r.record, r.experiment, Date.now()) });
+});
+
+/** A manual record (CR-24): five kinds, the provenance each needs and the student's source state; nothing guessed. */
+curriculum.post("/experiments/:id/notes", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const r = await memberExperiment(c, s, c.req.param("id"));
+  if (r instanceof Response) return r;
+  if (r.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  const now = Date.now();
+  const built = noteEvent({ experiment: r.experiment, note: body, id: newVentureId("note"), now });
+  if (!built.ok) return refuse(c, 400, built.code);
+  if ((await r.record.observationsOf("notes", r.experiment.id)).length >= EVIDENCE_LIMITS.maxNotesPerExperiment) return refuse(c, 409, "note_limit", { max: EVIDENCE_LIMITS.maxNotesPerExperiment });
+  await ensureExperimentTask(r.record, r.experiment, now);
+  try {
+    await addNote(r.record, r.experiment, built.event);
+  } catch (e) {
+    const code = e instanceof Error ? e.message : "";
+    if (/^(invalid_|missing_|identity_field|ai_text_as_student|unsupported_)/.test(code)) return refuse(c, 400, code);
+    throw e;
+  }
+  return c.json({ note: built.event }, 201);
+});
+
+/**
+ * Store an evidence draft, revision 1 (CR-25): the runtime's observed items over the records
+ * (`from_runtime`), or items an AI summary or the student wrote. Every observed statement must
+ * cite records of this experiment that resolve; otherwise nothing is stored and every refused
+ * item is named (422).
+ */
+curriculum.post("/experiments/:id/drafts", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const r = await memberExperiment(c, s, c.req.param("id"));
+  if (r instanceof Response) return r;
+  let body: { from_runtime?: unknown; items?: unknown; author?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  if (r.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
+  const now = Date.now();
+  if ((await r.record.evidenceDrafts(r.experiment.id).catch(() => [])).length >= EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment) return refuse(c, 409, "draft_limit");
+  await ensureExperimentTask(r.record, r.experiment, now);
+  const id = newVentureId("drf");
+  let draft: unknown;
+  if (body.from_runtime === true) {
+    const ev = await experimentEvidence(r.record, r.experiment, now);
+    const d = runtimeDraft({ id, experiment: r.experiment, sessions: ev.sessions, notes: ev.notes, at: now });
+    if (!d) return refuse(c, 409, "no_evidence_recorded");
+    draft = d;
+  } else {
+    const author = body.author === "ai" ? "ai" : "user";
+    draft = { format: "hps-evidence-draft/1", id, revision: 1, supersedes: null, experiment: r.experiment.id, author, created_at: now, items: body.items };
+  }
+  let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
+  try {
+    saved = await r.record.saveEvidenceDraft(r.experiment.id, draft, { quota: "none" });
+  } catch (e) {
+    const code = e instanceof Error ? e.message : "";
+    if (/^(invalid_|unsupported_|missing_)/.test(code)) return refuse(c, 400, code);
+    throw e;
+  }
+  if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
+  return c.json({ draft: saved.draft }, 201);
+});
+
+/** Accept, edit or reject items (CR-26): a new revision; the previous one and every raw record keep their bytes. */
+curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const r = await memberExperiment(c, s, c.req.param("id"));
+  if (r instanceof Response) return r;
+  let body: { revision?: unknown; actions?: unknown; reason?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  const draftId = c.req.param("draft");
+  const all = (await r.record.evidenceDrafts(r.experiment.id).catch(() => [] as EvidenceDraft[])).filter((d) => d.id === draftId);
+  const latest = all.at(-1);
+  if (!latest) return unknownRoute(c);
+  if (body.revision !== latest.revision) return refuse(c, 409, "stale_revision", { latest: latest.revision });
+  let next: EvidenceDraft;
+  try {
+    next = reviseEvidenceDraft(latest, body.actions as Parameters<typeof reviseEvidenceDraft>[1], { at: Date.now(), reason: typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 1000) : "student review" });
+  } catch (e) {
+    return refuse(c, 400, e instanceof Error ? e.message : "invalid_review");
+  }
+  const saved = await r.record.saveEvidenceDraft(r.experiment.id, next, { quota: "none" });
+  if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
+  return c.json({ draft: saved.draft }, 201);
+});
+
+/**
+ * Delete an experiment's test data (CR-69): every participant session, event, manual record
+ * and evidence draft in its record (`deleteTask`, MC-31), with the receipt it returns. Its
+ * links are revoked and its session counters follow; the Experiment record stays, closed, with
+ * when its data was deleted. A cohort may reserve deletion for directors (CR-70).
+ */
+curriculum.delete("/experiments/:id", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const r = await memberExperiment(c, s, c.req.param("id"));
+  if (r instanceof Response) return r;
+  if (!(await getCohortControls(c.env.HPS_DB, r.project.cohort_id)).student_deletion) return refuse(c, 403, "deletion_reserved");
+  const now = Date.now();
+  let report: Awaited<ReturnType<typeof r.record.deleteTask>> | null = null;
+  try {
+    report = await r.record.deleteTask(r.experiment.id, { by: "user", at: now });
+  } catch (e) {
+    if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
+  }
+  const experiment = await closeExperimentAfterDeletion(c.env.HPS_DB, r.experiment, now);
+  return c.json({ receipt: { kind: "experiment_test_data_deleted", experiment_id: experiment.id, at: now, removed: report?.removed ?? {}, not_covered: report?.not_covered ?? [], links_revoked: true }, experiment });
+});
+
+/** Delete one participant session (CR-69; recon R6's per-session erase), with its receipt; the link's counter follows. */
+curriculum.delete("/experiments/:id/sessions/:sid", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const r = await memberExperiment(c, s, c.req.param("id"));
+  if (r instanceof Response) return r;
+  if (!(await getCohortControls(c.env.HPS_DB, r.project.cohort_id)).student_deletion) return refuse(c, 403, "deletion_reserved");
+  const sid = c.req.param("sid");
+  if (!/^ps-[0-9a-f]{32}$/.test(sid)) return unknownRoute(c);
+  const link = await r.record.sessionLink(PUBLISHED_HOST, sid);
+  if (!link || link.task !== r.experiment.id) return unknownRoute(c);
+  const now = Date.now();
+  const report = await r.record.deleteSession(PUBLISHED_HOST, sid, { by: "user", at: now });
+  if (link.attribution?.link) await releaseErasedSession(c.env.HPS_DB, link.attribution.link);
+  return c.json({ receipt: { kind: "participant_session_deleted", experiment_id: r.experiment.id, session_id: sid, at: now, removed: report.removed, not_covered: report.not_covered } });
+});
+
 /** The CR-T02 Worker inventory of this router, as `METHOD /path` under /v1/curriculum. */
 export const CURRICULUM_ROUTES = [
   "GET /v1/curriculum/projects",
@@ -519,4 +729,11 @@ export const CURRICULUM_ROUTES = [
   "GET /v1/curriculum/experiments/:id/channels",
   "POST /v1/curriculum/experiments/:id/links",
   "POST /v1/curriculum/links/:id/revoke",
+  // cr-evidence (#1394)
+  "GET /v1/curriculum/experiments/:id/evidence",
+  "POST /v1/curriculum/experiments/:id/notes",
+  "POST /v1/curriculum/experiments/:id/drafts",
+  "POST /v1/curriculum/experiments/:id/drafts/:draft/review",
+  "DELETE /v1/curriculum/experiments/:id",
+  "DELETE /v1/curriculum/experiments/:id/sessions/:sid",
 ] as const;

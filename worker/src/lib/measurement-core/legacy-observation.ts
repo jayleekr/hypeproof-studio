@@ -34,21 +34,29 @@ import { CANDIDATE_CAPABILITY_V1, LEGACY_SEVEN_ASSETS } from "./capability-model
 import {
   ARTIFACT_REF_KEYS,
   BROWSER_RESULT_REF_KEYS,
+  EVENT_ATTRIBUTION_KEYS,
   EVIDENCE_TYPES,
   LEARNING_EVENT_KEYS,
   LEARNING_EVENT_KINDS,
   LEARNING_EVENT_SPEC,
   LEARNING_OUTCOMES,
+  MANUAL_RECORD_KINDS,
   OBSERVATION_ACTORS,
+  PARTICIPANT_EVENT_KEYS,
+  PARTICIPANT_EVENT_KINDS,
   REF_KEYS,
   SOURCE_KINDS,
   SOURCE_STATES,
+  forbidIdentityFields,
   forbidPersonalMetrics,
   isHumanEvidence,
   isLearningEventKind,
+  isParticipantEventKind,
   type EvidenceType,
   type LearningEventKind,
+  type ManualRecordKind,
   type ObservationActor,
+  type ParticipantEventKind,
   type SourceKind,
   type SourceState,
 } from "./learning-events.ts";
@@ -80,7 +88,7 @@ export const LEGACY_OBSERVATION_KINDS = [
   "correction",
 ] as const;
 export type LegacyObservationKind = (typeof LEGACY_OBSERVATION_KINDS)[number];
-export type ObservationKind = LegacyObservationKind | LearningEventKind;
+export type ObservationKind = LegacyObservationKind | LearningEventKind | ParticipantEventKind;
 export interface ObservationEvent {
   id: string;
   seq: number;
@@ -117,6 +125,14 @@ export interface ObservationEvent {
   adopted_from?: string;
   decision?: { from: string; to: string };
   next_experiment?: string;
+  // ── /2 participant evidence, additive (cr-evidence; PARTICIPANT_EVENT_KEYS in ./learning-events.ts). ──
+  participant?: { session_id: string; pseudonym?: string };
+  attribution?: { project: string; experiment: string; product_version?: string; link?: string; channel?: string; variant?: string };
+  target?: { role: string; path: string };
+  label?: string;
+  input_value?: string;
+  note_kind?: ManualRecordKind;
+  locator?: string;
 }
 export interface ObservationBatch {
   format: ObservationFormat;
@@ -239,6 +255,66 @@ function checkLearningFields(e: Record<string, unknown>): void {
   }
 }
 
+const PSEUDONYM = /^pp-[0-9a-f]{32}$/;
+
+/**
+ * The participant-evidence rules for one /2 event (cr-evidence; CR-23, CR-24, CR-65, CR-67,
+ * CR-74). Only reached for a /2 batch, after the key allowlist. Each refusal is named.
+ *
+ *   - a participant event is `external_user`, carries its session (`participant`) and its
+ *     inherited `attribution`, and a `source_state` of `real` (a served session) or
+ *     `simulated` (a rehearsal); SX-46 still asks `real` for provenance, which the Service
+ *     writes (the pseudonym, the time, the link);
+ *   - `target` only on `click` / `input`, `input_value` only on `input`, a `label` on
+ *     exactly the task and milestone kinds;
+ *   - a manual record is `external_feedback_received` with one `note_kind`; an external
+ *     source names its `locator`, the others do not;
+ *   - no identity-like key at any depth (`identity_field`, CR-65).
+ */
+function checkParticipantFields(e: Record<string, unknown>): void {
+  const kind = String(e.kind);
+  const participantKind = isParticipantEventKind(kind);
+  const carries = (PARTICIPANT_EVENT_KEYS as readonly string[]).some((k) => e[k] !== undefined);
+  if (!participantKind && !carries) return;
+  forbidIdentityFields(e);
+  if (e.attribution !== undefined) {
+    const a = e.attribution;
+    check(
+      object(a) &&
+        Object.keys(a).every((k) => (EVENT_ATTRIBUTION_KEYS as readonly string[]).includes(k)) &&
+        str(a.project) && str(a.experiment) &&
+        ["product_version", "link", "channel", "variant"].every((k) => a[k] === undefined || str(a[k])),
+      "invalid_attribution",
+    );
+    check(participantKind || kind === "external_feedback_received", "invalid_attribution");
+  }
+  if (e.note_kind !== undefined || e.locator !== undefined) {
+    check(kind === "external_feedback_received" && (MANUAL_RECORD_KINDS as readonly string[]).includes(String(e.note_kind)), "invalid_note_kind");
+    if (e.note_kind === "external_source") check(str(e.locator, 500), "missing_locator");
+    else check(e.locator === undefined, "invalid_note_kind");
+  }
+  if (!participantKind) {
+    check(e.participant === undefined && e.target === undefined && e.label === undefined && e.input_value === undefined, "invalid_participant_event");
+    return;
+  }
+  check(e.actor === "external_user", "invalid_actor");
+  check(e.source_state === "real" || e.source_state === "simulated", "invalid_source_state");
+  const p = e.participant;
+  check(
+    object(p) && Object.keys(p).every((k) => k === "session_id" || k === "pseudonym") && str(p.session_id) && (p.pseudonym === undefined || PSEUDONYM.test(String(p.pseudonym))),
+    "invalid_participant",
+  );
+  check(e.attribution !== undefined, "missing_attribution");
+  if (e.target !== undefined) {
+    check(kind === "click" || kind === "input", "invalid_participant_event");
+    check(object(e.target) && Object.keys(e.target).length === 2 && str(e.target.role, 40) && str(e.target.path, 300), "invalid_target");
+  }
+  if (e.input_value !== undefined) check(kind === "input" && typeof e.input_value === "string" && e.input_value.length <= 2000, "invalid_participant_event");
+  const labelled = kind === "task_start" || kind === "task_complete" || kind === "milestone";
+  check(labelled ? str(e.label, 80) : e.label === undefined, "invalid_label");
+  check(e.student_text === undefined, "invalid_participant_event");
+}
+
 const DIGEST_REF = /^sha256:[a-f0-9]{64}$/;
 
 /**
@@ -293,6 +369,7 @@ export function validateObservation(value: unknown): {
     // record written before them, so those read exactly as they did.
     ...BROWSER_RESULT_REF_KEYS,
     ...(v2 ? LEARNING_EVENT_KEYS : []),
+    ...(v2 ? PARTICIPANT_EVENT_KEYS : []),
   ];
   for (const e of value.events) {
     // A personal score has no place in an observed event either; named before the
@@ -311,7 +388,8 @@ export function validateObservation(value: unknown): {
     );
     check(
       (LEGACY_OBSERVATION_KINDS as readonly string[]).includes(String(e.kind)) ||
-        (v2 && (LEARNING_EVENT_KINDS as readonly string[]).includes(String(e.kind))),
+        (v2 && (LEARNING_EVENT_KINDS as readonly string[]).includes(String(e.kind))) ||
+        (v2 && (PARTICIPANT_EVENT_KINDS as readonly string[]).includes(String(e.kind))),
       "invalid_kind",
     );
     check(
@@ -321,6 +399,7 @@ export function validateObservation(value: unknown): {
       "invalid_event_text",
     );
     if (v2) checkLearningFields(e);
+    if (v2) checkParticipantFields(e);
     checkBrowserResultRefs(e);
     if (["tool_request", "approval", "tool_result"].includes(String(e.kind)))
       check(str(e.tool_id), "missing_tool_id");

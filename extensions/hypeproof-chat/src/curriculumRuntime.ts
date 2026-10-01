@@ -86,6 +86,8 @@ export interface CrSurfaceInventory {
 export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
 /** The participant snippet opens the visit's session here, once (CR-21). */
 export const CR_TEST_ORIGIN_SESSION_ROUTE = "POST <test-origin>/l/:link/__hp/session";
+/** The participant snippet's events go here (cr-evidence; CR-23). */
+export const CR_TEST_ORIGIN_EVENTS_ROUTE = "POST <test-origin>/l/:link/__hp/events";
 
 export const CR_SURFACES: CrSurfaceInventory = {
   // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17).
@@ -107,6 +109,16 @@ export const CR_SURFACES: CrSurfaceInventory = {
     "POST /v1/curriculum/links/:id/revoke",
     CR_TEST_ORIGIN_ROUTE,
     CR_TEST_ORIGIN_SESSION_ROUTE,
+    // cr-evidence: participant evidence, manual records, drafts, deletion, and the admin's cohort controls.
+    "GET /v1/curriculum/experiments/:id/evidence",
+    "POST /v1/curriculum/experiments/:id/notes",
+    "POST /v1/curriculum/experiments/:id/drafts",
+    "POST /v1/curriculum/experiments/:id/drafts/:draft/review",
+    "DELETE /v1/curriculum/experiments/:id",
+    "DELETE /v1/curriculum/experiments/:id/sessions/:sid",
+    CR_TEST_ORIGIN_EVENTS_ROUTE,
+    "GET /admin/curriculum/cohorts/:cohort/controls",
+    "PUT /admin/curriculum/cohorts/:cohort/controls",
   ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };

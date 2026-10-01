@@ -1365,3 +1365,21 @@ CREATE TABLE IF NOT EXISTS cr_test_links (
 );
 CREATE INDEX IF NOT EXISTS idx_cr_test_links_experiment ON cr_test_links(experiment_id);
 CREATE INDEX IF NOT EXISTS idx_cr_test_links_project ON cr_test_links(project_id);
+
+-- cr-evidence (#1394) — migration 0033: per-link rate windows and per-cohort data controls.
+-- Policy and rate state only; participant evidence stays in the measurement-core record on R2.
+CREATE TABLE IF NOT EXISTS cr_link_rates (
+  link_id      TEXT NOT NULL REFERENCES cr_test_links(id),
+  kind         TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count        INTEGER NOT NULL,
+  PRIMARY KEY (link_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS cr_cohort_controls (
+  cohort_id  TEXT PRIMARY KEY,
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  updated_by TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
