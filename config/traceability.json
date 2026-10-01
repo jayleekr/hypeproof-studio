@@ -3145,6 +3145,9 @@
         },
         {
           "path": "e2e/curriculum-runtime/evidence-runtime.real.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-evidence-capture.md"
         }
       ]
     },

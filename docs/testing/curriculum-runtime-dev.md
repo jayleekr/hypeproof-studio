@@ -131,3 +131,40 @@ With `scripts/dev-stack.sh` (wrangler dev) instead: apply the migration to the l
 | 10 | Restarts the Service with `off` and reloads the window | The command is not in the palette; the share link answers like an unknown address |
 
 **Where the data is.** On the Service: the D1 tables `cr_projects`, `cr_hypotheses`, `cr_product_versions`, `cr_experiments` and `cr_test_links` (one `hps-venture/1` document per row); the published files as R2 objects `test-versions/<digest>/<path>` of `HPS_TRACES`; each participant session as the per-session key `curriculum/<cohort>/<project>/sessions/published/<session id>` of the measurement-core record on the same bucket, with its `attribution` (project, experiment, product version, link, channel), written once per visit when the page's script opens it (`POST /l/<link>/__hp/session`); the per-link count in `cr_test_links.sessions_opened`, which the panel's counts read. In the App: the Project id and its test origin per signed-in person in `workspaceState` (`hypeproof-chat.crProjects`). With the in-memory fixtures (`app-service.mjs publish`, the tests), all of it is gone when the process ends.
+
+## `cr-evidence` — Evidence capture (#1394)
+
+**Flag:** the same `curriculum_runtime: { enabled: true }` and `HPS_TEST_ORIGIN` as `cr-publish`. Nothing else. The cohort's admin controls (`/admin/curriculum/cohorts/<cohort>/controls`) start at the defaults: data deleted 30 days after an experiment's last link ended, raw-input declarations allowed, no link expiry default, students may delete their test data, no team ceilings.
+
+**Fastest check (background, no app, no phone).**
+
+```bash
+cd worker && node --experimental-strip-types --experimental-sqlite test/cr-evidence.test.mjs    # Service + App session, SQLite
+cd worker && npm run test:cr-evidence:d1                                                         # the same on local workerd D1 and R2
+cd e2e && npm run test:cr-evidence                                                                # a participant in Chromium as a 390 px phone
+```
+
+**In the app (background, scripted participants).** The same prepared copy as `cr-browser`, with this branch's extension and webview injected:
+
+```bash
+GATE=idle HPS_APP_PATH="<app copy>" bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts evidence-app
+```
+
+It publishes the kiosk fixture from the panel, opens three participant visits through the published runtime (the same requests the page's script makes), and writes `e2e/test-results/cr-app/evidence-result.json`.
+
+**By hand, with a phone.** Set up `cr-publish`'s ngrok path above, publish, then:
+
+| Step | What the student does | Expected (in student terms) |
+|---|---|---|
+| 1 | Publishes the kiosk with "같은 사람이 다시 와서 쓰는지 볼래요" ticked, opens the QR on a phone and orders a drink | Nothing visible changes on the phone; the kiosk works as before |
+| 2 | Runs "HypeProof: 실험 증거 보기" | A "실험 증거" box: the experiment, "참가 세션 1개 · 메모 0개", "다시 온 기기: 아직 없음" |
+| 3 | Opens the link again on the same phone the next day (or a minute later), then reopens the box | "다시 온 기기: <6글자> 1번 (간격 …일)" and "기기 기준이에요. 사람 수가 아니에요." An experiment published without the tick says "측정하지 않음", never 0 |
+| 4 | Opens "기록 남기기", picks "인터뷰 메모", writes what the participant said, fills 누가 · 언제 · 어떤 상황, and tries to save without choosing "실제로 있었던 일" | The save button stays off until a source state is chosen; nothing is chosen for them |
+| 5 | Chooses "실제로 있었던 일" and saves | "기록을 남겼어요."; the note appears under "원래 기록 보기" exactly as typed |
+| 6 | Presses "기록에서 초안 만들기" | Under "관찰한 것": sentences like "'주문'을(를) 시작한 세션 2개 중 2개가 끝까지 마쳤어요." with "근거 2개" |
+| 7 | Clicks that sentence | It opens the sessions it counts: "참가 세션 …", the time, "화면 · 누름", "주문 마침" |
+| 8 | Presses "받아들이기" on a sentence, then "버리기" on another | The sentences read "받아들임" and "버림"; the original records under "원래 기록 보기" are unchanged |
+| 9 | Presses "이 세션 지우기" on one session and confirms | A modal asks first; then "지웠어요. 지운 기록의 영수증이 남았어요."; the session is gone and so is any draft that counted it |
+| 10 | Restarts the Service with `off` and reloads the window | "실험 증거 보기" is not in the palette; the events address of the link answers like an unknown address |
+
+**Where the data is.** On the Service, in the same measurement-core record as `cr-publish`'s sessions (`curriculum/<cohort>/<project>/` on `HPS_TRACES`): participant events under `observations/published/<experiment>/<session>/e<seq>`, the student's notes under `observations/notes/<experiment>/<experiment>/note-…`, drafts under `drafts/<experiment>/<draft>@<revision>`, and tombstones of deleted sessions and experiments under `deleted/`. The participant pseudonym is on the session key. D1: `cr_link_rates` (one rate window per link; no events), `cr_cohort_controls` (the admin's controls), and the Experiment row's `data_deleted_at` once its data was deleted. In the App: nothing beyond `cr-publish`'s remembered Project. With the in-memory fixtures, all of it is gone when the process ends. With `scripts/dev-stack.sh`, apply `migrations/0033-curriculum-runtime-evidence.sql` to the local D1 after 0032. These by-hand rows were written from the code and the executed runs above, not executed on a real phone.
