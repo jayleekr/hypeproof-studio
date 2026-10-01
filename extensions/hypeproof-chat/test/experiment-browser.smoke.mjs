@@ -1,0 +1,797 @@
+// cr-browser (#1391) — Experiment Browser core over a scripted CDP page.
+// CR-T04 observation · CR-T05 per-document records · CR-T06 actions · CR-T08 step
+// attribution (unit half) · CR-T11 origin scope · CR-T63 page indicator (unit half).
+//
+// Every check has a positive control (a sample that must pass) and a negative control
+// (a planted defect that must be caught). The fake page is not a browser; the
+// real-Chromium run is e2e/curriculum-runtime/experiment-browser.real.mjs.
+//
+// Run: node --experimental-strip-types test/experiment-browser.smoke.mjs
+
+import assert from "node:assert/strict";
+import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
+
+const eb = await import("../src/experimentBrowser.ts");
+const { PageEventLog, CrExecutor, observationProblems, actionResultProblems, checkAgentOrigin, failuresOf } = eb;
+const { toMcpToolResult } = await import("../src/browserMcp.ts");
+const { toProxyToolResult } = await import("../src/browserControlHelpers.ts");
+
+/**
+ * The text the model reads for a result: what both runtimes hand it (`toMcpToolResult` on
+ * the SDK path, `toProxyToolResult` on the proxy path), never the `observation` side field.
+ */
+function modelText(r) {
+  const texts = (blocks) => blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const sdk = texts(toMcpToolResult(r).content);
+  assert.equal(texts(toProxyToolResult("t", r).content), sdk, "both runtimes hand the model the same text");
+  return sdk;
+}
+/**
+ * The failures (CR-08) the model can read off a result: error records with their step.
+ * A record marked "이전 요청" belongs to an earlier request and is not this request's failure.
+ */
+function failuresInText(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (/^- \[[a-z]+\/[a-z]+\] 이전 요청 /.test(line)) continue;
+    const m = /^- \[(console|exception|network|log)\/([a-z]+)\](?: 단계 (\d+))? (.*?)(?: @ \S+)?$/.exec(line);
+    if (!m || !(m[1] === "exception" || m[1] === "network" || m[2] === "error" || m[2] === "assert")) continue;
+    out.push({ step: m[3] ? Number(m[3]) : null, kind: m[1], message: m[4] });
+  }
+  return out;
+}
+
+const ORIGIN = "http://127.0.0.1:5173";
+const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+let passed = 0;
+async function test(name, fn) {
+  await fn();
+  passed++;
+  console.log(`✓ ${name}`);
+}
+
+function executorFor(page, over = {}) {
+  const indicator = [];
+  const hooks = {
+    allowedOrigins: () => [ORIGIN],
+    artifactVersion: async () => FAKE_VERSION,
+    onIndicator: (visible, tool) => indicator.push({ visible, tool }),
+    settleMs: 0,
+    sleep: (ms) => tick(Math.min(ms, 10)),
+    ...over,
+  };
+  return { ex: new CrExecutor(fakePort(page), hooks), indicator };
+}
+
+// ── CR-T04 observation ──────────────────────────────────────────────────────
+
+await test("CR-T04 positive: known title, route, three buttons and viewport, tagged with the document", async () => {
+  const page = makeFakePage({ viewport: { width: 390, height: 844 } });
+  const { ex } = executorFor(page);
+  const r = await ex.execute("browser_observe");
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  const o = r.observation;
+  assert.deepEqual(observationProblems(o), []);
+  assert.equal(o.url, `${ORIGIN}/index.html`);
+  assert.equal(o.route, "/index.html");
+  assert.equal(o.title, "키오스크 연습");
+  assert.deepEqual(o.refs, ["e1", "e2", "e3"]);
+  assert.match(o.snapshot, /\[ref=e1\] button "주문하기"/);
+  assert.match(o.snapshot, /\[ref=e3\] button "도움말"/);
+  assert.deepEqual(o.viewport, { width: 390, height: 844 });
+  assert.equal(o.documentGeneration, "L0");
+  assert.equal(o.screenshot.data, page.state.screenshot);
+  assert.equal(o.artifact.id, FAKE_VERSION.id);
+  assert.equal(r.content[1].type, "image_url", "the screenshot rides as an image block");
+  // What the model reads carries every part, not just the side field.
+  const lines = modelText(r).split("\n");
+  for (const want of [`URL: ${ORIGIN}/index.html`, "경로: /index.html", "뷰포트: 390x844", "문서 세대: L0", `산출물 버전: ${FAKE_VERSION.id}`]) {
+    assert.ok(lines.some((l) => l.startsWith(want)), `the model reads "${want}"`);
+  }
+  assert.ok(lines.some((l) => /\[ref=e1\] button "주문하기"/.test(l)), "the model reads the snapshot refs");
+  assert.equal(toMcpToolResult(r).content[1].type, "image", "the SDK path hands the screenshot on as an image");
+});
+
+await test("CR-T04 negative: an observation missing viewport or document generation is an explicit error", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  const good = (await ex.execute("browser_observe")).observation;
+  const { viewport: _v, ...noViewport } = good;
+  assert.deepEqual(observationProblems(noViewport), ["viewport"]);
+  assert.deepEqual(observationProblems({ ...good, documentGeneration: "" }), ["documentGeneration"]);
+  assert.deepEqual(observationProblems({ ...good, viewport: { width: 0, height: 600 } }), ["viewport"]);
+  // Every required part, removed one at a time, is named (CR-04's full list plus CR-10's version).
+  for (const field of ["url", "route", "snapshot", "screenshot", "viewport", "documentGeneration", "artifact"]) {
+    const { [field]: _gone, ...planted } = good;
+    assert.deepEqual(observationProblems(planted), [field], `missing ${field}`);
+  }
+  assert.deepEqual(observationProblems({ ...good, screenshot: { mimeType: "image/jpeg", data: "" } }), ["screenshot"]);
+  // End to end: a capture that comes back empty is refused, not passed on without an image.
+  const blank = await executorFor(makeFakePage({ screenshot: "" })).ex.execute("browser_observe");
+  assert.equal(blank.isError, true);
+  assert.match(blank.content[0].text, /빠진 것: screenshot/);
+  // End to end: a page whose screenshot fails yields an error result, never a partial one.
+  const broken = makeFakePage({ screenshotFails: true });
+  const r = await executorFor(broken).ex.execute("browser_observe");
+  assert.equal(r.isError, true);
+  assert.equal(r.observation, undefined, "no partial observation rides on an error");
+});
+
+// ── CR-T05 per-document records ─────────────────────────────────────────────
+
+const PLANTED = (p) => {
+  p.consoleError("planted-console-error");
+  p.throwError("planted-throw");
+  p.fetch404("/missing.png");
+};
+
+await test("CR-T05 positive: one console.error, one throw and one 404 yield exactly three records", async () => {
+  const page = makeFakePage({ onLoad: PLANTED });
+  const log = new PageEventLog();
+  await log.attach(page.cdp);
+  page.newDocument();
+  await tick(5);
+  const recs = log.records();
+  assert.equal(recs.length, 3, JSON.stringify(recs));
+  assert.deepEqual(recs.map((r) => r.kind).sort(), ["console", "exception", "network"]);
+  const c = recs.find((r) => r.kind === "console");
+  assert.equal(c.level, "error");
+  assert.equal(c.message, "planted-console-error");
+  assert.deepEqual(c.source, { url: `${ORIGIN}/index.html`, line: 12, column: 5 });
+  assert.ok(recs.every((r) => Number.isFinite(r.time) && r.documentGeneration === "L1"));
+  assert.match(recs.find((r) => r.kind === "network").message, /^404 Not Found .*\/missing\.png$/);
+});
+
+await test("CR-T05 negative: a clean page has zero records; the previous document's never move to the new one", async () => {
+  const clean = makeFakePage();
+  const cleanLog = new PageEventLog();
+  await cleanLog.attach(clean.cdp);
+  clean.newDocument();
+  assert.equal(cleanLog.records().length, 0, "clean page");
+
+  const page = makeFakePage({ onLoad: PLANTED });
+  const log = new PageEventLog();
+  await log.attach(page.cdp);
+  page.newDocument(); // L1 with three planted records
+  const oldCtx = page.state.ctx;
+  // A request of L1 still in flight when the next document commits.
+  page.emit("Network.requestWillBeSent", { requestId: "late", loaderId: "L1", frameId: "F1", request: { url: `${ORIGIN}/late.json` } });
+  page.state.onLoad = () => {};
+  page.newDocument(); // L2, clean
+  // Late events of the OLD document arrive after L2 committed.
+  page.emit("Runtime.consoleAPICalled", { type: "error", args: [{ type: "string", value: "late-from-L1" }], executionContextId: oldCtx, timestamp: Date.now() });
+  page.emit("Network.responseReceived", { requestId: "late", response: { status: 500, statusText: "Server Error" } });
+  page.emit("Runtime.exceptionThrown", { timestamp: Date.now(), exceptionDetails: { text: "Uncaught", exception: { description: "Error: late-throw-from-L1" }, executionContextId: oldCtx } });
+  assert.equal(log.documentGeneration, "L2");
+  assert.equal(log.records().length, 0, `L2 must be clean: ${JSON.stringify(log.records())}`);
+  assert.equal(log.records("L1").length, 6, "the late ones (console, network, exception) stay with L1");
+  // Instrument check: the attribution really keys on the context (a context-less record is dropped, not guessed).
+  page.emit("Runtime.consoleAPICalled", { type: "error", args: [{ type: "string", value: "orphan" }], executionContextId: 9999 });
+  assert.equal(log.records().length, 0);
+});
+
+await test("CR-T05 agent-visible: the model reads the planted document's three records, and \"없음\" on a clean one", async () => {
+  const page = makeFakePage({ onLoad: PLANTED });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const r = await ex.execute("browser_reload");
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  const text = modelText(r);
+  assert.match(text, /콘솔·오류·실패한 요청 3건:/);
+  for (const m of ["planted-console-error", "planted-throw", "/missing.png"]) assert.ok(text.split("\n").some((l) => l.startsWith("- [") && l.includes(m)), `the model reads ${m}`);
+  const clean = makeFakePage();
+  const { ex: cx } = executorFor(clean);
+  await cx.execute("browser_observe");
+  const c = await cx.execute("browser_reload");
+  assert.match(modelText(c), /이 문서의 콘솔·오류·실패한 요청: 없음/);
+  assert.deepEqual(failuresInText(modelText(c)), []);
+});
+
+await test("CR-T05 network rules: a 404 counts once; cancelled and pre-enable requests are dropped", async () => {
+  const page = makeFakePage();
+  const log = new PageEventLog();
+  await log.attach(page.cdp);
+  page.fetch404("/a", "r1");
+  page.emit("Network.loadingFailed", { requestId: "r1", errorText: "net::ERR_ABORTED", canceled: false });
+  page.emit("Network.requestWillBeSent", { requestId: "r2", loaderId: "L0", frameId: "F1", request: { url: `${ORIGIN}/b` } });
+  page.emit("Network.loadingFailed", { requestId: "r2", errorText: "net::ERR_ABORTED", canceled: true });
+  page.emit("Network.loadingFailed", { requestId: "before-enable", errorText: "net::ERR_FAILED", canceled: false });
+  page.emit("Network.requestWillBeSent", { requestId: "r3", loaderId: "L0", frameId: "F1", request: { url: "http://127.0.0.1:9/x" } });
+  page.emit("Network.loadingFailed", { requestId: "r3", errorText: "net::ERR_CONNECTION_REFUSED", canceled: false });
+  assert.deepEqual(log.records().map((r) => r.message), ["404 Not Found http://127.0.0.1:5173/a", "net::ERR_CONNECTION_REFUSED http://127.0.0.1:9/x"]);
+});
+
+await test("CR-T05 bound: records past the per-document cap are counted, not kept", async () => {
+  const page = makeFakePage();
+  const log = new PageEventLog({ maxPerDocument: 2 });
+  await log.attach(page.cdp);
+  for (let i = 0; i < 5; i++) page.consoleLog(`line ${i}`);
+  assert.equal(log.records().length, 2);
+  assert.equal(log.dropped(), 3);
+});
+
+// ── CR-T06 actions ──────────────────────────────────────────────────────────
+
+const WITH_SELECT = [
+  { key: "order", role: "button", name: "주문하기", tag: "button", id: "order" },
+  { key: "size", role: "combobox", name: "크기", tag: "select", id: "size", options: [{ value: "s", text: "작은 컵" }, { value: "l", text: "큰 컵" }] },
+  { key: "help", role: "button", name: "도움말", tag: "button", id: "help" },
+];
+
+await test("CR-T06 positive: select, scroll, hover and reload each change what the next observation shows", async () => {
+  const page = makeFakePage({ elements: WITH_SELECT });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const sel = await ex.execute("browser_select", { ref: "e2", value: "큰 컵" });
+  assert.equal(sel.isError, false, JSON.stringify(sel.content));
+  assert.deepEqual(actionResultProblems("browser_select", sel), []);
+  assert.match(sel.observation.snapshot, /select=\{"size":"l"\}/);
+  const hov = await ex.execute("browser_hover", { ref: "e1" });
+  assert.match(hov.observation.snapshot, /hover=order/);
+  const scr = await ex.execute("browser_scroll", { ref: "e3" });
+  assert.match(scr.observation.snapshot, /scroll=help/);
+  const pageScroll = await ex.execute("browser_scroll", { dy: 300 });
+  assert.match(pageScroll.observation.snapshot, /y=300/);
+  const before = pageScroll.observation.documentGeneration;
+  const rel = await ex.execute("browser_reload");
+  assert.equal(rel.isError, false, JSON.stringify(rel.content));
+  assert.notEqual(rel.observation.documentGeneration, before, "reload yields a new document");
+  assert.match(rel.observation.snapshot, /y=0/);
+  for (const r of [sel, hov, scr, pageScroll, rel]) assert.deepEqual(actionResultProblems("x", { ...r }).filter((p) => !p.startsWith("unknown")), []);
+  // The pre-CR actions return the resulting observation too.
+  const click = await ex.execute("browser_click", { ref: "e1" });
+  assert.deepEqual(actionResultProblems("browser_click", click), []);
+  assert.match(click.observation.snapshot, /clicks=order/);
+});
+
+await test("CR-T06 negative: unknown action, stripped observation, and stale refs after reload", async () => {
+  const page = makeFakePage({ elements: WITH_SELECT });
+  const { ex } = executorFor(page);
+  const unknown = await ex.execute("browser_teleport", {});
+  assert.equal(unknown.isError, true);
+  assert.match(unknown.content[0].text, /알 수 없는 도구: browser_teleport/);
+
+  await ex.execute("browser_observe");
+  const good = await ex.execute("browser_hover", { ref: "e1" });
+  const { observation: _o, ...stripped } = good;
+  assert.deepEqual(actionResultProblems("browser_hover", stripped), ["missing observation"]);
+
+  await ex.execute("browser_observe"); // refs of document L0
+  page.newDocument(); // e.g. the live server's SSE reload: a new document without our action
+  await tick(10);
+  const callsBefore = page.calls.length;
+  for (const [name, input] of [["browser_select", { ref: "e2", value: "s" }], ["browser_scroll", { ref: "e3" }], ["browser_hover", { ref: "e1" }]]) {
+    const r = await ex.execute(name, input);
+    assert.equal(r.isError, true, `${name} on a stale ref must not run`);
+    assert.match(r.content[0].text, /이전 문서의 ref/);
+  }
+  const acted = page.calls.slice(callsBefore).filter((c) => ["DOM.resolveNode", "Runtime.callFunctionOn", "Input.dispatchMouseEvent", "DOM.getBoxModel"].includes(c.method));
+  assert.deepEqual(acted, [], "no CDP action reached the page for a stale ref");
+  assert.equal(page.state.dom.hovered, "order", "state unchanged by the refused hover (still the earlier one)");
+});
+
+// ── CR-T08 (unit half) — the step a failure happened in ─────────────────────
+
+await test("CR-T08 unit: a console error raised by step 3 is reported once, at step 3; a clean flow reports none", async () => {
+  const flow = [["browser_click", { ref: "e1" }], ["browser_click", { ref: "e2" }], ["browser_click", { ref: "e3" }], ["browser_click", { ref: "e1" }], ["browser_click", { ref: "e2" }]];
+  for (const planted of [true, false]) {
+    let clicks = 0;
+    // Benign output on every step (console.log / console.info) is kept but never a failure.
+    const page = makeFakePage({
+      onClick: (p) => {
+        clicks++;
+        p.consoleLog(`step ${clicks} ok`);
+        p.emit("Runtime.consoleAPICalled", { type: "info", args: [{ type: "string", value: `info ${clicks}` }], executionContextId: p.state.ctx, timestamp: Date.now() });
+        if (planted && clicks === 3) p.consoleError("step-3-error");
+      },
+    });
+    const { ex } = executorFor(page);
+    await ex.execute("browser_observe");
+    const failures = [];
+    for (const [name, input] of flow) {
+      const r = await ex.execute(name, input);
+      assert.equal(r.isError, false);
+      // The verdict is what the model reads, not the observation side field.
+      for (const f of failuresInText(modelText(r))) if (!failures.some((g) => g.message === f.message)) failures.push(f);
+    }
+    if (planted) assert.deepEqual(failures, [{ step: 3, kind: "console", message: "step-3-error" }]);
+    else assert.deepEqual(failures, [], "no false positive on the unmodified flow");
+    // Instrument check: the benign lines really reached the records, so "no failure" is a verdict, not an empty log.
+    assert.ok((await ex.logFor(page.cdp)).records().some((r) => r.level === "info"), "benign info lines were recorded");
+  }
+});
+
+await test("CR-T08 step attribution: a record captured outside any agent step carries step null", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  await ex.execute("browser_hover", { ref: "e1" }); // step 1, no error
+  page.consoleError("student-made-error-between-steps"); // the student's own click, between agent steps
+  const r = await ex.execute("browser_observe");
+  const rec = r.observation.records.find((x) => x.message === "student-made-error-between-steps");
+  assert.equal(rec.step, null, `outside any step: ${JSON.stringify(rec)}`);
+  assert.deepEqual(failuresInText(modelText(r)).find((f) => f.message === "student-made-error-between-steps"), { step: null, kind: "console", message: "student-made-error-between-steps" }, "the model reads it with no step");
+  // Control: an error raised during a step still carries that step.
+  const during = makeFakePage({ onClick: (p) => p.consoleError("during-step") });
+  const { ex: dx } = executorFor(during);
+  await dx.execute("browser_observe");
+  const c = await dx.execute("browser_click", { ref: "e1" });
+  assert.equal(c.observation.records.find((x) => x.message === "during-step").step, 1);
+});
+
+await test("CR-T08: with one executor across turns, a new turn numbers its steps from 1 again", async () => {
+  let clicks = 0;
+  const page = makeFakePage({ onClick: (p) => { if (++clicks === 4) p.consoleError("third-step-of-second-turn"); } });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  for (let i = 0; i < 3; i++) await ex.execute("browser_hover", { ref: "e1" });
+  for (let i = 0; i < 3; i++) await ex.execute("browser_click", { ref: "e1" }); // the first turn: steps 1–6 (clicks 1–3)
+  ex.newTurn();
+  await ex.execute("browser_hover", { ref: "e1" });
+  await ex.execute("browser_hover", { ref: "e1" });
+  const r = await ex.execute("browser_click", { ref: "e1" }); // click 4 = this turn's step 3
+  assert.deepEqual(failuresInText(modelText(r)).find((f) => f.message === "third-step-of-second-turn")?.step, 3);
+  // Control (planted): without the new turn the same action reads as step 9.
+  const { ex: old } = executorFor(makeFakePage({ onClick: (p) => p.consoleError("no-new-turn") }));
+  await old.execute("browser_observe");
+  for (let i = 0; i < 8; i++) await old.execute("browser_hover", { ref: "e1" });
+  const o = await old.execute("browser_click", { ref: "e1" });
+  assert.equal(failuresInText(modelText(o)).find((f) => f.message === "no-new-turn")?.step, 9);
+});
+
+await test("CR-T08: an earlier request's error is never reported at a step of the request now running", async () => {
+  let clicks = 0;
+  const page = makeFakePage({ onClick: (p) => { if (++clicks === 3) p.consoleError("turn1-step3-error"); } });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  for (let i = 0; i < 3; i++) await ex.execute("browser_click", { ref: "e1" }); // turn 1: the error at step 3
+  ex.newTurn();
+  // Turn 2 does not navigate first ("다시 해봐" and the agent just clicks again): same document.
+  const r = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.observation.step, 1);
+  const text = modelText(r);
+  assert.deepEqual(failuresInText(text), [], `turn 2 reports no failure: ${text.split("\n").filter((l) => l.startsWith("- [")).join(" | ")}`);
+  assert.deepEqual(failuresOf(r.observation.records), [], "nor does the failure rule");
+  assert.match(text, /^- \[console\/error\] 이전 요청 turn1-step3-error/m, "the earlier error stays visible, marked as an earlier request's");
+  assert.doesNotMatch(text, /단계 3 turn1-step3-error/, "never with the step number of the earlier request");
+  const rec = r.observation.records.find((x) => x.message === "turn1-step3-error");
+  assert.deepEqual([rec.step, rec.earlierRequest], [null, true]);
+  // Control: an error raised during THIS request's step still carries its step.
+  const page2 = makeFakePage({ onClick: (p) => p.consoleError("turn2-step2-error") });
+  const { ex: ex2 } = executorFor(page2);
+  await ex2.execute("browser_observe");
+  ex2.newTurn();
+  await ex2.execute("browser_hover", { ref: "e1" });
+  const c = await ex2.execute("browser_click", { ref: "e1" });
+  assert.deepEqual(failuresInText(modelText(c)), [{ step: 2, kind: "console", message: "turn2-step2-error" }]);
+});
+
+await test("CR-T08: an error the student raises BETWEEN requests is a failure of the next request, not an earlier request's", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  await ex.execute("browser_hover", { ref: "e1" }); // request 1 ends here
+  // The student clicks a button in the preview themself and it throws ("이 버튼이 왜 안 돼?").
+  page.consoleError("student-click-between-requests");
+  await tick();
+  ex.newTurn();
+  const r = await ex.execute("browser_observe");
+  const text = modelText(r);
+  assert.deepEqual(failuresInText(text), [{ step: null, kind: "console", message: "student-click-between-requests" }], `the model reads it as a failure: ${text.split("\n").filter((l) => l.startsWith("- [")).join(" | ")}`);
+  assert.deepEqual(failuresOf(r.observation.records), [{ step: null, kind: "console", message: "student-click-between-requests" }]);
+  assert.doesNotMatch(text, /이전 요청 student-click-between-requests/, "no agent request caused it");
+  // Control: on the same page, an error raised during request 1's step is still an earlier request's.
+  const page2 = makeFakePage({ onClick: (p) => p.consoleError("request1-step-error") });
+  const { ex: ex2 } = executorFor(page2);
+  await ex2.execute("browser_observe");
+  await ex2.execute("browser_click", { ref: "e1" });
+  page2.consoleError("student-click-after-request-1");
+  await tick();
+  ex2.newTurn();
+  const r2 = await ex2.execute("browser_observe");
+  assert.deepEqual(failuresOf(r2.observation.records).map((f) => f.message), ["student-click-after-request-1"]);
+  assert.match(modelText(r2), /^- \[console\/error\] 이전 요청 request1-step-error/m);
+});
+
+await test("CR-T05 late attach: load-time HTTP errors are recovered, and a late-attached clean page is not called clean", async () => {
+  // The log attaches after the page loaded with a 404 script (the first CR call of a turn).
+  const page = makeFakePage({ loadFailures: [{ u: `${ORIGIN}/app-typo.js`, s: 404 }] });
+  const r = await executorFor(page).ex.execute("browser_observe");
+  assert.equal(r.isError, false);
+  assert.deepEqual(r.observation.records.map((x) => x.message), [`404 ${ORIGIN}/app-typo.js`]);
+  assert.equal(r.observation.recordsPartial, true);
+  // A late-attached page with nothing recovered is "none confirmed", not "none".
+  const quiet = await executorFor(makeFakePage()).ex.execute("browser_observe");
+  assert.match(quiet.content[0].text, /확인된 것 없음 — 단, 관찰이 페이지가 뜬 뒤에 시작돼/);
+  assert.doesNotMatch(quiet.content[0].text, /실패한 요청: 없음/);
+  // Control: after a reload the log saw the whole load, so the plain "없음" is earned.
+  const { ex } = executorFor(makeFakePage());
+  await ex.execute("browser_observe");
+  const rel = await ex.execute("browser_reload");
+  assert.equal(rel.observation.recordsPartial, undefined);
+  assert.match(rel.content[0].text, /실패한 요청: 없음/);
+});
+
+await test("CR-T05 Log attribution: an id-less Log entry right after a commit is not put on the new document", async () => {
+  let t = 1_000_000;
+  const page = makeFakePage();
+  const log = new PageEventLog({ now: () => t });
+  await log.attach(page.cdp);
+  page.newDocument(); // L1 commits at t
+  page.emit("Log.entryAdded", { entry: { source: "security", level: "error", text: "late-from-L0" } });
+  assert.deepEqual(log.records(), [], "dropped inside the commit window");
+  t += 5000;
+  page.emit("Log.entryAdded", { entry: { source: "security", level: "error", text: "mixed content in L1" } });
+  assert.deepEqual(log.records().map((r) => r.message), ["mixed content in L1"], "control: outside the window it is the current document's");
+  // With a request id the entry follows its request's document, whenever it arrives.
+  page.emit("Network.requestWillBeSent", { requestId: "q", loaderId: "L1", frameId: "F1", request: { url: `${ORIGIN}/x` } });
+  page.newDocument(); // L2
+  page.emit("Log.entryAdded", { entry: { source: "security", level: "error", text: "for q", networkRequestId: "q" } });
+  assert.ok(log.records("L1").some((r) => r.message === "for q"));
+  assert.ok(!log.records().some((r) => r.message === "for q"));
+});
+
+// ── CR-T11 origin scope ─────────────────────────────────────────────────────
+
+await test("CR-T11 positive: agent browser actions on the live-server origin run", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  const nav = await ex.execute("browser_navigate", { url: `${ORIGIN}/menu.html` });
+  assert.equal(nav.isError, false, JSON.stringify(nav.content));
+  assert.equal(nav.observation.route, "/menu.html");
+  assert.deepEqual(checkAgentOrigin(`${ORIGIN}/x`, [ORIGIN]), { ok: true });
+});
+
+await test("CR-T11 negative: external origins are refused with a reason before any CDP call", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  for (const url of ["https://example.com/", "http://127.0.0.1:9999/", "file:///etc/passwd", "http://localhost:5173/"]) {
+    const before = page.calls.length;
+    const r = await ex.execute("browser_navigate", { url });
+    assert.equal(r.isError, true, url);
+    assert.match(r.content[0].text, /범위 밖이라 거절|미리보기/, url);
+    assert.equal(page.calls.length, before, `no CDP call for ${url}`);
+  }
+  // A tab that is already on an external page: element actions are refused too.
+  const external = makeFakePage({ origin: "https://example.com" });
+  const r = await executorFor(external).ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.isError, true);
+  assert.equal(external.calls.length, 0);
+  // Back into an external history entry is refused before navigating.
+  const hist = makeFakePage({ backUrl: "https://example.com/" });
+  const { ex: hx } = executorFor(hist);
+  await hx.execute("browser_observe");
+  const back = await hx.execute("browser_back");
+  assert.equal(back.isError, true);
+  assert.ok(!hist.calls.some((c) => c.method === "Page.navigateToHistoryEntry"));
+  // No preview running: refused with the reason, not a silent no-op.
+  const none = await executorFor(makeFakePage(), { allowedOrigins: () => [] }).ex.execute("browser_observe");
+  assert.equal(none.isError, true);
+  assert.match(none.content[0].text, /미리보기가 켜져 있지 않아요/);
+});
+
+await test("CR-T11 negative: an action that navigates off scope (link, script, form) is refused and the tab restored", async () => {
+  for (const [label, external] of [
+    ["link click to an external origin", "https://example.com/"],
+    ["script location change to another local port", "http://127.0.0.1:60679/js.html"],
+    ["form submit whose path collides with a local file", "http://127.0.0.1:60692/index.html"],
+  ]) {
+    const page = makeFakePage({ elements: [{ key: "out", role: "link", name: "나가기", tag: "a", id: "out", href: external }, { key: "stay", role: "button", name: "머물기", tag: "button", id: "stay" }] });
+    const results = [];
+    const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+    await ex.execute("browser_observe");
+    const shotsBefore = page.calls.filter((c) => c.method === "Page.captureScreenshot").length;
+    const r = await ex.execute("browser_click", { ref: "e1" });
+    assert.equal(r.isError, true, `${label}: ${JSON.stringify(r.content)}`);
+    assert.match(r.content[0].text, /범위 밖/, label);
+    assert.equal(r.observation, undefined, `${label}: no observation of the external page`);
+    assert.equal(page.calls.filter((c) => c.method === "Page.captureScreenshot").length, shotsBefore, `${label}: nothing captured`);
+    assert.deepEqual(results, ["browser_observe"], `${label}: no result recorded for the escape`);
+    assert.equal(page.state.origin, ORIGIN, `${label}: the tab stays on (or returns to) the preview`);
+    const again = await ex.execute("browser_observe");
+    assert.equal(again.isError, false, `${label}: the next observation works on the preview`);
+  }
+  // A navigation that already committed off scope (no stop in time) is taken back.
+  const late = makeFakePage({ elements: [{ key: "out", role: "link", name: "나가기", tag: "a", id: "out" }], onClick: (p) => { p.state.origin = "https://example.com"; p.newDocument("/"); } });
+  const { ex: lx } = executorFor(late);
+  await lx.execute("browser_observe");
+  const r = await lx.execute("browser_click", { ref: "e1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /되돌렸어요/);
+  await tick(20);
+  assert.equal(late.state.origin, ORIGIN);
+  // Control: an in-scope link click is a normal result.
+  const inside = makeFakePage({ elements: [{ key: "in", role: "link", name: "메뉴", tag: "a", id: "in", href: `${ORIGIN}/menu.html` }] });
+  const { ex: ix } = executorFor(inside);
+  await ix.execute("browser_observe");
+  const ok = await ix.execute("browser_click", { ref: "e1" });
+  await tick(10);
+  assert.equal(ok.isError, false, JSON.stringify(ok.content));
+});
+
+await test("CR-T11 negative: the viewport wrapper is out of scope for the agent, with a reason", async () => {
+  const v = checkAgentOrigin(`${ORIGIN}/__hp_viewport?path=/index.html`, [ORIGIN]);
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /__hp_viewport/);
+  const page = makeFakePage({ route: "/__hp_viewport" });
+  const r = await executorFor(page).ex.execute("browser_observe");
+  assert.equal(r.isError, true);
+  assert.equal(page.calls.length, 0, "refused before any CDP call");
+  assert.deepEqual(checkAgentOrigin(`${ORIGIN}/index.html`, [ORIGIN]), { ok: true }, "control");
+});
+
+await test("CR-T11 negative: an escape set off by a step after it returned is stopped, taken back, and refuses the next call", async () => {
+  const EXT = "https://example.com/next.html";
+  for (const [label, el] of [
+    ["delayed location change (stopped before commit)", { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: EXT, lateMs: 30 }],
+    ["delayed commit with no request event (taken back)", { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: EXT, lateMs: 30, lateCommit: true }],
+  ]) {
+    const page = makeFakePage({ elements: [el] });
+    const results = [];
+    const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+    await ex.execute("browser_observe");
+    const click = await ex.execute("browser_click", { ref: "e1" });
+    assert.equal(click.isError, false, `${label}: the step itself saw nothing yet`);
+    await tick(80);
+    assert.equal(page.state.origin, ORIGIN, `${label}: the tab is on the preview, not left on the other origin`);
+    const next = await ex.execute("browser_observe");
+    assert.equal(next.isError, true, `${label}: the next call carries the refusal`);
+    assert.match(next.content[0].text, /지난 단계가 끝난 뒤 .*범위 밖\(https:\/\/example\.com\/next\.html\)/, label);
+    if (el.lateCommit) assert.match(next.content[0].text, /되돌렸어요/, label);
+    assert.deepEqual(results, ["browser_observe", "browser_click"], `${label}: nothing of the other page recorded`);
+    const after = await ex.execute("browser_observe");
+    assert.equal(after.isError, false, `${label}: reported once, then the preview observes normally`);
+  }
+  // Control: outside the after-step window the tab is the student's; their navigation is not undone.
+  let t = 1_000_000;
+  const page = makeFakePage();
+  const { ex } = executorFor(page, { now: () => t });
+  await ex.execute("browser_hover", { ref: "e1" }).catch(() => {});
+  await ex.execute("browser_observe");
+  t += 60_000;
+  page.commitNavigation("https://example.com/student-went-here");
+  await tick(20);
+  assert.equal(page.state.origin, "https://example.com", "the student's own navigation stays");
+  const refused = await ex.execute("browser_observe");
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /범위 밖이라 거절/, "the ordinary scope check refuses the agent there");
+});
+
+await test("CR-T11 negative: a window opened off scope during a step is refused and closed; an in-scope one is not", async () => {
+  for (const [label, url] of [["target=_blank link to another origin", "https://example.com/"], ["window.open with no URL yet", "about:blank"]]) {
+    const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: url }] });
+    const results = [];
+    const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+    await ex.execute("browser_observe");
+    const r = await ex.execute("browser_click", { ref: "e1" });
+    assert.equal(r.isError, true, label);
+    assert.match(r.content[0].text, /새 창.*닫았어요/, label);
+    assert.equal(r.observation, undefined);
+    assert.deepEqual(page.state.popups, [], `${label}: the window is closed`);
+    assert.deepEqual(results, ["browser_observe"], `${label}: nothing recorded`);
+  }
+  const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: `${ORIGIN}/menu.html` }] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const ok = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(ok.isError, false, "control: an in-scope new tab is a normal result");
+  assert.equal(page.state.popups.length, 1, "control: and it is left open");
+});
+
+await test("CR-T11: a window the student opened before the step is left open; only the agent's new window is closed", async () => {
+  const page = makeFakePage({ elements: [{ key: "pop", role: "link", name: "새 탭", tag: "a", id: "pop", popup: "https://example.com/agent" }] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  // The student's own off-scope popup, opened outside any agent step and still listed.
+  page.state.popups.push({ targetId: "STUDENT", type: "page", url: "https://example.com/student", openerId: "SELF" });
+  const r = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /새 창.*닫았어요/);
+  assert.deepEqual(page.state.popups.map((x) => x.targetId), ["STUDENT"], "the agent's window is closed, the student's is not");
+});
+
+await test("CR-T11: a committed escape is taken back to the latest in-scope page, not the one the guard started on", async () => {
+  const late = { key: "late", role: "button", name: "늦게 이동", tag: "button", id: "late", lateHref: "https://example.com/x", lateMs: 30, lateCommit: true };
+  const page = makeFakePage({ elements: [late] });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe"); // the guard installs on /index.html
+  const nav = await ex.execute("browser_navigate", { url: `${ORIGIN}/b.html` });
+  assert.equal(nav.isError, false, JSON.stringify(nav.content));
+  await ex.execute("browser_click", { ref: "e1" });
+  await tick(80);
+  assert.equal(page.state.origin, ORIGIN);
+  assert.equal(page.state.route, "/b.html", "taken back to page B, where the student's preview was");
+});
+
+await test("CR-T08: an executor built without settleMs still waits after an action before observing", async () => {
+  const waits = [];
+  const page = makeFakePage();
+  const ex = new CrExecutor(fakePort(page), { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, sleep: async (ms) => { waits.push(ms); } });
+  await ex.execute("browser_observe");
+  assert.deepEqual(waits, [], "control: an observation alone does not wait");
+  await ex.execute("browser_hover", { ref: "e1" });
+  assert.ok(waits.some((ms) => ms >= 200), `the product default settle wait is used: ${JSON.stringify(waits)}`);
+});
+
+await test("CR-T11 negative: browser_navigate to an in-scope page that redirects off scope is refused and the tab taken back", async () => {
+  for (const [label, redirect] of [
+    ["renderer redirect right after load", { to: "https://example.com/", ms: 1 }],
+    ["committed redirect right after load", { to: "https://example.com/", ms: 1, commit: true }],
+  ]) {
+    const page = makeFakePage({ redirects: { "/redir.html": redirect } });
+    const results = [];
+    const { ex } = executorFor(page, { settleMs: 30, onResult: (tool) => results.push(tool) });
+    const r = await ex.execute("browser_navigate", { url: `${ORIGIN}/redir.html` });
+    assert.equal(r.isError, true, `${label}: ${JSON.stringify(r.content)}`);
+    assert.match(r.content[0].text, /범위 밖/);
+    assert.deepEqual(results, [], `${label}: nothing recorded`);
+    await tick(20);
+    assert.equal(page.state.origin, ORIGIN, `${label}: the tab is back on the preview`);
+    // Stopped before it committed, the tab simply stays on the in-scope page; committed, it
+    // is taken back to the page it was on before the navigation.
+    if (redirect.commit) assert.equal(page.state.route, "/index.html", `${label}: back where it was before the navigation`);
+  }
+});
+
+await test("CR-T04/CR-T11: every part of an observation comes from one document, and that document is in scope", async () => {
+  // A document commits off scope while the tree is read.
+  const out = makeFakePage();
+  const results = [];
+  const { ex: ox } = executorFor(out, { onResult: (tool) => results.push(tool) });
+  out.state.onAxRead = (p) => p.commitNavigation("https://example.com/secret.html");
+  const r = await ox.execute("browser_observe");
+  assert.equal(r.isError, true, JSON.stringify(r.content));
+  assert.match(r.content[0].text, /범위 밖/);
+  assert.deepEqual(results, [], "nothing of the other origin recorded");
+  // An in-scope document commits while the tree is read: re-observed whole, never mixed.
+  const inside = makeFakePage();
+  const { ex: ix } = executorFor(inside);
+  inside.state.onAxRead = (p) => p.commitNavigation(`${ORIGIN}/menu.html`);
+  const o = (await ix.execute("browser_observe")).observation;
+  assert.equal(o.route, "/menu.html");
+  assert.match(o.snapshot, new RegExp(`문서 ${ORIGIN}/menu\\.html`), "snapshot and URL are the same document");
+  assert.equal(o.documentGeneration, `L${inside.state.loader}`);
+});
+
+await test("CR-T11: observePage on its own refuses an out-of-scope page, and observes an in-scope one", async () => {
+  const scope = (url) => checkAgentOrigin(url, [ORIGIN]);
+  const outside = makeFakePage({ origin: "https://example.com" });
+  const olog = new PageEventLog();
+  await olog.attach(outside.cdp);
+  await assert.rejects(eb.observePage(outside.cdp, olog, { step: null, scope, artifactVersion: async () => FAKE_VERSION }), (e) => e instanceof eb.ScopeEscapeError);
+  assert.ok(!outside.calls.some((c) => c.method === "Page.captureScreenshot"), "nothing captured");
+  const inside = makeFakePage();
+  const ilog = new PageEventLog();
+  await ilog.attach(inside.cdp);
+  const o = await eb.observePage(inside.cdp, ilog, { step: null, scope, artifactVersion: async () => FAKE_VERSION });
+  assert.equal(o.route, "/index.html", "control");
+});
+
+await test("CR-T11: a window the page opens off scope while it is being observed refuses the result", async () => {
+  const page = makeFakePage();
+  const results = [];
+  const { ex } = executorFor(page, { onResult: (tool) => results.push(tool) });
+  await ex.execute("browser_observe");
+  page.state.onAxRead = (p) => p.openPopup("https://example.com/ad");
+  const r = await ex.execute("browser_observe");
+  assert.equal(r.isError, true, JSON.stringify(r.content));
+  assert.match(r.content[0].text, /새 창이 범위 밖/);
+  assert.deepEqual(results, ["browser_observe"], "the observation taken meanwhile is not recorded");
+  assert.deepEqual(page.state.popups, [], "and the window is closed");
+});
+
+await test("CR-T63 unit: browser_navigate that opens the first tab draws the outline once the page exists", async () => {
+  const page = makeFakePage();
+  let opened = false;
+  const port = { ...fakePort(page), tabUrl: () => (opened ? `${page.state.origin}${page.state.route}` : undefined), navigate: async (url) => { opened = true; await fakePort(page).navigate(url); } };
+  const ex = new CrExecutor(port, { allowedOrigins: () => [ORIGIN], artifactVersion: async () => FAKE_VERSION, settleMs: 0, sleep: (ms) => tick(Math.min(ms, 10)) });
+  const r = await ex.execute("browser_navigate", { url: `${ORIGIN}/index.html` });
+  assert.equal(r.isError, false, JSON.stringify(r.content));
+  const after = page.calls.slice(page.calls.findIndex((c) => c.method === "Page.navigate") + 1);
+  assert.ok(after.some((c) => c.method === "Overlay.highlightRect"), "the outline is drawn after the new tab loads");
+  assert.deepEqual(indicatorProblems(after), []);
+});
+
+await test("CR-T08: records captured during an observation carry step null; the observation names the last action", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_hover", { ref: "e1" }).catch(() => {});
+  await ex.execute("browser_observe");
+  await ex.execute("browser_hover", { ref: "e1" }); // step 2
+  page.state.onAxRead = (p) => p.consoleError("during-observe");
+  const r = await ex.execute("browser_observe");
+  assert.equal(r.observation.records.find((x) => x.message === "during-observe").step, null);
+  assert.equal(r.observation.step, 2);
+});
+
+// ── CR-T63 (unit half) — the page-level indicator ───────────────────────────
+
+/** The instrument: every page-changing CDP call must happen while the outline is drawn. */
+function indicatorProblems(calls) {
+  const ACT = new Set(["Input.dispatchMouseEvent", "Runtime.callFunctionOn", "Page.reload", "Input.insertText", "Page.navigate", "Page.navigateToHistoryEntry"]);
+  let drawn = false;
+  const problems = [];
+  for (const c of calls) {
+    if (c.method === "Overlay.highlightRect") drawn = true;
+    else if (c.method === "Overlay.hideHighlight") drawn = false;
+    else if (ACT.has(c.method) && !drawn) problems.push(`${c.method} with no indicator`);
+    else if (c.method === "Page.captureScreenshot" && drawn) problems.push("evidence screenshot taken with the outline drawn");
+  }
+  if (drawn) problems.push("indicator left on after the step");
+  return problems;
+}
+
+await test("CR-T63 unit positive: outline drawn during each step, cleared for the screenshot and after the step", async () => {
+  const page = makeFakePage({ elements: WITH_SELECT });
+  const { ex, indicator } = executorFor(page);
+  await ex.execute("browser_observe");
+  page.calls.length = 0;
+  await ex.execute("browser_hover", { ref: "e1" });
+  await ex.execute("browser_select", { ref: "e2", value: "s" });
+  await ex.execute("browser_reload");
+  assert.deepEqual(indicatorProblems(page.calls), []);
+  assert.ok(page.calls.some((c) => c.method === "Overlay.highlightRect"));
+  // Chat-panel half: every step is bracketed true → false.
+  assert.deepEqual(indicator.slice(-2), [{ visible: true, tool: "browser_reload" }, { visible: false, tool: "browser_reload" }]);
+});
+
+await test("CR-T63 unit: every CR executor tool draws the outline during its step and clears it (navigate included)", async () => {
+  const page = makeFakePage({ elements: WITH_SELECT });
+  const { ex } = executorFor(page);
+  const run = [
+    ["browser_navigate", { url: `${ORIGIN}/index.html` }],
+    ["browser_observe", {}], ["browser_read", {}], ["browser_screenshot", {}],
+    ["browser_click", { ref: "e1" }], ["browser_type", { ref: "e1", text: "a" }], ["browser_select", { ref: "e2", value: "s" }],
+    ["browser_scroll", { ref: "e3" }], ["browser_hover", { ref: "e1" }], ["browser_reload", {}],
+  ];
+  await ex.execute("browser_observe");
+  for (const [name, input] of run) {
+    if (name !== "browser_navigate") await ex.execute("browser_observe");
+    page.calls.length = 0;
+    const r = await ex.execute(name, input);
+    assert.equal(r.isError, false, `${name}: ${JSON.stringify(r.content)}`);
+    assert.ok(page.calls.some((c) => c.method === "Overlay.highlightRect"), `${name}: the outline was drawn`);
+    assert.deepEqual(indicatorProblems(page.calls), [], name);
+  }
+  for (const name of ["browser_back", "browser_forward"]) {
+    const hist = makeFakePage();
+    const { ex: hx } = executorFor(hist);
+    await hx.execute("browser_observe");
+    hist.calls.length = 0;
+    await hx.execute(name);
+    assert.ok(hist.calls.some((c) => c.method === "Page.navigateToHistoryEntry" || c.method === "Page.getNavigationHistory"), `${name} ran`);
+    assert.deepEqual(indicatorProblems(hist.calls), [], name);
+  }
+  // Negative: a navigate whose outline was never drawn is caught by the instrument.
+  const nav = makeFakePage();
+  const { ex: nx } = executorFor(nav);
+  await nx.execute("browser_observe");
+  nav.calls.length = 0;
+  await nx.execute("browser_navigate", { url: `${ORIGIN}/menu.html` });
+  assert.ok(indicatorProblems(nav.calls.filter((c) => c.method !== "Overlay.highlightRect")).includes("Page.navigate with no indicator"));
+});
+
+await test("CR-T63 unit negative: a step with no visible indicator is caught", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  page.calls.length = 0;
+  await ex.execute("browser_hover", { ref: "e1" });
+  const planted = page.calls.filter((c) => c.method !== "Overlay.highlightRect");
+  assert.ok(indicatorProblems(planted).some((p) => /with no indicator/.test(p)));
+  const leftOn = page.calls.filter((c, i, all) => !(c.method === "Overlay.hideHighlight" && i === all.map((x) => x.method).lastIndexOf("Overlay.hideHighlight")));
+  assert.ok(indicatorProblems(leftOn).includes("indicator left on after the step"));
+});
+
+await test("dialog: an action that leaves a JS dialog open is an explicit error, not a hang", async () => {
+  const page = makeFakePage({ onClick: (p) => { p.state.dialog = "alert"; p.emit("Page.javascriptDialogOpening", { type: "alert", message: "주문 완료" }); } });
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  const r = await ex.execute("browser_click", { ref: "e1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /대화상자가 열려 있어 관찰할 수 없어요 \(alert: 주문 완료\)/);
+  const handled = await ex.execute("browser_dialog", { action: "accept" });
+  assert.equal(handled.isError, false, JSON.stringify(handled.content));
+});
+
+console.log(`\n${passed} experiment-browser checks passed`);

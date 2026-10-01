@@ -296,13 +296,27 @@ export async function runCommand(win: Page, label: string): Promise<void> {
   // after openChatContainer), Cmd+Shift+P would be swallowed by the iframe
   // and the QuickInput never opens. Defocus by clicking the title-bar area
   // (always present, never intercepts) before sending the shortcut.
+  //
+  // The unified layout opens its "AI와 작업" editor a moment after the workbench is
+  // ready and takes focus, which closes a palette opened in that window (recon F1,
+  // cr-browser #1391: the input was found but hidden). So the palette is opened again,
+  // up to three times, until its input is visible; a palette that never opens still fails.
   const titleBar = win.locator(".monaco-workbench .part.titlebar").first();
-  if ((await titleBar.count()) > 0) {
-    await titleBar.click({ position: { x: 10, y: 10 }, force: true }).catch(() => undefined);
-  }
-  await win.keyboard.press("Meta+Shift+P");
   const input = win.locator(".quick-input-widget input.input").first();
-  await input.waitFor({ state: "visible", timeout: 5_000 });
+  for (let attempt = 1; ; attempt++) {
+    if ((await titleBar.count()) > 0) {
+      await titleBar.click({ position: { x: 10, y: 10 }, force: true }).catch(() => undefined);
+    }
+    await win.keyboard.press("Meta+Shift+P");
+    try {
+      await input.waitFor({ state: "visible", timeout: attempt < 3 ? 2_500 : 5_000 });
+      break;
+    } catch (err) {
+      if (attempt >= 3) throw err;
+      await win.keyboard.press("Escape").catch(() => undefined);
+      await win.waitForTimeout(500);
+    }
+  }
   await input.fill(`>${label}`);
   // Wait briefly for the filter to settle
   await win.waitForTimeout(150);
