@@ -366,6 +366,33 @@ await test("CR-T08: an earlier request's error is never reported at a step of th
   assert.deepEqual(failuresInText(modelText(c)), [{ step: 2, kind: "console", message: "turn2-step2-error" }]);
 });
 
+await test("CR-T08: an error the student raises BETWEEN requests is a failure of the next request, not an earlier request's", async () => {
+  const page = makeFakePage();
+  const { ex } = executorFor(page);
+  await ex.execute("browser_observe");
+  await ex.execute("browser_hover", { ref: "e1" }); // request 1 ends here
+  // The student clicks a button in the preview themself and it throws ("이 버튼이 왜 안 돼?").
+  page.consoleError("student-click-between-requests");
+  await tick();
+  ex.newTurn();
+  const r = await ex.execute("browser_observe");
+  const text = modelText(r);
+  assert.deepEqual(failuresInText(text), [{ step: null, kind: "console", message: "student-click-between-requests" }], `the model reads it as a failure: ${text.split("\n").filter((l) => l.startsWith("- [")).join(" | ")}`);
+  assert.deepEqual(failuresOf(r.observation.records), [{ step: null, kind: "console", message: "student-click-between-requests" }]);
+  assert.doesNotMatch(text, /이전 요청 student-click-between-requests/, "no agent request caused it");
+  // Control: on the same page, an error raised during request 1's step is still an earlier request's.
+  const page2 = makeFakePage({ onClick: (p) => p.consoleError("request1-step-error") });
+  const { ex: ex2 } = executorFor(page2);
+  await ex2.execute("browser_observe");
+  await ex2.execute("browser_click", { ref: "e1" });
+  page2.consoleError("student-click-after-request-1");
+  await tick();
+  ex2.newTurn();
+  const r2 = await ex2.execute("browser_observe");
+  assert.deepEqual(failuresOf(r2.observation.records).map((f) => f.message), ["student-click-after-request-1"]);
+  assert.match(modelText(r2), /^- \[console\/error\] 이전 요청 request1-step-error/m);
+});
+
 await test("CR-T05 late attach: load-time HTTP errors are recovered, and a late-attached clean page is not called clean", async () => {
   // The log attaches after the page loaded with a 404 script (the first CR call of a turn).
   const page = makeFakePage({ loadFailures: [{ u: `${ORIGIN}/app-typo.js`, s: 404 }] });

@@ -53,7 +53,11 @@ export interface BrowserResultRecord {
   screenshot_digest: string | null;
   /** null only when the trace bytes could not be stored. */
   trace_digest: string | null;
-  records: Array<{ kind: PageRecordKind; level: string; message: string; step: number | null }>;
+  /**
+   * `earlier_request` (additive, decision 8) marks a record captured during an earlier agent
+   * request's step (CR-08): the list then counts failures by the same rule the agent did.
+   */
+  records: Array<{ kind: PageRecordKind; level: string; message: string; step: number | null; earlier_request?: true }>;
 }
 
 const VERSION = /^sha256:[a-f0-9]{64}$/;
@@ -110,7 +114,7 @@ export async function browserResultParts(input: ResultInput): Promise<{ record: 
     files: artifact.files.slice(0, MAX_FILES).map((f) => ({ ...f, path: f.path.slice(0, MAX_PATH) })),
     screenshot_digest: shot ? imageDigest(shot.data) : null,
     trace_digest: await digestOf(trace),
-    records: o.records.slice(0, MAX_RECORDS).map((r) => ({ kind: r.kind, level: r.level.slice(0, 20), message: r.message.slice(0, 200), step: r.step })),
+    records: o.records.slice(0, MAX_RECORDS).map((r) => ({ kind: r.kind, level: r.level.slice(0, 20), message: r.message.slice(0, 200), step: r.step, ...(r.earlierRequest ? { earlier_request: true as const } : {}) })),
   };
   while (browserResultEventText(record).length > MAX_RECORD_TEXT && (record.files.length || record.records.length)) {
     if (record.files.length) record.files.pop();

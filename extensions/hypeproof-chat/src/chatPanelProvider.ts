@@ -64,6 +64,9 @@ import {
   crResultsMenu,
   clearStoredResults,
   CR_BYTES_CONTEXT_KEY,
+  CR_BYTES_OWNERS_STATE,
+  crBytesOwner,
+  crBytesOwnersAfter,
   type BlobSink,
 } from "./crHostWiring";
 import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
@@ -469,40 +472,68 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     return this.crRecord;
   }
-  private readonly crBlobSink: BlobSink = (blobs) => {
-    const next = this.crBlobWrites.then(async () => {
-      try {
-        const { store, record } = this.crRecordHandle();
-        // One lock for the result's screenshot and trace together.
-        return await store.exclusive(async () => {
-          const out: Array<string | null> = [];
-          for (const blob of blobs) out.push(await record.putBlob(blob).catch(() => null));
-          return out;
-        });
-      } catch {
-        // Busy (a local review in another window holds the lock) or failed: the event
-        // then carries no digest for these bytes, never a dangling one.
-        return blobs.map(() => null);
-      }
-    });
-    this.crBlobWrites = next;
-    void next.then((digests) => { if (digests.some((d) => d !== null)) void this.refreshCrBytesContext(); });
-    return next;
-  };
   /**
-   * CR-10 — mirror "browser-result bytes are stored" to CR_BYTES_CONTEXT_KEY, which shows
-   * the delete command whatever the CR switch says (MC-27). Called at start-up, after bytes
-   * are stored and after they are deleted. Returns the stored count (0 when unreadable).
+   * CR-10 — where one turn's result bytes go, recorded as `owner`'s (crBytesOwner of the
+   * turn's token). Signed out (no owner): nothing is stored, so no bytes exist that nobody
+   * can count or delete.
    */
-  async refreshCrBytesContext(): Promise<number> {
-    let stored = 0;
+  private crBlobSinkFor(owner: string | null): BlobSink | undefined {
+    if (!owner) return undefined;
+    return (blobs) => {
+      const next = this.crBlobWrites.then(async () => {
+        try {
+          const { store, record } = this.crRecordHandle();
+          // One lock for the result's screenshot and trace together.
+          return await store.exclusive(async () => {
+            const out: Array<string | null> = [];
+            for (const blob of blobs) out.push(await record.putBlob(blob, { owner }).catch(() => null));
+            return out;
+          });
+        } catch {
+          // Busy (a local review in another window holds the lock) or failed: the event
+          // then carries no digest for these bytes, never a dangling one.
+          return blobs.map(() => null);
+        }
+      });
+      this.crBlobWrites = next;
+      void next.then((digests) => { if (digests.some((d) => d !== null)) void this.noteCrBytes(owner, true); });
+      return next;
+    };
+  }
+  /** Remember whether `owner` has bytes stored (CR_BYTES_OWNERS_STATE), then refresh the context key. */
+  private async noteCrBytes(owner: string, has: boolean): Promise<void> {
+    const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+    await this.context.globalState.update(CR_BYTES_OWNERS_STATE, crBytesOwnersAfter(list, owner, has));
+    await this.refreshCrBytesContext();
+  }
+  /**
+   * CR-10 — mirror "the signed-in person has browser-result bytes stored" to
+   * CR_BYTES_CONTEXT_KEY, which shows the delete command whatever the CR switch says
+   * (MC-27). Reads only the owners list in globalState, never the record: it runs at
+   * start-up and on every sign-in for every seat, so it does no disk I/O.
+   */
+  async refreshCrBytesContext(): Promise<void> {
+    const owner = crBytesOwner(await this.context.secrets.get(TOKEN_KEY));
+    const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+    const flagged = !!owner && Array.isArray(list) && list.includes(owner);
+    void vscode.commands.executeCommand("setContext", CR_BYTES_CONTEXT_KEY, flagged);
+  }
+  /**
+   * CR-10 — how many browser-result bytes the signed-in person stored, counted on the record
+   * (keys only, so an unrelated corrupt review record cannot hide them). Corrects the owners
+   * list. null when the record cannot be read: the delete is still offered if the list says
+   * bytes may be stored, so a read failure never makes stored screens undeletable.
+   */
+  private async crStoredCount(owner: string | null): Promise<number | null> {
+    if (!owner) return 0;
     try {
-      stored = (await this.crRecordHandle().record.records()).browser_results.stored;
+      const n = await this.crRecordHandle().record.blobCount({ owner });
+      await this.noteCrBytes(owner, n > 0);
+      return n;
     } catch {
-      stored = 0;
+      const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+      return Array.isArray(list) && list.includes(owner) ? null : 0;
     }
-    void vscode.commands.executeCommand("setContext", CR_BYTES_CONTEXT_KEY, stored > 0);
-    return stored;
   }
   /** CR-09 — the element the student picked for the NEXT turn, until sent or removed. */
   private readonly elementQueue = new ElementQueue();
@@ -841,7 +872,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const items = crResultHistory(events, (entry) => current.get(entry) ?? null);
     // What the record holds, so stored screenshots are never invisible (MC-27).
-    const stored = await this.refreshCrBytesContext();
+    const owner = crBytesOwner(token);
+    const stored = await this.crStoredCount(owner);
     const menu = crResultsMenu({ items, stored });
     if (menu.notice) {
       this.postPageNotice(menu.notice);
@@ -854,7 +886,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       : { label: r.label, description: r.description, detail: r.detail, item: r.item });
     const picked = await vscode.window.showQuickPick(rows, { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" });
     if (picked?.clear) {
-      await this.clearBrowserResultBytes(stored);
+      if (owner) await this.clearBrowserResultBytes(owner, stored);
       return;
     }
     if (!picked?.item?.screenshot_digest) return;
@@ -885,16 +917,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * goes off (cohort or tier change). It shows nothing of the results, only the count.
    */
   async clearStoredBrowserResults(): Promise<void> {
-    const stored = await this.refreshCrBytesContext();
-    if (!stored) {
-      this.postPageNotice("이 컴퓨터에 저장된 실험 브라우저 화면이 없어요.");
+    const owner = crBytesOwner(await this.context.secrets.get(TOKEN_KEY));
+    const stored = await this.crStoredCount(owner);
+    if (!owner || stored === 0) {
+      this.postPageNotice("이 컴퓨터에 저장된 내 실험 브라우저 화면이 없어요.");
       return;
     }
-    await this.clearBrowserResultBytes(stored);
+    await this.clearBrowserResultBytes(owner, stored);
   }
 
-  /** CR-10 — the student deletes the stored browser-result bytes (screenshots, action traces). */
-  private async clearBrowserResultBytes(stored: number): Promise<void> {
+  /**
+   * CR-10 — the student deletes the browser-result bytes (screenshots, action traces) THEY
+   * stored; another student's on the same PC are neither counted nor deleted.
+   */
+  private async clearBrowserResultBytes(owner: string, stored: number | null): Promise<void> {
     try {
       const out = await clearStoredResults(
         stored,
@@ -902,14 +938,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         async () => {
           await this.crBlobWrites.catch(() => undefined);
           const { store, record } = this.crRecordHandle();
-          return store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now() }));
+          return store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now(), owner }));
         },
       );
       if (out) this.postPageNotice(`저장된 화면·동작 기록 ${out.removed}개를 지웠어요.`);
     } catch {
       this.postPageNotice("기록을 지우지 못했어요. 다른 창에서 기록을 쓰는 중이면 잠시 뒤에 다시 해 주세요.");
     }
-    await this.refreshCrBytesContext();
+    await this.crStoredCount(owner);
   }
 
   /** Queue a picked element for the NEXT turn and show the student exactly what goes. */
@@ -1238,6 +1274,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
+    // CR-10 — the token changed: the delete command follows the new identity.
+    void this.refreshCrBytesContext();
     // #1298 — re-check instructor status + brief after token change.
     this._instructorMode.reset();
   }
@@ -1345,6 +1383,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // CR-02 (recon R3) — mirror the Curriculum Runtime switch; CR commands are gated on it.
         void vscode.commands.executeCommand("setContext", CR_CONTEXT_KEY, crContextKeyValue(p));
         if (!isCurriculumRuntimeEnabled(p)) this.clearElementContext();
+        // CR-10 — the delete command follows whoever is signed in now (no disk I/O).
+        void this.refreshCrBytesContext();
         // #306 — mirror the cohort's browser_session onto the hardened-session
         // settings the fork core patch reads (minor cohorts → persist:hp-safe).
         await this.applyBrowserSafety(p);
@@ -3082,7 +3122,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // CR-10 — the element capture is a browser result bound to its artifact version; its
     // bytes are stored first, and the turn's end waits for it (observationCaptures).
     // Bytes are stored only when a recorder will write the event that names them.
-    const turnBlobSink = roomGuardedSink(this.crBlobSink, observation ? (n) => observation.hasRoom(n) : undefined);
+    const turnBlobSink = roomGuardedSink(this.crBlobSinkFor(crBytesOwner(token)), observation ? (n) => observation.hasRoom(n) : undefined);
     if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, turnBlobSink));
     const messageId = randomId();
     const ctrl = new AbortController();

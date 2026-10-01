@@ -184,10 +184,10 @@ await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put
   assert.match(providerSrc, /this\.crSdkResults\.onToolUse\(a\.id, a\.name, this\.isCurriculumRuntimeEnabled\(\)\)/);
   assert.match(providerSrc, /const recording = recordProxyCrResult\(p\.recordObservation, call\.id, fixed\.call\.name, fixed\.call\.input \?\? \{\}, tr\.observation, p\.blobSink\);\s*if \(p\.trackObservation\) p\.trackObservation\(recording\);/);
   assert.match(providerSrc, /trackObservation: \(q\) => observationCaptures\.push\(q\),/);
-  assert.match(providerSrc, /const turnBlobSink = roomGuardedSink\(this\.crBlobSink, observation \? \(n\) => observation\.hasRoom\(n\) : undefined\);/);
+  assert.match(providerSrc, /const turnBlobSink = roomGuardedSink\(this\.crBlobSinkFor\(crBytesOwner\(token\)\), observation \? \(n\) => observation\.hasRoom\(n\) : undefined\);/);
   assert.match(providerSrc, /blobSink: turnBlobSink,/);
   assert.match(providerSrc, /if \(element\) observationCaptures\.push\(recordElementCapture\(recordObservation, `pick-\$\{crypto\.randomUUID\(\)\}`, element, turnBlobSink\)\);/);
-  assert.match(providerSrc, /return await store\.exclusive\(async \(\) => \{\s*const out: Array<string \| null> = \[\];\s*for \(const blob of blobs\) out\.push\(await record\.putBlob\(blob\)/);
+  assert.match(providerSrc, /return await store\.exclusive\(async \(\) => \{\s*const out: Array<string \| null> = \[\];\s*for \(const blob of blobs\) out\.push\(await record\.putBlob\(blob, \{ owner \}\)/);
 });
 
 await test("CR-10 negative: bytes that were not stored are never named; a sink that answers another digest is not trusted", async () => {
@@ -327,9 +327,9 @@ await test("CR-10 read-back: stored results come back newest first, labelled cur
   assert.match(providerSrc, /const items = crResultHistory\(events, \(entry\) => current\.get\(entry\) \?\? null\);/);
   assert.match(providerSrc, /blob = await this\.crRecordHandle\(\)\.record\.getBlob\(picked\.item\.screenshot_digest\);/);
   // The stored bytes are listed and can be deleted from the same command.
-  assert.match(providerSrc, /stored = \(await this\.crRecordHandle\(\)\.record\.records\(\)\)\.browser_results\.stored;/);
-  assert.match(providerSrc, /return store\.exclusive\(\(\) => record\.deleteBlobs\(\{ by: "user", at: Date\.now\(\) \}\)\);/);
-  assert.match(providerSrc, /const menu = crResultsMenu\(\{ items, stored \}\);/);
+  assert.match(providerSrc, /const n = await this\.crRecordHandle\(\)\.record\.blobCount\(\{ owner \}\);/);
+  assert.match(providerSrc, /return store\.exclusive\(\(\) => record\.deleteBlobs\(\{ by: "user", at: Date\.now\(\), owner \}\)\);/);
+  assert.match(providerSrc, /const owner = crBytesOwner\(token\);\s*const stored = await this\.crStoredCount\(owner\);\s*const menu = crResultsMenu\(\{ items, stored \}\);/);
   const menu = w.crResultsMenu({ items, stored: 4 });
   assert.equal(menu.notice, null);
   assert.deepEqual(menu.rows.map((r) => r.kind), ["result", "result", "result", "separator", "clear"]);
@@ -337,6 +337,67 @@ await test("CR-10 read-back: stored results come back newest first, labelled cur
   assert.deepEqual(w.crResultsMenu({ items: [], stored: 2 }).rows.map((r) => r.kind), ["clear"], "bytes with no listed result are still shown and deletable");
   assert.equal(w.crResultsMenu({ items, stored: 0 }).rows.some((r) => r.kind === "clear"), false);
   assert.match(w.crResultsMenu({ items: [], stored: 0 }).notice, /아직 기록된/);
+  // A record that cannot be counted still offers the delete (never invisible, MC-27).
+  const unknown = w.crResultsMenu({ items: [], stored: null });
+  assert.equal(unknown.notice, null);
+  assert.deepEqual(unknown.rows.map((r) => [r.kind, r.description]), [["clear", "개수 확인 안 됨"]]);
+});
+
+await test("CR-08/CR-10: the stored record keeps the earlier-request mark, so the list counts failures as the agent did", async () => {
+  const ex = observationOf(makeFakePage());
+  const obs = (await ex.execute("browser_observe")).observation;
+  const records = [
+    { kind: "console", level: "error", message: "request1-step1-error", step: null, earlierRequest: true, time: 1, documentGeneration: "L0" },
+    { kind: "console", level: "error", message: "between-requests-error", step: null, time: 2, documentGeneration: "L0" },
+  ];
+  const r = recorder();
+  await w.recordProxyCrResult(r.record, "a", "browser_observe", {}, { ...obs, records }, localRecord().sink);
+  const stored = readBrowserResultEvent(r.events[1]);
+  assert.deepEqual(stored.records.map((x) => [x.message, x.earlier_request ?? null]), [["request1-step1-error", true], ["between-requests-error", null]]);
+  const [item] = w.crResultHistory(validBatch(r.events), () => null);
+  assert.equal(item.detail, "오류 1건: between-requests-error", "the earlier request's error is not this result's; the one between requests is");
+  // Planted: dropping the mark on storage counts the earlier request's error again.
+  const dropped = { ...r.events[1], text: r.events[1].text.replace(/"earlier_request":true,?/, "") };
+  assert.notEqual(dropped.text, r.events[1].text);
+  assert.match(w.crResultHistory(validBatch([r.events[0], dropped]), () => null)[0].detail, /오류 2건/);
+});
+
+await test("CR-10 shared PC: one person's count and delete never reach another person's stored screens", async () => {
+  const { issue } = await import("../../../worker/src/lib/tokens.ts");
+  const secret = "cr-host-smoke-signing-secret-0123456789abcdef";
+  const tok = async (u, c) => (await issue({ u, c, p: "p" }, 6, secret)).token;
+  const a1 = await tok("kid01", "cohort-a");
+  const a2 = await tok("kid01", "cohort-a");
+  const b = await tok("kid02", "cohort-a");
+  const other = await tok("kid01", "cohort-b");
+  const ownerA = w.crBytesOwner(a1);
+  assert.match(ownerA, /^o-[a-f0-9]{32}$/);
+  assert.equal(w.crBytesOwner(a2), ownerA, "the same person on a reissued token is the same owner");
+  assert.notEqual(w.crBytesOwner(b), ownerA, "another student on the same PC is another owner");
+  assert.notEqual(w.crBytesOwner(other), ownerA, "a cohort-local id in another cohort is another person");
+  assert.equal(w.crBytesOwner(null), null, "signed out: no owner, nothing stored");
+  assert.ok(!ownerA.includes("kid01"), "the identity itself is never in the key");
+  const local = localRecord();
+  const shot = (n) => ({ media_type: "image/png", base64: Buffer.from(`png-${n}`).toString("base64") });
+  await local.record.putBlob(shot(1), { owner: ownerA });
+  await local.record.putBlob(shot(2), { owner: ownerA });
+  await local.record.putBlob(shot(2), { owner: w.crBytesOwner(b) });
+  await local.record.putBlob(shot(3), { owner: w.crBytesOwner(b) });
+  assert.equal(await local.record.blobCount({ owner: ownerA }), 2);
+  assert.equal(await local.record.blobCount({ owner: w.crBytesOwner(b) }), 2);
+  assert.equal(await local.record.blobCount(), 3);
+  assert.deepEqual(await local.record.deleteBlobs({ by: "user", at: 1, owner: w.crBytesOwner(b) }), { removed: 2 });
+  assert.equal(await local.record.blobCount({ owner: w.crBytesOwner(b) }), 0, "B sees nothing left");
+  assert.equal(await local.record.blobCount({ owner: ownerA }), 2, "A's screens, including the bytes B also stored, are untouched");
+  assert.equal(local.blobKeys().length, 2, "only the bytes nobody else stored were removed");
+  // Planted: an unscoped delete (the earlier behaviour) would have taken A's screens too.
+  const planted = localRecord();
+  await planted.record.putBlob(shot(1), { owner: ownerA });
+  await planted.record.putBlob(shot(3), { owner: w.crBytesOwner(b) });
+  await planted.record.deleteBlobs({ by: "user", at: 1 });
+  assert.equal(await planted.record.blobCount({ owner: ownerA }), 0);
+  // The provider stores as the turn's owner and stores nothing signed out.
+  assert.match(providerSrc, /private crBlobSinkFor\(owner: string \| null\): BlobSink \| undefined \{\s*if \(!owner\) return undefined;/);
 });
 
 await test("CR-10 negative: a version that disagrees between the event key and its text never reads as a result", async () => {
@@ -363,6 +424,9 @@ await test("CR-10: the delete asks first; only \"지우기\" deletes", async () 
   assert.deepEqual(out, { removed: 3 });
   assert.equal(called, 1);
   assert.match(asked, /3개를 지울까요\? 되돌릴 수 없어요\./);
+  let askedUnknown = "";
+  await w.clearStoredResults(null, async (m) => { askedUnknown = m; return undefined; }, async () => ({ removed: 0 }));
+  assert.match(askedUnknown, /동작 기록을 지울까요\?/);
   assert.match(providerSrc, /const out = await clearStoredResults\(\s*stored,\s*\(message\) => Promise\.resolve\(vscode\.window\.showWarningMessage\(message, \{ modal: true \}, "지우기"\)\),/);
 });
 
@@ -376,17 +440,22 @@ await test("CR-10 MC-27: stored bytes stay visible and deletable after the CR sw
   const palette = manifest.contributes.menus.commandPalette.filter((m) => m.command === w.CR_BYTES_CLEAR_COMMAND);
   assert.deepEqual(palette.map((m) => m.when), [w.CR_BYTES_CONTEXT_KEY], "shown in the palette by 'bytes are stored'");
   for (const expr of [cmd.enablement, ...palette.map((m) => m.when)]) assert.ok(!expr.includes(CR_CONTEXT_KEY), "never by the CR switch");
-  // It is not a CR surface (the switch-off check would hide it again).
+  // It is CR-02's listed exception, not a switch-gated surface (that check would hide it again).
   assert.deepEqual(manifestSwitchProblems(manifest), []);
   assert.match(extensionSrc, /registerCommand\("hypeproof-chat\.clearBrowserResultBytes", \(\) => provider\.clearStoredBrowserResults\(\)\)/);
   assert.match(extensionSrc, /void provider\.refreshCrBytesContext\(\);/);
   // The handler does not check the switch, and the key follows the record.
   const handler = /async clearStoredBrowserResults\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(providerSrc)?.[1] ?? "";
-  assert.match(handler, /const stored = await this\.refreshCrBytesContext\(\);[\s\S]*await this\.clearBrowserResultBytes\(stored\);/);
+  assert.match(handler, /const owner = crBytesOwner\(await this\.context\.secrets\.get\(TOKEN_KEY\)\);\s*const stored = await this\.crStoredCount\(owner\);[\s\S]*await this\.clearBrowserResultBytes\(owner, stored\);/);
   assert.doesNotMatch(handler, /isCurriculumRuntimeEnabled/);
-  assert.match(providerSrc, /void vscode\.commands\.executeCommand\("setContext", CR_BYTES_CONTEXT_KEY, stored > 0\);/);
-  assert.match(providerSrc, /void next\.then\(\(digests\) => \{ if \(digests\.some\(\(d\) => d !== null\)\) void this\.refreshCrBytesContext\(\); \}\);/);
-  assert.match(providerSrc, /this\.postPageNotice\("기록을 지우지 못했어요[^"]*"\);\s*\}\s*await this\.refreshCrBytesContext\(\);/);
+  assert.match(providerSrc, /void vscode\.commands\.executeCommand\("setContext", CR_BYTES_CONTEXT_KEY, flagged\);/);
+  assert.match(providerSrc, /void next\.then\(\(digests\) => \{ if \(digests\.some\(\(d\) => d !== null\)\) void this\.noteCrBytes\(owner, true\); \}\);/);
+  assert.match(providerSrc, /this\.postPageNotice\("기록을 지우지 못했어요[^"]*"\);\s*\}\s*await this\.crStoredCount\(owner\);/);
+  // The context refresh at start-up and on sign-in reads no record (no disk I/O, no directory).
+  const refresh = /async refreshCrBytesContext\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(providerSrc)?.[1] ?? "";
+  assert.ok(refresh, "refreshCrBytesContext found");
+  assert.doesNotMatch(refresh, /crRecordHandle|records\(\)|blobCount/);
+  assert.match(providerSrc, /if \(!isCurriculumRuntimeEnabled\(p\)\) this\.clearElementContext\(\);\s*\/\/[^\n]*\n\s*void this\.refreshCrBytesContext\(\);/);
 });
 
 await test("CR-10 negative: no bytes are stored once the turn's recorder cannot take the event that names them", async () => {

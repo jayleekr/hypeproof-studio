@@ -88,7 +88,16 @@ const BLOB_PREFIX = "blobs/";
 const BLOB_ORDER_PREFIX = "blob-order/";
 const blobKey = (digest: string) => `${BLOB_PREFIX}${digest.slice("sha256:".length)}`;
 const blobOrderKey = (at: number, digest: string) => `${BLOB_ORDER_PREFIX}${String(Math.max(0, Math.floor(at))).padStart(15, "0")}-${digest.slice("sha256:".length)}`;
-const isBlobKey = (key: string) => key.startsWith(BLOB_PREFIX) || key.startsWith(BLOB_ORDER_PREFIX);
+/**
+ * Who stored which bytes: `blob-owners/<owner>/<hex>` → { at }. An owner is an opaque id the
+ * host derives from the signed-in identity (a digest, never the identity itself), so on a
+ * shared PC one person's count and delete never reach what another person stored. Bytes two
+ * owners stored are kept until both have deleted them.
+ */
+const BLOB_OWNER_PREFIX = "blob-owners/";
+const OWNER = /^[A-Za-z0-9._-]{1,80}$/;
+const blobOwnerKey = (owner: string, hex: string) => `${BLOB_OWNER_PREFIX}${owner}/${hex}`;
+const isBlobKey = (key: string) => key.startsWith(BLOB_PREFIX) || key.startsWith(BLOB_ORDER_PREFIX) || key.startsWith(BLOB_OWNER_PREFIX);
 
 interface BlobRecord {
   format: typeof LOCAL_RECORD_FORMAT;
@@ -513,7 +522,7 @@ export class LocalRecord {
   }
 
   async #blobUsage(): Promise<number> {
-    return (await this.#usageOf(BLOB_PREFIX)) + (await this.#usageOf(BLOB_ORDER_PREFIX));
+    return (await this.#usageOf(BLOB_PREFIX)) + (await this.#usageOf(BLOB_ORDER_PREFIX)) + (await this.#usageOf(BLOB_OWNER_PREFIX));
   }
 
   /** The review data's usage against MC-35's limit. Browser-result bytes have their own bound (DEFAULT_BLOB_MAX_BYTES). */
@@ -538,9 +547,11 @@ export class LocalRecord {
 
   /**
    * false when `ifAbsent` found the key taken. Never evicts review data to make room;
-   * browser-result bytes are checked against their own bound (`quota: "blob"`).
+   * browser-result bytes are checked against their own bound (`quota: "blob"`). An owner
+   * marker (`quota: "none"`, a few characters) is not checked: refusing it would leave bytes
+   * their owner cannot count or delete.
    */
-  async #write(key: string, value: unknown, ifAbsent: boolean, quota: "review" | "blob" = "review"): Promise<boolean> {
+  async #write(key: string, value: unknown, ifAbsent: boolean, quota: "review" | "blob" | "none" = "review"): Promise<boolean> {
     // Last line of MC-30: no known secret format reaches storage, whichever field carries it.
     const raw = canonicalJson(redactDeep(value));
     let existing: string | null;
@@ -552,8 +563,10 @@ export class LocalRecord {
     // An existing record answers an ifAbsent write before any quota check, so an identical
     // retry stays idempotent when storage is full (MC-25/35). The port write itself stays atomic.
     if (ifAbsent && existing !== null) return false;
-    const [bytes, max] = quota === "blob" ? [await this.#blobUsage(), this.#maxBlobBytes] : [(await this.usage()).bytes, this.#maxBytes];
-    check(bytes - (existing?.length ?? 0) + raw.length <= max, "capacity_exceeded");
+    if (quota !== "none") {
+      const [bytes, max] = quota === "blob" ? [await this.#blobUsage(), this.#maxBlobBytes] : [(await this.usage()).bytes, this.#maxBytes];
+      check(bytes - (existing?.length ?? 0) + raw.length <= max, "capacity_exceeded");
+    }
     try {
       await this.#store.write(key, raw, { ifAbsent });
       return true;
@@ -674,10 +687,12 @@ export class LocalRecord {
    * through it, and its digest equals `digestOf(redactDeep(json))`. Images are stored as
    * given. Storing the same bytes again is a no-op that returns the same digest. When the
    * bytes do not fit DEFAULT_BLOB_MAX_BYTES the oldest stored bytes are removed first; review
-   * data is never touched to make room (MC-35).
+   * data is never touched to make room (MC-35). With `owner`, the bytes are also recorded as
+   * that owner's (`blobCount`/`deleteBlobs` with the same owner see only those).
    */
-  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }, options: { at?: number } = {}): Promise<string> {
+  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }, options: { at?: number; owner?: string } = {}): Promise<string> {
     check(isObj(input) && (BLOB_MEDIA_TYPES as readonly string[]).includes(String(input.media_type)), "invalid_blob");
+    check(options.owner === undefined || (typeof options.owner === "string" && OWNER.test(options.owner)), "invalid_owner");
     let bytes: Uint8Array;
     if (input.media_type === "application/json") {
       check(input.json !== undefined && input.base64 === undefined, "invalid_blob");
@@ -695,8 +710,12 @@ export class LocalRecord {
     } catch {
       throw new Error("storage_failure");
     }
+    const at = Number.isFinite(options.at) ? Number(options.at) : Date.now();
+    // The owner marker goes before the bytes: a crash between them leaves a marker that
+    // names nothing (never counted, cleared by the next delete), never bytes their owner
+    // cannot count or delete.
+    if (options.owner !== undefined) await this.#write(blobOwnerKey(options.owner, digest.slice("sha256:".length)), { at }, false, "none");
     if (present === null) {
-      const at = Number.isFinite(options.at) ? Number(options.at) : Date.now();
       const record: BlobRecord = { format: LOCAL_RECORD_FORMAT, kind: "blob", digest, media_type: input.media_type, bytes: bytes.length, at, data: toBase64(bytes) };
       const size = canonicalJson(redactDeep(record)).length;
       const marker = { size };
@@ -719,6 +738,7 @@ export class LocalRecord {
   async #evictBlobsFor(need: number): Promise<void> {
     let used = await this.#blobUsage();
     if (used + need <= this.#maxBlobBytes) return;
+    const owners = await this.#keys(BLOB_OWNER_PREFIX);
     for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
       if (used + need <= this.#maxBlobBytes) return;
       const key = BLOB_PREFIX + order.slice(-64);
@@ -730,8 +750,22 @@ export class LocalRecord {
       }
       await this.#remove(key);
       await this.#remove(order);
+      for (const o of owners) if (o.endsWith(`/${order.slice(-64)}`)) await this.#remove(o);
       used -= sizes;
     }
+  }
+
+  /**
+   * How many stored browser-result bytes there are: all of them, or those `owner` stored.
+   * Reads keys only, never a review record, so an unrelated corrupt task or review cannot
+   * hide stored screenshots (MC-27).
+   */
+  async blobCount(options: { owner?: string } = {}): Promise<number> {
+    const stored = (await this.#keys(BLOB_PREFIX)).map((k) => k.slice(BLOB_PREFIX.length));
+    if (options.owner === undefined) return stored.length;
+    check(typeof options.owner === "string" && OWNER.test(options.owner), "invalid_owner");
+    const present = new Set(stored);
+    return (await this.#keys(`${BLOB_OWNER_PREFIX}${options.owner}/`)).filter((k) => present.has(k.slice(-64))).length;
   }
 
   /**
@@ -740,14 +774,38 @@ export class LocalRecord {
    * them stay. Each blob goes before its age marker, as in eviction: an interruption leaves
    * a marker without bytes (cleared by the next eviction or delete), never bytes no bound
    * or delete can find.
+   *
+   * With `owner`, only what that owner stored is deleted, and `removed` counts it: their
+   * owner markers go, and the bytes go unless another owner stored the same bytes too.
    */
-  async deleteBlobs(input: { by: "user"; at: number; digests?: readonly string[] }): Promise<{ removed: number }> {
+  async deleteBlobs(input: { by: "user"; at: number; digests?: readonly string[]; owner?: string }): Promise<{ removed: number }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
     let wanted: Set<string> | null = null;
     if (input.digests !== undefined) {
       check(Array.isArray(input.digests) && input.digests.every((d) => typeof d === "string" && DIGEST.test(d)), "invalid_digest");
       wanted = new Set(input.digests.map((d) => d.slice("sha256:".length)));
     }
+    const owners = await this.#keys(BLOB_OWNER_PREFIX);
+    if (input.owner !== undefined) {
+      check(typeof input.owner === "string" && OWNER.test(input.owner), "invalid_owner");
+      const mine = `${BLOB_OWNER_PREFIX}${input.owner}/`;
+      const present = new Set((await this.#keys(BLOB_PREFIX)).map((k) => k.slice(BLOB_PREFIX.length)));
+      const scope = new Set(owners.filter((k) => k.startsWith(mine)).map((k) => k.slice(-64)).filter((h) => !wanted || wanted.has(h)));
+      let removed = 0;
+      for (const hex of scope) {
+        await this.#remove(blobOwnerKey(input.owner, hex));
+        if (present.has(hex)) removed++;
+      }
+      const others = new Set(owners.filter((k) => !k.startsWith(mine)).map((k) => k.slice(-64)));
+      const orphaned = [...scope].filter((h) => !others.has(h));
+      if (orphaned.length) await this.#removeBlobs(new Set(orphaned), []);
+      return { removed };
+    }
+    return { removed: await this.#removeBlobs(wanted, owners) };
+  }
+
+  /** Remove stored bytes (all, or the named hex digests) with their age and owner markers. */
+  async #removeBlobs(wanted: Set<string> | null, owners: readonly string[]): Promise<number> {
     const markers = new Map<string, string[]>();
     for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
       const hex = order.slice(-64);
@@ -765,7 +823,8 @@ export class LocalRecord {
     }
     // Markers whose bytes were already gone (an earlier interruption).
     for (const orders of markers.values()) for (const order of orders) await this.#remove(order);
-    return { removed };
+    for (const o of owners) if (!wanted || wanted.has(o.slice(-64))) await this.#remove(o);
+    return removed;
   }
 
   /** The bytes a digest names, checked against it; null when they are not stored. */
@@ -1166,7 +1225,7 @@ export class LocalRecord {
       if (g && (g.missing.length > 0 || g.incomplete)) gaps.push(g);
     }
     const deleted = (await this.#keys("deleted/")).map((k) => k.slice("deleted/".length));
-    const browser_results = { stored: (await this.#keys(BLOB_PREFIX)).length, bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
+    const browser_results = { stored: await this.blobCount(), bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
     return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted, browser_results };
   }
 }

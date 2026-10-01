@@ -230,3 +230,42 @@ test("positive: deleting a task removes the bytes its observations name; bytes a
   assert.ok(await record.getBlob(loose), "bytes no task names are not the task's");
   assert.ok(out.not_covered.includes("browser_result_bytes_not_named_by_the_task"), "and the result says so instead of claiming them");
 });
+
+test("positive: an owner counts and deletes only what it stored; bytes two owners stored stay until both delete", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port);
+  await assert.rejects(record.putBlob({ media_type: "image/png", base64: png(10, 1) }, { owner: "../a" }), /invalid_owner/);
+  const a1 = await record.putBlob({ media_type: "image/png", base64: png(10, 1) }, { owner: "o-a" });
+  const both = await record.putBlob({ media_type: "image/png", base64: png(10, 2) }, { owner: "o-a" });
+  assert.equal(await record.putBlob({ media_type: "image/png", base64: png(10, 2) }, { owner: "o-b" }), both, "same bytes, one copy");
+  await record.putBlob({ media_type: "image/png", base64: png(10, 3) }, { owner: "o-b" });
+  assert.deepEqual([await record.blobCount({ owner: "o-a" }), await record.blobCount({ owner: "o-b" }), await record.blobCount()], [2, 2, 3]);
+  assert.equal(await record.blobCount({ owner: "o-nobody" }), 0);
+  assert.deepEqual(await record.deleteBlobs({ by: "user", at: 1, owner: "o-a" }), { removed: 2 });
+  assert.equal(await record.getBlob(a1), null, "bytes only A stored are gone");
+  assert.ok(await record.getBlob(both), "bytes B stored too stay");
+  assert.deepEqual([await record.blobCount({ owner: "o-a" }), await record.blobCount({ owner: "o-b" })], [0, 2]);
+  assert.deepEqual(await record.deleteBlobs({ by: "user", at: 2, owner: "o-b" }), { removed: 2 });
+  assert.deepEqual([...port.store.keys()].filter((k) => k.startsWith("blob")), [], "no bytes, age or owner markers left");
+  // Owner markers never count against the review data (MC-35).
+  assert.equal((await record.usage()).bytes, 0);
+});
+
+test("negative: eviction takes the evicted bytes' owner markers with them", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port, { maxBlobBytes: 3 * 30_000 });
+  for (let i = 0; i < 6; i++) await record.putBlob({ media_type: "image/png", base64: png(20_000, i) }, { owner: "o-a" });
+  const owners = [...port.store.keys()].filter((k) => k.startsWith("blob-owners/"));
+  assert.equal(owners.length, blobKeys(port).length, "one owner marker per stored blob, none for evicted ones");
+  assert.equal(await record.blobCount({ owner: "o-a" }), blobKeys(port).length);
+});
+
+test("negative: an unrelated corrupt review record does not hide the stored bytes from the count", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port);
+  await record.putBlob({ media_type: "image/png", base64: png(10, 1) }, { owner: "o-a" });
+  await port.write("tasks/t1", "{not json");
+  await assert.rejects(record.records(), "instrument: the full read fails on the corrupt record");
+  assert.equal(await record.blobCount({ owner: "o-a" }), 1);
+  assert.equal(await record.blobCount(), 1);
+});

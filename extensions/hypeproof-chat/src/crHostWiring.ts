@@ -29,7 +29,9 @@ import {
 } from "./browserResult.ts";
 import type { BlobMediaType } from "../../../worker/src/lib/measurement-core/local-record.ts";
 import { BROWSER_RESULT_REF_KEYS } from "../../../worker/src/lib/measurement-core/learning-events.ts";
-import type { Observation } from "./experimentBrowser.ts";
+import { failuresOf, type Observation } from "./experimentBrowser.ts";
+import { decodeTokenPayloadUnverified } from "./chatPanelHelpers.ts";
+import { createHash } from "node:crypto";
 import type { ElementPreview } from "./protocol.ts";
 
 // ── CR-02 glue ──────────────────────────────────────────────────────────────
@@ -329,7 +331,7 @@ export function crResultHistory(
     .sort((a, b) => b.record.at - a.record.at)
     .map(({ record: r, version, label }) => {
       // The same failure rule the agent reports by (failuresOf, CR-08).
-      const errors = r.records.filter((x) => x.kind === "exception" || x.kind === "network" || x.level === "error" || x.level === "assert");
+      const errors = failuresOf(r.records.map((x) => ({ ...x, earlierRequest: x.earlier_request })));
       return {
         label: `${STATE_LABEL[label]} · 버전 ${numberOf(r.artifact_entry, version)}`,
         description: `${r.tool.replace(/^mcp__hypeproof__/, "")} · ${r.route || r.url}${r.step === null ? "" : ` · ${r.step}단계`}`,
@@ -351,25 +353,58 @@ export type CrResultsRow =
 export const CR_CLEAR_LABEL = "$(trash) 저장된 화면·동작 기록 지우기";
 
 /**
- * Context key: browser-result bytes are stored on this seat's local record. It gates the
- * delete command (CR_BYTES_CLEAR_COMMAND) and deliberately NOT the CR switch: after a
- * cohort or tier change turns the switch off, the stored screenshots of the student's pages
- * must still be visible and deletable (MC-27), while every CR surface stays hidden (CR-02).
+ * Context key (defined with the switch inventory): the signed-in person has browser-result
+ * bytes stored on this seat's local record. It gates the delete command
+ * (CR_BYTES_CLEAR_COMMAND) and deliberately NOT the CR switch: after a tier change turns the
+ * switch off, the stored screenshots of the student's pages must still be deletable (MC-27,
+ * decision 6), while every other CR surface stays hidden (CR-02's listed exception).
  */
-export const CR_BYTES_CONTEXT_KEY = "hypeproof-chat.crBrowserBytesStored";
+export { CR_BYTES_CONTEXT_KEY } from "./curriculumRuntime.ts";
 export const CR_BYTES_CLEAR_COMMAND = "hypeproof-chat.clearBrowserResultBytes";
 
 /**
- * What the results command shows (switch on): the results, then a delete row when bytes
- * are stored. `notice` replaces the list when there is nothing to show.
+ * Who stored browser-result bytes on this seat's record: a digest of the signed-in identity
+ * (a personal account, or the cohort-local user within its cohort), never the identity or the
+ * token. The bytes directory is one per OS account, so on a shared classroom PC every student
+ * shares it; the owner keeps one student's count and delete from reaching another's screens
+ * (classroom-admin: another student's list is empty). null when signed out: nothing is
+ * stored, counted or deleted then. Decoded unverified, like every other local bucket choice:
+ * it picks whose bytes these are, it grants nothing.
  */
-export function crResultsMenu(input: { items: readonly CrResultItem[]; stored: number }): { notice: string | null; rows: CrResultsRow[] } {
-  const stored = Math.max(0, Math.floor(input.stored || 0));
-  if (!input.items.length && !stored) return { notice: "아직 기록된 실험 브라우저 결과가 없어요.", rows: [] };
+export function crBytesOwner(token: string | null | undefined): string | null {
+  const p = decodeTokenPayloadUnverified(token);
+  const id = typeof p?.account === "string" && p.account ? `account\n${p.account}`
+    : typeof p?.u === "string" && p.u && typeof p?.c === "string" && p.c ? `seat\n${p.c}\n${p.u}`
+    : null;
+  return id ? `o-${createHash("sha256").update(id).digest("hex").slice(0, 32)}` : null;
+}
+
+/**
+ * globalState key: the owners that may have bytes stored. Read at start-up and on sign-in
+ * instead of the record, so showing the delete command costs no disk I/O and creates no
+ * directory for a seat that never stored anything. It may run ahead of the record (bytes
+ * evicted by the bound): the command then counts for real and says there is nothing.
+ */
+export const CR_BYTES_OWNERS_STATE = "hypeproof-chat.crBytesOwners";
+
+/** The owners list after `owner` stored bytes (`has` true) or has none left (`has` false). */
+export function crBytesOwnersAfter(list: unknown, owner: string, has: boolean): string[] {
+  const owners = Array.isArray(list) ? list.filter((o): o is string => typeof o === "string" && o !== owner) : [];
+  return has ? [...owners, owner] : owners;
+}
+
+/**
+ * What the results command shows (switch on): the results, then a delete row when the
+ * signed-in person has bytes stored. `stored` null means they may have some but the record
+ * could not be counted: the row is still offered. `notice` replaces an empty list.
+ */
+export function crResultsMenu(input: { items: readonly CrResultItem[]; stored: number | null }): { notice: string | null; rows: CrResultsRow[] } {
+  const stored = input.stored === null ? null : Math.max(0, Math.floor(input.stored || 0));
+  if (!input.items.length && stored === 0) return { notice: "아직 기록된 실험 브라우저 결과가 없어요.", rows: [] };
   const rows: CrResultsRow[] = input.items.map((item) => ({ kind: "result", label: item.label, description: item.description, detail: item.detail, item }));
-  if (stored) {
+  if (stored !== 0) {
     if (rows.length) rows.push({ kind: "separator" });
-    rows.push({ kind: "clear", label: CR_CLEAR_LABEL, description: `${stored}개`, detail: "이 컴퓨터에 저장된 실험 브라우저 화면과 동작 기록을 모두 지워요. 결과 목록은 남아요." });
+    rows.push({ kind: "clear", label: CR_CLEAR_LABEL, description: stored === null ? "개수 확인 안 됨" : `${stored}개`, detail: "내가 저장한 실험 브라우저 화면과 동작 기록을 이 컴퓨터에서 모두 지워요. 결과 목록은 남아요." });
   }
   return { notice: null, rows };
 }
@@ -379,11 +414,11 @@ export function crResultsMenu(input: { items: readonly CrResultItem[]; stored: n
  * "지우기"; anything else (Escape, closing the dialog) deletes nothing.
  */
 export async function clearStoredResults(
-  stored: number,
+  stored: number | null,
   confirm: (message: string) => Promise<string | undefined>,
   remove: () => Promise<{ removed: number }>,
 ): Promise<{ removed: number } | null> {
-  const ok = await confirm(`저장된 실험 브라우저 화면과 동작 기록 ${stored}개를 지울까요? 되돌릴 수 없어요.`);
+  const ok = await confirm(`내가 저장한 실험 브라우저 화면과 동작 기록${stored === null ? "을" : ` ${stored}개를`} 지울까요? 되돌릴 수 없어요.`);
   if (ok !== "지우기") return null;
   return remove();
 }

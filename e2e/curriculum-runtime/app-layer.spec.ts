@@ -7,7 +7,10 @@
 // browser through the App's own proxy loop; the agent only sees what the App sent back.
 //
 //   CR-T02 in-app   switch off: no CR command in the palette, no CR tool in the request;
-//                   switch on: both commands and all five tools appear.
+//                   switch on: both commands and all five tools appear. CR-02's one listed
+//                   exception, the delete command for stored screens: hidden before anything
+//                   is stored, shown once bytes are stored, still shown after a relaunch with
+//                   the switch off (results and pick hidden), and gone after "지우기".
 //   CR-T07          five-step kiosk flow reaches the order screen; planted disabled step 4
 //                   stops at step 4.
 //   CR-T08          planted console error in flow step 3 reported once, at the step index of
@@ -39,6 +42,8 @@ const FIXTURE = path.join(here, "fixtures/kiosk-practice");
 const CR_TOOLS = ["browser_observe", "browser_select", "browser_scroll", "browser_hover", "browser_reload"];
 const PICK = "HypeProof: 화면에서 요소 골라 코치에게 묻기";
 const RESULTS = "HypeProof: 실험 브라우저 결과 기록 보기";
+/** CR-02's listed exception: shown, whatever the switch, only while the person has bytes stored. */
+const CLEAR = "HypeProof: 저장된 실험 브라우저 화면 지우기";
 const PREVIEW = "HypeProof: HTML 미리보기 (옆 패널)";
 
 type Run = { failedAt: number | null; failures: Array<{ step: number | null; message: string }>; steps: number; done: boolean; results: unknown[]; actions: string[]; lines: Array<{ round: number; line: string }> };
@@ -215,7 +220,74 @@ test("CR-T02 in-app, switch off: no CR command or tool is reachable; the existin
   const control = await paletteRows(ctx.win, PREVIEW);
   expect(control.some((r) => r.includes("HTML 미리보기")), "control: the palette instrument finds an existing command").toBe(true);
   for (const title of [PICK, RESULTS]) expect((await paletteRows(ctx.win, title)).some((r) => r.includes(title.replace("HypeProof: ", ""))), `${title} hidden`).toBe(false);
+  expect(hasRow(await paletteRows(ctx.win, CLEAR), CLEAR), "the delete exception is hidden with nothing stored").toBe(false);
   record["CR-T02-off"] = { tools };
+});
+
+const hasRow = (rows: string[], title: string) => rows.some((r) => r.includes(title.replace("HypeProof: ", "")));
+/** Stored browser-result bytes on a user data dir's local record (keys under `blobs/`). */
+function storedBlobs(userDataDir: string): number {
+  const storage = path.join(userDataDir, "User/globalStorage");
+  if (!fs.existsSync(storage)) return 0;
+  const recordDir = fs.readdirSync(storage).map((d) => path.join(storage, d, "local-review-v1")).find((d) => fs.existsSync(d));
+  const files = recordDir ? fs.readdirSync(recordDir).filter((f) => /^[a-f0-9]{64}\.json$/.test(f)) : [];
+  return files.map((f) => JSON.parse(fs.readFileSync(path.join(recordDir!, f), "utf8")).key as string).filter((k) => k.startsWith("blobs/")).length;
+}
+
+test("CR-T02 exception in-app: the delete command for stored screens across the switch (MC-27)", async () => {
+  await svc.start(true);
+  ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
+  const { app, win, wsDir } = ctx;
+  fs.cpSync(FIXTURE, wsDir, { recursive: true });
+  const preClear = hasRow(await paletteRows(win, CLEAR), CLEAR);
+  await send(win, "안녕");
+  await expect.poll(async () => (await svc.state()).requests.length, { timeout: 60_000 }).toBeGreaterThan(0);
+  await win.locator(".monaco-workbench .part.titlebar").first().click({ position: { x: 10, y: 10 }, force: true });
+  await win.keyboard.press("Meta+P");
+  await win.locator(".quick-input-widget input.input").first().fill("index.html");
+  await win.waitForTimeout(600);
+  await win.keyboard.press("Enter");
+  await win.waitForTimeout(800);
+  await runCommand(win, PREVIEW);
+  await expect.poll(() => previewUrl(app), { timeout: 30_000 }).not.toBeNull();
+  await send(win, "[cr:flow] 주문 시작부터 주문 완료까지 눌러보고 오류가 있으면 몇 번째 단계였는지 알려줘");
+  const clean = await waitRun(svc, "clean", win);
+  expect(clean.failedAt).toBeNull();
+  await expect.poll(() => storedBlobs(ctx!.userDataDir), { timeout: 10_000 }).toBeGreaterThan(0);
+  const onBlobs = storedBlobs(ctx.userDataDir);
+  const onClear = hasRow(await paletteRows(win, CLEAR), CLEAR);
+  // The same student, the switch now off (a tier change), on the same user data dir.
+  const udd = ctx.userDataDir;
+  await app.close(); // not closeApp: that removes the user data dir this relaunch reuses
+  ctx = undefined;
+  svc.stop();
+  await new Promise((r) => setTimeout(r, 1500));
+  await svc.start(false);
+  ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" }, reuseUserDataDir: udd });
+  await ctx.win.waitForTimeout(3000);
+  const off = {
+    clear: hasRow(await paletteRows(ctx.win, CLEAR), CLEAR),
+    results: hasRow(await paletteRows(ctx.win, RESULTS), RESULTS),
+    pick: hasRow(await paletteRows(ctx.win, PICK), PICK),
+  };
+  let dialog: string | null = null;
+  if (off.clear) {
+    await runCommand(ctx.win, CLEAR);
+    const btn = ctx.win.locator(".monaco-dialog-box .monaco-button", { hasText: "지우기" }).first();
+    await btn.waitFor({ state: "visible", timeout: 15_000 });
+    dialog = await ctx.win.locator(".monaco-dialog-box").first().innerText().catch(() => null);
+    await btn.click();
+  }
+  await expect.poll(() => storedBlobs(udd), { timeout: 10_000 }).toBe(0);
+  const afterClear = hasRow(await paletteRows(ctx.win, CLEAR), CLEAR);
+  record["CR-T02-exception"] = { preClear, onBlobs, onClear, off, dialog, afterBlobs: storedBlobs(udd), afterClear };
+  expect(preClear, "hidden before anything is stored").toBe(false);
+  expect(onClear, "shown once bytes are stored (switch on)").toBe(true);
+  expect(off.results, "the results command stays hidden with the switch off").toBe(false);
+  expect(off.pick, "element pick stays hidden with the switch off").toBe(false);
+  expect(off.clear, "the delete command is shown with the switch off while bytes are stored").toBe(true);
+  expect(dialog ?? "", "the dialog says how many and that it cannot be undone").toMatch(/개를 지울까요\? 되돌릴 수 없어요/);
+  expect(afterClear, "hidden again once nothing is stored").toBe(false);
 });
 
 test("CR-T02/07/08/09/10/63 in-app, switch on", async () => {

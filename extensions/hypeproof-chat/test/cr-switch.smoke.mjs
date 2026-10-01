@@ -24,7 +24,7 @@ registerHooks({
   },
 });
 
-const { CR_SURFACES, CR_CONTEXT_KEY, manifestSwitchProblems, isCurriculumRuntimeEnabled } = await import("../src/curriculumRuntime.ts");
+const { CR_SURFACES, CR_CONTEXT_KEY, CR_BYTES_CONTEXT_KEY, manifestSwitchProblems, manifestStoredOnlyProblems, isCurriculumRuntimeEnabled } = await import("../src/curriculumRuntime.ts");
 const { permittedMcpToolsFor } = await import("../src/sdkCoachHelpers.ts");
 const { buildHypeproofMcpServer, MCP_BROWSER_TOOLS } = await import("../src/browserMcp.ts");
 const { BrowserControl } = await import("../src/browserControl.ts");
@@ -65,6 +65,25 @@ assert.match(providerSrc, /async pickElement\(\): Promise<void> \{\s*if \(!this\
 assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
 assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"], "both CR commands are in the inventory the manifest check walks");
 ok("commands: the pickElement and browserResults handlers re-check the served switch before anything else");
+
+// ── the listed exception: delete-only, shown only while the person has bytes stored ──
+assert.deepEqual(CR_SURFACES.switchOffWhileStored, ["hypeproof-chat.clearBrowserResultBytes"], "the delete command is in the inventory as the one allowed exception");
+assert.deepEqual(manifestStoredOnlyProblems(manifest), [], "gated on exactly 'bytes are stored', never on anything else");
+for (const id of CR_SURFACES.switchOffWhileStored) assert.ok(!CR_SURFACES.commands.includes(id), "not also listed as a switch-gated command");
+const plantStored = (fn) => { const m = structuredClone(manifest); fn(m); return manifestStoredOnlyProblems(m); };
+const clearCmd = (m) => m.contributes.commands.find((c) => c.command === "hypeproof-chat.clearBrowserResultBytes");
+assert.ok(plantStored((m) => delete clearCmd(m).enablement).some((p) => /enablement/.test(p)), "an always-enabled delete command is caught");
+assert.ok(plantStored((m) => (clearCmd(m).enablement = `${CR_BYTES_CONTEXT_KEY} || true`)).some((p) => /enablement/.test(p)));
+assert.ok(plantStored((m) => (m.contributes.menus.commandPalette = m.contributes.menus.commandPalette.filter((x) => x.command !== "hypeproof-chat.clearBrowserResultBytes"))).some((p) => /palette/.test(p)), "no palette entry = always in the palette");
+assert.ok(plantStored((m) => (m.contributes.menus.commandPalette.find((x) => x.command === "hypeproof-chat.clearBrowserResultBytes").when = "true")).some((p) => /commandPalette/.test(p)));
+// The key is false when the signed-in person has nothing stored: it reads only the owners
+// list, and an owner is in it only after a store and until a count of 0.
+const wiring = await import("../src/crHostWiring.ts");
+assert.deepEqual(wiring.crBytesOwnersAfter(undefined, "o-a", false), []);
+assert.deepEqual(wiring.crBytesOwnersAfter(["o-b"], "o-a", true), ["o-b", "o-a"]);
+assert.deepEqual(wiring.crBytesOwnersAfter(["o-b", "o-a"], "o-a", false), ["o-b"]);
+assert.match(providerSrc, /const flagged = !!owner && Array\.isArray\(list\) && list\.includes\(owner\);\s*void vscode\.commands\.executeCommand\("setContext", CR_BYTES_CONTEXT_KEY, flagged\);/);
+ok("commands: the delete command is the listed switch-off exception, gated on exactly 'bytes are stored'; planted variants are caught");
 
 // ── MCP tools: granted and registered only with the switch on ───────────────
 const adult = { game: { template_tier: "website" }, sdk_tools: { browser: true }, minor_cohort: false };

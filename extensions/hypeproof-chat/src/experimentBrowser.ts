@@ -42,8 +42,10 @@ export interface PageRecord {
   /** The agent step during which it was captured, or null outside any step. */
   step: number | null;
   /**
-   * Captured during an EARLIER agent request (CR-08). Its step number belonged to that
-   * request, so it is cleared: "단계 N" always means a step of the request now running.
+   * Captured during a step of an EARLIER agent request (CR-08). Its step number belonged to
+   * that request, so it is cleared: "단계 N" always means a step of the request now running.
+   * A record captured outside any agent step (the student clicking between requests) is
+   * never marked: no agent request caused it, and it is still this page's failure.
    */
   earlierRequest?: true;
 }
@@ -193,7 +195,7 @@ export class PageEventLog {
   records(generation: string | null = this.generation): PageRecord[] {
     if (!generation) return [];
     return (this.byGeneration.get(generation)?.records ?? []).map(({ turn, ...r }) =>
-      turn === this.turn ? r : { ...r, step: null, earlierRequest: true as const },
+      turn === this.turn || r.step === null ? r : { ...r, step: null, earlierRequest: true as const },
     );
   }
 
@@ -703,7 +705,9 @@ export function observationText(o: Observation): string {
  * a failure, and neither is a record of an earlier request (it stays in the observation,
  * marked "이전 요청").
  */
-export function failuresOf(records: readonly PageRecord[]): Array<{ step: number | null; kind: PageRecordKind; message: string }> {
+export function failuresOf(
+  records: ReadonlyArray<Pick<PageRecord, "kind" | "level" | "message" | "step" | "earlierRequest">>,
+): Array<{ step: number | null; kind: PageRecordKind; message: string }> {
   return records
     .filter((r) => !r.earlierRequest)
     .filter((r) => r.kind === "exception" || r.kind === "network" || r.level === "error" || r.level === "assert")
@@ -1037,8 +1041,9 @@ export class CrExecutor {
    * agent took for THIS request (CR-08). With the switch on one executor outlives turns
    * (proxyTurnBrowser), and without this the third step of a second request read
    * "단계 15" in the app (in-app CR-T08, 2026-10-01). Refs, guard and logs are kept, but
-   * records captured before this request lose their step number and read "이전 요청", so an
-   * earlier request's step 3 is never reported as this request's step 3.
+   * records captured during an earlier request's steps lose their step number and read
+   * "이전 요청", so an earlier request's step 3 is never reported as this request's step 3.
+   * Records captured between requests (no step) stay failures of this page.
    */
   newTurn(): void {
     this.step = 0;
