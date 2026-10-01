@@ -166,3 +166,83 @@ export async function publishWorld(input: PublishInput): Promise<PublishResult> 
     displayName: body.displayName ?? "",
   };
 }
+
+// ── Publish for User Test (cr-publish #1393; CR-17–CR-19, CR-39, CR-73) ─────────
+//
+// The second publish path of this one module, beside `publishWorld`: a chosen product
+// version goes to the Service (`/v1/curriculum/*`) as an immutable, content-addressed test
+// version served on the project's own test origin (recon §6). The Lab gallery route is not
+// used for it: its sandboxed opaque origin cannot keep a participant pseudonym or send
+// events. Same discipline as `publishWorld`: identity comes from the token alone, a failure
+// is never swallowed, and the student reads Korean words, not status codes.
+
+/** The Service's curriculum base from the configured proxy URL (`…/v1` → `…/v1/curriculum`). */
+export function curriculumBase(proxyUrl: string): string {
+  const v = proxyUrl.trim().replace(/\/+$/, "");
+  return `${/\/v1$/.test(v) ? v : `${v}/v1`}/curriculum`;
+}
+
+export type CurriculumResult<T> =
+  | { ok: true; status: number; body: T }
+  | { ok: false; status: number; code: string; message: string; detail?: Record<string, unknown> };
+
+/** Korean words for the Service's refusal codes (the code stays on the result for the record). */
+const CURRICULUM_MESSAGES: Record<string, string> = {
+  not_found: "이 프로젝트를 찾지 못했거나, 이 수업에서는 사용자 테스트 공개를 쓸 수 없어요.",
+  expiry_required: "링크를 언제까지 열어 둘지 골라 주세요.",
+  invalid_expiry: "링크 기간은 지금부터 90일 안에서 골라 주세요.",
+  invalid_channel: "채널 이름은 40자까지 쓸 수 있어요.",
+  secret_found: "비밀값처럼 보이는 내용이 있어 공개하지 않았어요.",
+  version_digest_mismatch: "공개한 버전의 파일은 바꿀 수 없어요. 고친 파일은 새 버전으로 공개돼요.",
+  file_digest_mismatch: "공개한 버전의 파일은 바꿀 수 없어요. 고친 파일은 새 버전으로 공개돼요.",
+  excluded_path: "점(.)으로 시작하는 파일이나 node_modules 는 공개하지 않아요.",
+  hypothesis_required: "이 테스트로 확인하려는 가설을 적어 주세요.",
+  hypothesis_unresolved: "고른 가설을 이 프로젝트에서 찾지 못했어요.",
+  version_unresolved: "이 버전이 아직 올라가지 않았어요. 다시 공개해 주세요.",
+  invalid_experiment: "질문, 방법, 성공 기준을 모두 적어 주세요.",
+  test_origin_unavailable: "공개 주소가 아직 준비되지 않았어요. 강사에게 알려 주세요.",
+  experiment_not_running: "끝난 실험에는 새 링크를 만들 수 없어요.",
+  revoked: "이 HypeProof 코드는 더 이상 쓸 수 없어요.",
+  not_in_roster: "등록된 참가자가 아니에요. 강사에게 알려 주세요.",
+};
+
+export async function curriculumRequest<T>(input: { base: string; token: string; fetchImpl?: typeof fetch }, method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<CurriculumResult<T>> {
+  const doFetch = input.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await doFetch(`${input.base.replace(/\/+$/, "")}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${input.token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (err) {
+    return { ok: false, status: 0, code: "network", message: `인터넷에 연결되지 않았어요 (${err instanceof Error ? err.message : String(err)})` };
+  }
+  let json: Record<string, unknown> = {};
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* status alone below */
+  }
+  if (!res.ok) {
+    const error = (json.error ?? {}) as Record<string, unknown>;
+    const code = String(error.code ?? error.type ?? `http_${res.status}`);
+    return { ok: false, status: res.status, code, message: CURRICULUM_MESSAGES[code] ?? `공개하지 못했어요 (${res.status})`, detail: error };
+  }
+  return { ok: true, status: res.status, body: json as T };
+}
+
+/** Upload one published file set (R4) as a test version of the Project. Same bytes, same id. */
+export function publishTestVersion(
+  input: { base: string; token: string; fetchImpl?: typeof fetch },
+  projectId: string,
+  set: { id: string; entry: string; files: Array<{ path: string; sha256: string; bytes: number; data: Uint8Array }>; manifest_added: string[] },
+  verificationReport?: string,
+) {
+  return curriculumRequest<{ version: { id: string }; created: boolean }>(input, "PUT", `/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(set.id)}`, {
+    entry_html: set.entry,
+    ...(set.manifest_added.length ? { manifest_added: set.manifest_added } : {}),
+    ...(verificationReport ? { verification_report: verificationReport } : {}),
+    files: set.files.map((f) => ({ path: f.path, sha256: f.sha256, bytes: f.bytes, data: Buffer.from(f.data).toString("base64") })),
+  });
+}

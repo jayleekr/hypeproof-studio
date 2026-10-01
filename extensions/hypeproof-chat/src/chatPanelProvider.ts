@@ -34,7 +34,9 @@ import {
   withCoachSeatLock,
 } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { PublishSession } from "./publishSession";
+import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
   originOfUrl,
@@ -68,6 +70,8 @@ import {
   clearStoredResults,
   CR_BYTES_CONTEXT_KEY,
   CR_BYTES_OWNERS_STATE,
+  CR_PROJECTS_STATE,
+  crAllowedOrigins,
   crBytesOwner,
   crBytesOwnersAfter,
   type BlobSink,
@@ -660,6 +664,89 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.postVerifyState(r.ok ? {} : { error: refusalText(r.code) });
   }
 
+  // ── Publish for User Test (cr-publish, #1393) ─────────────────────────────
+  /** The signed-in person's key for their Project id (crBytesOwner: a digest, never the identity). */
+  private crPublishOwner: string | null = null;
+  private crProjects(): Record<string, { id?: string; origin?: string | null }> {
+    const v = this.context.workspaceState.get<unknown>(CR_PROJECTS_STATE);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, { id?: string; origin?: string | null }>) : {};
+  }
+  private async setCrProject(patch: { id?: string; origin?: string | null }): Promise<void> {
+    if (!this.crPublishOwner) return;
+    const all = this.crProjects();
+    const next = { ...(all[this.crPublishOwner] ?? {}), ...patch };
+    if (!next.id) delete all[this.crPublishOwner];
+    else all[this.crPublishOwner] = next;
+    await this.context.workspaceState.update(CR_PROJECTS_STATE, all);
+  }
+  /** "사용자 테스트용으로 공개": the session over the preview's files, the record and the Service. */
+  private readonly publishSession = new PublishSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: async () => {
+      const token = (await this.context.secrets.get(TOKEN_KEY)) ?? null;
+      this.crPublishOwner = token ? crBytesOwner(token) : null;
+      return token;
+    },
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    root: () => this.liveServer.currentRoot() ?? null,
+    entry: () => {
+      const base = this.liveServer.currentUrl();
+      return base ? new URL(base).pathname || "/" : null;
+    },
+    events: async () => (await this.verifyRecorder())?.events() ?? [],
+    projectId: () => (this.crPublishOwner ? this.crProjects()[this.crPublishOwner]?.id : undefined),
+    setProjectId: (id) => this.setCrProject(id ? { id } : { id: undefined, origin: null }),
+    rememberedOrigin: () => (this.crPublishOwner ? this.crProjects()[this.crPublishOwner]?.origin ?? null : null),
+    rememberOrigin: (origin) => this.setCrProject({ origin }),
+    week: () => {
+      const w = this.cachedProfile?.lesson?.content?.learning?.week;
+      return typeof w === "number" ? w : null;
+    },
+    defaultTitle: () => vscode.workspace.workspaceFolders?.[0]?.name ?? "내 제품",
+    qr: qrDataUrl,
+  });
+
+  /** Post the publish panel state (null hides it with the switch off). */
+  private async postPublishState(extra: { error?: string; errorLines?: string[]; shareUrl?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "publishState", view: await this.publishSession.view(), ...extra });
+  }
+
+  /** CR-17 — the "Publish for user test" command: re-checks the served switch, then opens the panel. */
+  async publishTestVersion(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 사용자 테스트 공개를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postPublishState();
+  }
+
+  /** One publish action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handlePublishMessage(msg: { type: "publishOpen"; manifest?: string[] } | { type: "publishSubmit"; form: import("./publishView").PublishForm } | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number } | { type: "publishRevoke"; linkId: string }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, error: "이 수업에서는 사용자 테스트 공개를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "publishOpen") {
+      if (msg.manifest !== undefined) this.publishSession.setManifest(msg.manifest);
+      return this.postPublishState();
+    }
+    if (msg.type === "publishSubmit") {
+      const r = await this.publishSession.submit(msg.form ?? ({} as import("./publishView").PublishForm));
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message, ...(r.lines ? { errorLines: r.lines } : {}) });
+    }
+    if (msg.type === "publishLink") {
+      const r = await this.publishSession.link(String(msg.experimentId ?? ""), { channel: msg.channel, expires_in_days: msg.expiresInDays });
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message });
+    }
+    const r = await this.publishSession.revoke(String(msg.linkId ?? ""));
+    return this.postPublishState(r.ok ? {} : { error: r.message });
+  }
+
   /** A coach call of a verify tool (both runtimes): the same session, the same answer (CR-03). */
   private async runVerifyTool(name: string, input: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError: boolean; observation?: undefined }> {
     const short = name.replace(/^mcp__hypeproof__/, "");
@@ -876,15 +963,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private crBrowserOptions(): CrBrowserOptions {
     return {
       enabled: () => this.isCurriculumRuntimeEnabled(),
-      allowedOrigins: () => {
-        const base = this.liveServer.currentUrl();
-        try {
-          return base ? [new URL(base).origin] : [];
-        } catch {
-          return [];
-        }
-      },
+      // CR-11 — the live preview, plus the published test origin of the student's own Project (cr-publish).
+      allowedOrigins: () => crAllowedOrigins(this.liveServer.currentUrl(), this.publishSession.publishedOrigins()),
       artifactVersion: async (url: string) => {
+        // cr-publish — a page on the Project's published test origin is the version its link pins.
+        const published = this.publishSession.publishedArtifactVersion(url);
+        if (published) return published;
         const root = this.liveServer.currentRoot();
         if (!root) throw new Error("미리보기 서버가 꺼져 있어요");
         const u = new URL(url);
@@ -2960,6 +3044,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "verifyFix":
         // cr-verify — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
         await this.handleVerifyMessage(msg);
+        break;
+      case "publishOpen":
+      case "publishSubmit":
+      case "publishLink":
+      case "publishRevoke":
+        // cr-publish — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handlePublishMessage(msg);
         break;
       case "clearHistory":
         void this.clearHistory();

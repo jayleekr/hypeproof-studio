@@ -463,3 +463,31 @@ export function proxyTurnBrowser<B extends { dispose(): Promise<void> }>(
   const browser = fresh();
   return { browser, release: () => browser.dispose() };
 }
+
+/** workspaceState: each signed-in person's Project id and its test origin, keyed by crBytesOwner (cr-publish). */
+export const CR_PROJECTS_STATE = "hypeproof-chat.crProjects";
+
+// ── CR-11: the origins an agent action or a runner step may act on ──────────
+
+/**
+ * The live preview's origin, plus the published test origin of the student's own Project
+ * (cr-publish #1393). Another project's origin is never in the list, so `checkAgentOrigin`
+ * refuses it with its reason before any CDP call. Anything that is not a plain http(s)
+ * origin is dropped.
+ */
+export function crAllowedOrigins(liveUrl: string | null | undefined, published: readonly string[]): string[] {
+  const out: string[] = [];
+  const add = (v: string, exact: boolean) => {
+    try {
+      const u = new URL(v);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return;
+      if (exact && u.origin !== v.replace(/\/+$/, "")) return;
+      out.push(u.origin);
+    } catch {
+      /* not a URL: not an origin */
+    }
+  };
+  if (liveUrl) add(liveUrl, false);
+  for (const o of published) add(o, true);
+  return [...new Set(out)];
+}

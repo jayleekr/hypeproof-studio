@@ -86,11 +86,11 @@ export interface CrSurfaceInventory {
 export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
 
 export const CR_SURFACES: CrSurfaceInventory = {
-  // cr-verify adds "Test my product" (CR-12).
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct"],
+  // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion"],
   mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
-  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix"],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke"],
   // cr-verify adds no Worker route. cr-publish adds the Publish for User Test routes
   // (worker/src/routes/curriculum.ts `CURRICULUM_ROUTES`) and the test origin's.
   workerRoutes: [

@@ -373,6 +373,11 @@ export type WebviewMessage = (
   | { type: "verifyStart"; requestId: string; criteria: Array<{ text: string; proposed_by: "student" | "ai"; confirmed: boolean; adopted_from?: string }> }
   | { type: "verifyRetest" }
   | { type: "verifyFix"; requestId: string; criterionId: string; text: string }
+  // cr-publish — "Publish for user test" (CR-17–CR-22, CR-39, CR-73; CR switch only, re-checked by the host).
+  | { type: "publishOpen"; manifest?: string[] }
+  | { type: "publishSubmit"; form: import("./publishView").PublishForm }
+  | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number }
+  | { type: "publishRevoke"; linkId: string }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -519,6 +524,9 @@ export type HostMessage = (
   // sentence the panel sends next through the normal send path (the coach context rides
   // with it, model-only). `error`: why the last action was refused.
   | { type: "verifyState"; view: import("./verifyView").VerifyView | null; sendText?: string; requestId?: string; error?: string }
+  // cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden). `error`/`errorLines`: why the
+  // last action was refused (the file and line of a refused set); `shareUrl`: the link just made.
+  | { type: "publishState"; view: import("./publishView").PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again

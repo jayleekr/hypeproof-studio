@@ -591,6 +591,191 @@ await test("test origin: unset means no link; production refuses a shared or htt
   }
 });
 
+// ── CR-T17 App half + CR-81 + CR-11 (published origin), the App's session against the real Service ──
+
+const core = await import("../src/lib/measurement-core/index.ts");
+const { PublishSession, publishTiming } = await import("../../extensions/hypeproof-chat/src/publishSession.ts");
+const { artifactVersionFor } = await import("../../extensions/hypeproof-chat/src/artifactVersion.ts");
+const { crAllowedOrigins } = await import("../../extensions/hypeproof-chat/src/crHostWiring.ts");
+const { checkAgentOrigin } = await import("../../extensions/hypeproof-chat/src/experimentBrowser.ts");
+const { makeCtx } = await import("./harness/index.mjs");
+const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } = await import("node:fs");
+const { tmpdir } = await import("node:os");
+const { join } = await import("node:path");
+
+/** Verdict events of one all-pass (or failing) verification run on `version`, as VerifySession records them. */
+function verificationEvents(version, status = "pass") {
+  const CTX = { week: 1, step_id: "test-my-product", task: "task-1", module_version: "unversioned" };
+  const b = { format: "hps-observation/2", scope: "synthetic-cr-publish", session: "s1", program: "p1", events: [] };
+  let n = 0;
+  const push = (e) => { const ev = { id: `e${++n}`, seq: n, task: "task-1", at: 1_000 + n, text: "", assistance: "unknown", ...e }; b.events.push(ev); core.validateObservation(b); return ev; };
+  const h = version.slice(7);
+  const PLAN = { steps: [{ action: "click", target: { role: "button", name: "주문 시작" } }], expect: [{ kind: "text", text: "버전 0" }] };
+  const SNAP = 'heading: 버전 0';
+  const verdict = core.evaluate({ step: 1, snapshot: SNAP, route: "/index.html", errors: [], screenshot: null, viewport: { width: 390, height: 800 } }, [{ kind: "text", text: status === "pass" ? "버전 0" : "결제 완료" }], [{ index: 0, action: "navigate", ok: true, message: "이동 완료" }]);
+  for (const text of ["첫 화면이 보인다", "주문이 된다", "오류가 없다"]) {
+    const c = push({ kind: "criterion_set", actor: "user", context: CTX, evidence_type: "criterion", source_state: "self_reported", student_text: text });
+    const last = [...b.events].reverse().find((e) => e.kind === "artifact");
+    if (last?.sha256 !== h) push({ kind: "artifact", text: core.versionArtifactText({ id: version, entry: "index.html", files: [] }), sha256: h });
+    const tool_id = `verify-run-1-${c.id}`;
+    push({ kind: "tool_request", text: "verify_criterion", tool_id, sha256: h });
+    const result = push({ kind: "tool_result", tool_id, outcome: "success", sha256: h, artifact_version: version, text: core.verifyResultText({ format: "hps-verify-result/1", run_id: "run-1", criterion_id: c.id, criterion_text: text, artifact_version: version, tested_at: 5_000 + n, plan: PLAN, verdict }) });
+    push({ kind: core.testEventKind(b.events, c.id, verdict.status, { retest: false, versionHex: h }), actor: "ai", context: CTX, evidence_type: "action", source_state: "real", criterion_ref: c.id, artifact_after: h, outcome: core.outcomeOf(verdict.status), result_ref: result.id });
+  }
+  return b.events;
+}
+
+function workspace(files) {
+  const root = mkdtempSync(join(tmpdir(), "cr-publish-ws-"));
+  for (const [p, c] of Object.entries(files)) {
+    mkdirSync(join(root, p, ".."), { recursive: true });
+    writeFileSync(join(root, p), c);
+  }
+  return root;
+}
+
+function appSession(f, root, { events = [], switchOn = () => true } = {}) {
+  const calls = [];
+  let project;
+  let origin = null;
+  const session = new PublishSession({
+    switchOn,
+    token: async () => f.student(),
+    base: () => "https://service.test/v1/curriculum",
+    fetchImpl: async (url, init) => {
+      calls.push({ method: init?.method ?? "GET", path: new URL(url).pathname, body: init?.body ? JSON.parse(init.body) : undefined });
+      return f.app.fetch(new Request(url, init), f.env, makeCtx());
+    },
+    root: () => root,
+    entry: () => "/index.html",
+    events: async () => events,
+    projectId: () => project,
+    setProjectId: async (id) => { project = id; },
+    rememberedOrigin: () => origin,
+    rememberOrigin: async (o) => { origin = o; },
+    week: () => 1,
+    defaultTitle: () => "키오스크",
+    qr: (u) => `qr:${u}`,
+  });
+  return { session, calls, project: () => project };
+}
+
+const FORM = { hypothesis: "처음 쓰는 사람도 혼자 주문할 수 있다", question: "도움 없이 주문을 마칠 수 있나?", method: "task_test", success_criteria: ["5명 중 3명 완료"], channel: "학교 게시판", expires_in_days: 3 };
+
+await test("CR-T17 App half (synthetic, real Service): the publish action shows verified only for an all-pass report bound to this version; .env, dot-files, unreachable files and an out-of-root symlink are never uploaded; a planted key refuses before any request", async () => {
+  const f = await fixture();
+  const root = workspace({ ...V0, ".env": "OPENAI_API_KEY=sk-should-never-leave", ".hidden.js": "x", "notes.txt": "not referenced", "data/menu.json": "[]" });
+  try {
+    const version = await artifactVersionFor(root, "/index.html");
+    // CR-81 on the publish panel: no report → not verified; a report bound to another version → not verified.
+    const none = appSession(f, root);
+    assert.equal((await none.session.view()).verification.state, "not_verified");
+    const other = appSession(f, root, { events: verificationEvents("sha256:" + "9".repeat(64)) });
+    assert.equal((await other.session.view()).verification.state, "needs_recheck");
+    const failing = appSession(f, root, { events: verificationEvents(version.id, "fail") });
+    assert.equal((await failing.session.view()).verification.state, "failed");
+    // Positive: three passes bound to exactly this version → verified, and the publish carries that report.
+    const a = appSession(f, root, { events: verificationEvents(version.id) });
+    const v = await a.session.view();
+    assert.deepEqual([v.version.id, v.verification.state], [version.id, "verified"], "the set id equals the verified version id (no manifest)");
+    assert.deepEqual(v.version.files.map((x) => x.path).sort(), ["app.js", "index.html", "style.css"]);
+    a.session.setManifest(["data/menu.json"]);
+    const withManifest = await a.session.view();
+    assert.deepEqual(withManifest.version.manifest_added, ["data/menu.json"]);
+    assert.notEqual(withManifest.version.id, version.id, "a manifest addition is another version, which needs its own verification");
+    a.session.setManifest([]);
+    const r = await a.session.submit(FORM);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const put = a.calls.find((c) => c.method === "PUT");
+    assert.deepEqual(put.body.files.map((x) => x.path).sort(), ["app.js", "index.html", "style.css"], "only the R4 set left the machine");
+    assert.equal(put.body.verification_report, "run-1");
+    assert.ok(!JSON.stringify(a.calls).includes("sk-should-never-leave"));
+    // The share link opens; the panel lists it with its QR.
+    assert.equal((await openEntry(f, r.share_url)).status, 200);
+    const after = await a.session.view();
+    assert.equal(after.experiments[0].links[0].qr, `qr:${r.share_url}`);
+    assert.equal(after.experiments[0].current_version, true);
+    // Manifest: a dot-file or a path outside the root is refused by name, before any upload.
+    for (const bad of [".env", "../outside.txt"]) {
+      const b2 = appSession(f, root);
+      const out = await b2.session.submit({ ...FORM, manifest: [bad] });
+      assert.equal(out.ok, false, bad);
+      assert.equal(b2.calls.filter((c) => c.method !== "GET").length, 0, `${bad}: nothing sent`);
+    }
+    // A planted key: refused before any request at all.
+    const keyed = workspace({ ...V0, "app.js": `const k = "${"AI" + "za"}${"Sy".padEnd(35, "Q")}";` });
+    const k = appSession(f, keyed);
+    const kr = await k.session.submit(FORM);
+    assert.equal(kr.ok, false);
+    assert.match(kr.lines.join(), /app\.js 1번째 줄 \(gemini_key\)/);
+    assert.equal(k.calls.length, 0, "the scan refuses before any request");
+    // A symlink the entry references that resolves outside the root: refused, nothing uploaded.
+    const linked = workspace({ ...V0, "index.html": PAGE("버전 0", '<img src="photo.png">') });
+    const outside = mkdtempSync(join(tmpdir(), "cr-publish-outside-"));
+    writeFileSync(join(outside, "secret.png"), "outside bytes");
+    symlinkSync(join(outside, "secret.png"), join(linked, "photo.png"));
+    const l = appSession(f, linked);
+    const lr = await l.session.submit(FORM);
+    assert.equal(lr.ok, false);
+    assert.match(lr.message, /photo\.png/);
+    assert.equal(l.calls.filter((c) => c.method !== "GET").length, 0);
+    // Switch off: the session refuses without a request.
+    const off = appSession(f, root, { switchOn: () => false });
+    assert.equal((await off.session.submit(FORM)).ok, false);
+    assert.equal((await off.session.view()).available, false);
+    assert.equal(off.calls.length, 0);
+    rmSync(outside, { recursive: true, force: true });
+    for (const d of [keyed, linked]) rmSync(d, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    f.close();
+  }
+});
+
+await test("CR-T11 published-origin cases: agent actions and runner steps may act on the project's own test origin; another project's origin is refused with a reason", async () => {
+  const f = await fixture();
+  const root = workspace(V0);
+  try {
+    const mine = appSession(f, root);
+    assert.equal((await mine.session.submit(FORM)).ok, true);
+    await mine.session.view();
+    const own = mine.session.publishedOrigins();
+    assert.equal(own.length, 1);
+    const allowed = crAllowedOrigins("http://127.0.0.1:5173/index.html", own);
+    assert.deepEqual(checkAgentOrigin(`${own[0]}/l/AAAAAAAAAAAAAAAAAAAAAA/index.html`, allowed), { ok: true }, "positive: the project's own published origin");
+    assert.deepEqual(checkAgentOrigin("http://127.0.0.1:5173/index.html", allowed), { ok: true }, "the live preview stays allowed");
+    // Another team's project, with its own published origin.
+    const otherRoot = workspace(V1);
+    const theirs = appSession({ ...f, student: () => f.student("cr-b") }, otherRoot);
+    assert.equal((await theirs.session.submit(FORM)).ok, true);
+    await theirs.session.view();
+    const foreign = theirs.session.publishedOrigins()[0];
+    assert.notEqual(foreign, own[0]);
+    const refused = checkAgentOrigin(`${foreign}/l/AAAAAAAAAAAAAAAAAAAAAA/index.html`, allowed);
+    assert.equal(refused.ok, false);
+    assert.match(refused.reason, /범위 밖이라 거절/);
+    assert.equal(checkAgentOrigin("https://example.com/", allowed).ok, false, "an external origin is refused");
+    // Control: a list that let any test origin through would allow the foreign one.
+    assert.equal(checkAgentOrigin(`${foreign}/x`, [...allowed, foreign]).ok, true);
+    assert.deepEqual(crAllowedOrigins(null, ["javascript:alert(1)", "http://x.test.invalid/path"]), [], "non-origins are dropped");
+    // A browser result on a published page names the version its link pins (CR-10 on a published origin).
+    const st = (await mine.session.view()).experiments[0];
+    const ver = mine.session.publishedArtifactVersion(st.links[0].share_url + "index.html");
+    assert.equal(ver.id, st.product_version_id);
+    assert.equal(mine.session.publishedArtifactVersion(`${foreign}/l/AAAAAAAAAAAAAAAAAAAAAA/index.html`), null);
+    rmSync(otherRoot, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    f.close();
+  }
+});
+
+await test("CR-64 timing instrument: a publish under 10 s is a pass; a planted slow upload is a recorded miss with its cause", () => {
+  assert.deepEqual(publishTiming(0, 3_200, { scan: 100, upload: 2_000, link: 300 }), { ms: 3_200, ok: true, cause: null });
+  assert.deepEqual(publishTiming(0, 12_500, { scan: 100, upload: 11_900, link: 300 }), { ms: 12_500, ok: false, cause: "upload 11900ms" });
+  assert.equal(publishTiming(0, 10_000, {}).ok, false, "exactly 10 s is not under 10 s");
+});
+
 if (mf) await mf.dispose();
 if (failed) {
   console.error(`\n${failed} cr-publish check(s) failed`);
