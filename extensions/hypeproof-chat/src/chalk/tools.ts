@@ -455,8 +455,10 @@ export async function execGeneratorBrief(
       const code = typeof b?.code === "string" ? b.code : null;
       if (e.status === 409) {
         if (code === "inputs_missing") {
-          const msg = typeof b?.error === "string" ? b.error : "입력값이 없습니다. chalk_set_inputs로 먼저 입력값을 설정하세요.";
-          return { error: "inputs_missing", message: msg };
+          const serverMsg = typeof b?.error === "string" ? b.error : "";
+          const hint = "chalk_set_inputs로 먼저 입력값을 설정하세요.";
+          const message = serverMsg ? `${serverMsg} — ${hint}` : `입력값이 없습니다. ${hint}`;
+          return { error: "inputs_missing", message };
         }
         if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
         if (code === "knowledge_incomplete") return { error: "knowledge_incomplete", message: "지식이 불완전합니다. 지식 버전을 확인하세요." };
