@@ -2167,11 +2167,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Shared by the live_server preview path and the coach's
    * `live_preview_start` MCP tool (#282 P2 slice 2).
    */
-  async startLivePreview(): Promise<string | null> {
+  async startLivePreview(filePath?: string): Promise<string | null> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return null;
     try {
-      const url = await this.liveServer.ensure(root);
+      const base = await this.liveServer.ensure(root);
+      // When a specific file path is given, verify the file is accessible before opening.
+      // Returns "file_not_found" sentinel so the caller can surface a clear failure.
+      const targetUrl = filePath ? `${base}/${filePath}` : base;
+      if (filePath) {
+        try {
+          const res = await fetch(targetUrl, { method: "HEAD", signal: AbortSignal.timeout(3000) });
+          if (!res.ok) return "file_not_found";
+        } catch {
+          return "file_not_found";
+        }
+      }
       // Avoid stacking preview tabs on the right. The live server binds a fresh
       // random port on each (re)start (app relaunch, root change), so the URL
       // can differ from a previously-opened tab — an exact-URL match alone then
@@ -2182,7 +2193,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const tabs = vscode.window.browserTabs ?? [];
       const isPreviewTab = (u?: string): boolean =>
         !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
-      const current = tabs.find((t) => t.url?.startsWith(url));
+      const current = tabs.find((t) => t.url?.startsWith(filePath ? targetUrl : base));
       // #519 — below, the preview tab is pinned as the coach's drive target. Leaving
       // it as `?.` means that when live_preview_start is the first tool call (no
       // instance yet) the pin is silently lost and the screenshot that follows falls
@@ -2214,13 +2225,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // would open the preview next to that empty group, leaving a blank pane
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
-        const opened = await vscode.window.openBrowserTab(url, {
+        const opened = await vscode.window.openBrowserTab(targetUrl, {
           viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
       }
-      return url;
+      return targetUrl;
     } catch {
       return null;
     }

@@ -22,6 +22,7 @@ REVIEW_PROFILE_ARG=""
 REVIEW_COHORT_ARG=""
 NO_APP=0
 AFTER_SCRIPT=""
+DEV_APP_PID=""
 
 if [[ -z "$INPUT" ]]; then
   echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app]" >&2
@@ -104,7 +105,11 @@ cleanup() {
     wait "$SERVER_PID" 2>/dev/null || true
   fi
   pkill -f "wrangler dev.*--port $WRANGLER_PORT" 2>/dev/null || true
-  pkill -f "HypeProof Studio Dev.app/Contents/" 2>/dev/null || true
+  # Kill only the Dev app we launched (by recorded PID), never by process name.
+  if [[ -n "${DEV_APP_PID:-}" ]] && kill -0 "$DEV_APP_PID" 2>/dev/null; then
+    echo "Closing Dev app (PID $DEV_APP_PID)..."
+    kill "$DEV_APP_PID" 2>/dev/null || true
+  fi
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
   [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
@@ -418,11 +423,14 @@ else
   # Never write it to local-participant-token.txt (TOKEN_KEY student slot).
 
   T5=$(ms)
-  python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
+  DEV_APP_RAW="$(python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
     --provider "$PROVIDER" \
-    --service local 2>&1
+    --service local \
+    ${HPS_REVIEW_CDP_PORT:+--cdp-port "$HPS_REVIEW_CDP_PORT"} 2>&1)"
+  echo "$DEV_APP_RAW"
+  DEV_APP_PID="$(echo "$DEV_APP_RAW" | grep -oE 'Development process started: [0-9]+' | grep -oE '[0-9]+$' || true)"
   T5_END=$(ms)
-  echo "studio-dev.py run done in $(( T5_END - T5 ))ms"
+  echo "studio-dev.py run done in $(( T5_END - T5 ))ms (dev app PID: ${DEV_APP_PID:-unknown})"
 
   # ── Step 6: instructions ────────────────────────────────────────────────────
   echo ""

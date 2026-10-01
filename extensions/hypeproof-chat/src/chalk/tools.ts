@@ -66,7 +66,11 @@ export class IssuerHttpError extends Error {
   readonly status: number;
   readonly body: unknown;
   constructor(status: number, body: unknown) {
-    super(`서버 오류 ${status}`);
+    const b = body as Record<string, unknown> | null;
+    const code = typeof b?.code === "string" ? b.code : "";
+    const errMsg = typeof b?.error === "string" ? b.error : "";
+    const detail = [code, errMsg].filter(Boolean).join(": ");
+    super(`서버 오류 ${status}` + (detail ? ` (${detail})` : ""));
     this.name = "IssuerHttpError";
     this.status = status;
     this.body = body;
@@ -332,6 +336,23 @@ async function fetchExpectedRevision(
   }
 }
 
+/**
+ * knowledge_version 자동 결정. 우선순위:
+ * 1. HTML meta 태그 `<meta name="chalk:knowledge-version" content="N">`
+ * 2. GET /admin/chalk/knowledge/versions 최신 버전
+ */
+async function resolveKnowledgeVersion(ctx: ChalkToolContext, html: string): Promise<number> {
+  const metaMatch = html.match(/<meta\s+name="chalk:knowledge-version"\s+content="(\d+)"/i);
+  if (metaMatch) {
+    const v = Number(metaMatch[1]);
+    if (Number.isInteger(v) && v >= 1) return v;
+  }
+  const resp = await issuerFetch(ctx, `/admin/chalk/knowledge/versions`) as { versions?: Array<{ version: number }> };
+  const latest = resp?.versions?.[0]?.version;
+  if (typeof latest === "number" && Number.isInteger(latest) && latest >= 1) return latest;
+  throw new Error("knowledge_version을 결정할 수 없습니다. 지식이 적재되지 않았을 수 있습니다.");
+}
+
 async function hasLocalChanges(filePath: string): Promise<boolean> {
   try {
     const stat = await nodeFs.stat(filePath);
@@ -365,6 +386,15 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
       requirements: { type: "string", description: "기타 요구사항 또는 제약 (빈 문자열 허용)" },
       format: { type: "string", enum: ["workshop", "track"], description: "강의 형식" },
       family_session: { type: "boolean", description: "가족 세션 여부 (선택)" },
+      audience_tier: {
+        type: "string",
+        enum: ["lv1", "lv2", "adult"],
+        description: "학습자 연령 층 (선택). lv1=11~13세, lv2=14~16세, adult=성인 (매핑 미확정; 강사 직접 선택)",
+      },
+      duration_min: {
+        type: "integer",
+        description: "수업 길이 (분, 선택). 양의 정수.",
+      },
       vocab: {
         type: "object",
         properties: {
@@ -493,16 +523,40 @@ export async function execOpenCourse(
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
 
   const qs = file ? `?file=${encodeURIComponent(file)}` : "";
-  const result = await issuerFetch(
-    ctx,
-    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan${qs}`,
-  ) as { html?: string; [k: string]: unknown };
 
-  const html = result?.html;
+  let planResult: { html?: string; [k: string]: unknown } | null = null;
+  let fromSkeleton = false;
+
+  try {
+    planResult = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan${qs}`,
+    ) as { html?: string; [k: string]: unknown };
+  } catch (e) {
+    if (e instanceof IssuerHttpError && e.status === 404) {
+      // Plan not saved yet — fetch skeleton from brief endpoint.
+      const briefQs = file ? `?file=${encodeURIComponent(file)}` : "";
+      const brief = await issuerFetch(
+        ctx,
+        `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief${briefQs}`,
+      ) as { skeleton_html?: string; [k: string]: unknown };
+      const skeletonHtml = typeof brief?.skeleton_html === "string" ? brief.skeleton_html : null;
+      if (!skeletonHtml || !ctx.cwd) {
+        return { error: "plan_not_found", message: "계획서가 없고 스켈레톤 HTML도 없습니다. chalk_generator_brief를 먼저 호출하세요." };
+      }
+      planResult = { html: skeletonHtml };
+      fromSkeleton = true;
+    } else {
+      throw e;
+    }
+  }
+
+  const html = planResult?.html;
   // cwd 없거나 html 없으면 원격 응답만 반환
-  if (typeof html !== "string" || !ctx.cwd) return result;
+  if (typeof html !== "string" || !ctx.cwd) return planResult;
 
   const dest = workingCopyPath(ctx.cwd, course, file);
+  const webPath = nodePath.relative(ctx.cwd, dest);
 
   if (await hasLocalChanges(dest)) {
     const confirmed = await ctx.requestConfirmation?.(
@@ -513,7 +567,11 @@ export async function execOpenCourse(
 
   await nodeFs.mkdir(nodePath.dirname(dest), { recursive: true });
   await nodeFs.writeFile(dest, html, "utf8");
-  return { ...result, localPath: dest };
+
+  if (fromSkeleton) {
+    return { created_from: "skeleton", localPath: dest, webPath };
+  }
+  return { ...planResult, localPath: dest, webPath };
 }
 
 // chalk_save_plan — PUT /admin/chalk/cohorts/:cohort/courses/:course/plan
@@ -548,24 +606,29 @@ export async function execSavePlan(
     throw new Error(`로컬 작업 사본(${src})을 읽을 수 없습니다. chalk_open_course로 먼저 열어보세요.`);
   }
 
-  // knowledge_version 등 모델이 넘긴 추가 필드는 그대로 전달한다.
-  const { cohort: _c, course: _co, file: _f, ...extras } = input as Record<string, unknown>;
+  // knowledge_version은 모델에게 맡기지 않고 도구 층이 직접 결정한다.
+  // HTML meta → GET /versions latest 순서로 시도.
+  const knowledge_version = await resolveKnowledgeVersion(ctx, html);
   const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
   const request_id = randomUUID().replace(/-/g, "");
   try {
     const result = await issuerFetch(
       ctx,
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
-      { method: "PUT", body: { html, file: file ?? "lesson", ...extras, expected_revision, request_id } },
+      { method: "PUT", body: { html, file: file ?? "lesson", knowledge_version, expected_revision, request_id } },
     ) as Record<string, unknown>;
     return result;
   } catch (e) {
     if (e instanceof IssuerHttpError) {
       const b = e.body as Record<string, unknown> | null;
       const code = typeof b?.code === "string" ? b.code : null;
+      const errMsg = typeof b?.error === "string" ? b.error : null;
       if (e.status === 409) {
         if (code === "revision_conflict") return { error: "revision_conflict", message: "버전 충돌이 발생했습니다. chalk_open_course로 최신 버전을 불러온 뒤 다시 시도하세요." };
         if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
+      }
+      if (e.status === 400) {
+        return { error: code ?? "invalid_request", message: errMsg ?? "잘못된 요청입니다. (HTTP 400)" };
       }
     }
     throw e;

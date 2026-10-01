@@ -177,7 +177,7 @@ def prepare(repo, base, state, service):
     return app
 
 
-def launch(app, state, local_runtime=None):
+def launch(app, state, local_runtime=None, cdp_port=None):
     executable = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleExecutable']
     env = dict(os.environ)
     # The launcher already has the developer shell environment. VS Code's
@@ -192,10 +192,14 @@ def launch(app, state, local_runtime=None):
     env['HPS_DEV_TOKEN_FILE'] = str(state / 'local-participant-token.txt')
     # HPS_DEV_ISSUER_TOKEN_FILE: forwarded from the caller when set (review-pr.sh writes it).
     # dict(os.environ) above already carries it; no explicit override needed.
+    cmd = [str(app / 'Contents/MacOS' / executable),
+           '--user-data-dir=' + str(state / 'user-data'), '--extensions-dir=' + str(state / 'extensions'),
+           '--new-window', '--skip-welcome', '--skip-release-notes', str(state / 'workspace')]
+    if cdp_port is not None:
+        # Bind remote debugging to loopback only. Not enabled by default.
+        cmd += [f'--remote-debugging-port={cdp_port}', '--remote-debugging-address=127.0.0.1']
     with (state / 'app.log').open('a') as log:
-        process = subprocess.Popen([str(app / 'Contents/MacOS' / executable),
-            '--user-data-dir=' + str(state / 'user-data'), '--extensions-dir=' + str(state / 'extensions'),
-            '--new-window', '--skip-welcome', '--skip-release-notes', str(state / 'workspace')],
+        process = subprocess.Popen(cmd,
             env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     time.sleep(3)
     if process.poll() is not None:
@@ -216,6 +220,8 @@ def main():
     parser.add_argument('--base-app', type=Path, default=Path('/Applications/HypeProof Studio.app'))
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--service', choices=['local', 'live'], default='local')
+    parser.add_argument('--cdp-port', type=int, default=None,
+                        help='Open CDP remote debugging port on 127.0.0.1 only. Default: off.')
     parser.add_argument('--provider', choices=['claude', 'codex', 'service'], default='claude',
                         help='Development funding: local Claude Code subscription (default), Codex subscription, or Service API.')
     args = parser.parse_args()
@@ -259,7 +265,7 @@ def main():
         with locked(state):
             app = prepare(REPO, args.base_app.resolve(), state, args.service)
             if args.action == 'run':
-                launch(app, state, local_runtime)
+                launch(app, state, local_runtime, cdp_port=args.cdp_port)
 
 
 if __name__ == '__main__':

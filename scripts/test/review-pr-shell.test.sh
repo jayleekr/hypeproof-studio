@@ -270,6 +270,30 @@ else
   fi
 fi
 
+# 31. Cleanup kills Dev app by recorded DEV_APP_PID, not by pkill name.
+if grep -q 'DEV_APP_PID' "$SCRIPT" && grep -qE 'kill.*DEV_APP_PID' "$SCRIPT"; then
+  if grep -qE 'pkill.*HypeProof Studio Dev' "$SCRIPT"; then
+    fail "cleanup: pkill by name still present alongside DEV_APP_PID (should use PID only)"
+  else
+    ok "cleanup: Dev app terminated via recorded DEV_APP_PID (not pkill by name)"
+  fi
+else
+  fail "cleanup: DEV_APP_PID recording or kill-by-PID not found in script"
+fi
+
+# 32. HPS_REVIEW_CDP_PORT absent → --cdp-port not passed unconditionally.
+# Every line containing --cdp-port must also contain HPS_REVIEW_CDP_PORT on the same line
+# (i.e., it must be inside the ${HPS_REVIEW_CDP_PORT:+...} conditional expansion).
+CDP_LINES_ALL="$(grep -n -- '--cdp-port' "$SCRIPT" 2>/dev/null || true)"
+CDP_LINES_UNCONDITIONAL="$(grep -n -- '--cdp-port' "$SCRIPT" 2>/dev/null | grep -v 'HPS_REVIEW_CDP_PORT' || true)"
+if [[ -z "$CDP_LINES_ALL" ]]; then
+  fail "CDP port: --cdp-port not found in script (gating code missing)"
+elif [[ -n "$CDP_LINES_UNCONDITIONAL" ]]; then
+  fail "CDP port: --cdp-port appears outside HPS_REVIEW_CDP_PORT conditional:"$'\n'"$CDP_LINES_UNCONDITIONAL"
+else
+  ok "CDP port: --cdp-port gated on HPS_REVIEW_CDP_PORT (absent env → not passed)"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]

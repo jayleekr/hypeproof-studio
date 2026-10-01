@@ -136,8 +136,12 @@ export interface BrowserMcpHost {
   openBrowser(url: string): Promise<BrowserOpenOutcome | void>;
   /** Capture the active integrated-browser tab; null when no tab / capture failed. */
   screenshot(): Promise<BrowserScreenshot | null>;
-  /** Ensure the #309 live server + open the browser; returns the URL or null. */
-  startLivePreview(): Promise<string | null>;
+  /**
+   * Ensure the #309 live server + open the browser; returns the URL or null.
+   * When `path` is given: opens `${base}/${path}` (verifies file exists first).
+   * Returns "file_not_found" when `path` is given but the file is missing at that URL.
+   */
+  startLivePreview(path?: string): Promise<string | null>;
   /**
    * #507 — 지금 **떠 있는** 라이브 서버의 주소 (안 떠 있으면 null). 시작시키지
    * 않는다 — "주소가 뭐냐"를 묻는 것이 서버를 켜는 부작용을 가지면 안 된다.
@@ -570,15 +574,35 @@ export function buildHypeproofMcpServer(
   const livePreviewStart = factory.tool(
     "live_preview_start",
     "학생 워크스페이스를 로컬 라이브 서버(127.0.0.1)로 서빙하고 통합 브라우저에서 연다. " +
-      "파일이 바뀌면 자동 새로고침된다. 브라우저까지 열리므로 뒤이어 browser_open 을 부를 필요가 없다.",
-    {},
-    async () => {
-      const url = await host.startLivePreview();
+      "파일이 바뀌면 자동 새로고침된다. 브라우저까지 열리므로 뒤이어 browser_open 을 부를 필요가 없다. " +
+      "path 를 주면 워크스페이스 루트 기준 상대 경로의 파일을 열고 그 파일이 존재하는지 먼저 확인한다.",
+    {
+      path: {
+        type: "string",
+        description:
+          "열 파일의 상대 경로 (워크스페이스 루트 기준, 예: chalk/lesson-01/lesson.html). " +
+          "생략하면 루트 URL 을 연다. chalk_open_course 의 webPath 를 그대로 넣는다.",
+      },
+    },
+    async ({ path: filePath }: { path?: string }) => {
+      const url = await host.startLivePreview(filePath);
       if (!url) {
         return withPageState(
           {
             content: [
               { type: "text", text: "라이브 프리뷰를 시작하지 못했어요 (작업 폴더가 없나요?)." },
+            ],
+            isError: true,
+          },
+          await readCurrentPage(host),
+        );
+      }
+      // path 가 주어졌을 때 URL 은 이미 해당 경로를 포함하므로 실패 결과도 명확하다.
+      if (filePath && url === "file_not_found") {
+        return withPageState(
+          {
+            content: [
+              { type: "text", text: `라이브 프리뷰를 시작했지만 파일이 없어요: ${filePath}. chalk_open_course를 먼저 호출하세요.` },
             ],
             isError: true,
           },
