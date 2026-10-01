@@ -3107,6 +3107,43 @@
       ]
     },
     {
+      "id": "ST-IMP-CR-SKILLS",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-EVIDENCE",
+        "ST-IMP-CR-MEMORY"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/skills/curriculum/registry.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/contract.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/rules.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/curriculum-v5.json"
+        },
+        {
+          "path": "worker/src/lib/curriculum/skill-run.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/skillSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/skillView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/SkillsPanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CR",
       "stage": "test",
       "owner": "jayleekr",
@@ -3115,7 +3152,8 @@
         "ST-DES-CR",
         "ST-IMP-CR-PUBLISH",
         "ST-IMP-CR-EVIDENCE",
-        "ST-IMP-CR-MEMORY"
+        "ST-IMP-CR-MEMORY",
+        "ST-IMP-CR-SKILLS"
       ],
       "sources": [
         {
@@ -3189,6 +3227,18 @@
         },
         {
           "path": "docs/testing/curriculum-runtime-2026-10-02-memory.md"
+        },
+        {
+          "path": "worker/test/cr-skills.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-skills.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/skills-app.spec.ts"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-skills.md"
         }
       ]
     },
