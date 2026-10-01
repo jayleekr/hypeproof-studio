@@ -1,14 +1,30 @@
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { StoragePort } from '../../../worker/src/lib/measurement-core/local-record.ts';
+
+/** The local record's directory under the extension's global storage: the local review
+ * (localReviewPanel.ts) and CR-10's browser-result bytes (chatPanelProvider.ts) share it. */
+export const LOCAL_RECORD_DIR = 'local-review-v1';
+
+/** In-process writers of one directory, chained: two callers in the same extension host
+ * (the local review and CR-10's browser-result bytes) wait for each other instead of the
+ * second one failing `storage_busy` against its own pid. Other processes still fail closed,
+ * and so does a call made from INSIDE a held lock (waiting there would deadlock). */
+const chains = new Map<string, Promise<unknown>>();
+const held = new AsyncLocalStorage<ReadonlySet<string>>();
 
 /** Private flat namespace. Complete files are fsynced before atomic publication.
  * Interrupted temporary writes are never listed as records. No network or eviction. */
 export class FileRecordStorage implements StoragePort {
   readonly root: string;
   private sizes: Map<string, number> | undefined;
+  /** File name → its key and value length, valid while the file's size and mtime are
+   * unchanged. A file name is the hash of its key, so a name never changes key; this only
+   * spares re-reading every record (screenshots included) to rebuild the size map. */
+  private readonly seen = new Map<string, { key: string; length: number; size: number; mtimeMs: number }>();
   constructor(root: string) { this.root = resolve(root); }
   async initialize() {
     if (this.sizes) return;
@@ -32,6 +48,27 @@ export class FileRecordStorage implements StoragePort {
     } finally { await handle.close(); }
   }
   async read(key: string) { await this.initialize(); return (await this.readFile(this.file(key)))?.value ?? null; }
+  /** Every record's key and value length, re-reading only files that changed since last seen. */
+  private async scan(): Promise<Map<string, number>> {
+    await this.initialize();
+    const out = new Map<string, number>();
+    const names = new Set<string>();
+    for (const name of await fs.readdir(this.root)) {
+      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+      const file = join(this.root, name);
+      let st;
+      try { st = await fs.lstat(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; throw e; }
+      names.add(name);
+      const hit = this.seen.get(name);
+      if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) { out.set(hit.key, hit.length); continue; }
+      const entry = await this.readFile(file);
+      if (!entry) continue;
+      this.seen.set(name, { key: entry.key, length: entry.value.length, size: st.size, mtimeMs: st.mtimeMs });
+      out.set(entry.key, entry.value.length);
+    }
+    for (const name of [...this.seen.keys()]) if (!names.has(name)) this.seen.delete(name);
+    return out;
+  }
   private async syncDirectory() {
     const dir = await fs.open(this.root, 'r');
     try { await dir.sync(); } finally { await dir.close(); }
@@ -48,35 +85,44 @@ export class FileRecordStorage implements StoragePort {
       else await fs.rename(temp, target);
       await this.syncDirectory();
       this.sizes?.set(key, value.length);
+      const st = await fs.lstat(target).catch(() => null);
+      if (st) this.seen.set(basename(target), { key, length: value.length, size: st.size, mtimeMs: st.mtimeMs });
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw Error('exists');
       throw e;
     } finally { await fs.unlink(temp).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
   }
   async list(prefix: string) {
-    if (this.sizes) return [...this.sizes.keys()].filter(k => k.startsWith(prefix)).sort();
-    await this.initialize();
-    const keys: string[] = [];
-    for (const name of await fs.readdir(this.root)) {
-      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
-      const entry = await this.readFile(join(this.root, name));
-      if (entry?.key.startsWith(prefix)) keys.push(entry.key);
-    }
-    return keys.sort();
+    const sizes = this.sizes ?? await this.scan();
+    return [...sizes.keys()].filter(k => k.startsWith(prefix)).sort();
   }
   async remove(key: string) {
     await this.initialize();
-    try { await fs.unlink(this.file(key)); await this.syncDirectory(); this.sizes?.delete(key); }
+    try { await fs.unlink(this.file(key)); this.seen.delete(basename(this.file(key))); await this.syncDirectory(); this.sizes?.delete(key); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   }
   async usageBytes(): Promise<number> {
-    if (this.sizes) return [...this.sizes.values()].reduce((sum, n) => sum + n, 0);
+    return this.usageOf('');
+  }
+  async usageOf(prefix: string): Promise<number> {
+    const sizes = this.sizes ?? await this.scan();
     let total = 0;
-    for (const key of await this.list('')) total += (await this.read(key))?.length || 0;
+    for (const [key, n] of sizes) if (key.startsWith(prefix)) total += n;
     return total;
   }
   /** Fail closed on competing Studio windows. A crashed owner's lock can be recovered. */
   async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const holding = held.getStore();
+    if (holding?.has(this.root)) return this.locked(fn);
+    const inLock = () => held.run(new Set([...(holding ?? []), this.root]), () => this.locked(fn));
+    const prior = chains.get(this.root) ?? Promise.resolve();
+    const run = prior.catch(() => undefined).then(inLock);
+    const tail = run.catch(() => undefined);
+    chains.set(this.root, tail);
+    try { return await run; }
+    finally { if (chains.get(this.root) === tail) chains.delete(this.root); }
+  }
+  private async locked<T>(fn: () => Promise<T>): Promise<T> {
     await this.initialize();
     const lock = join(this.root, '.writer');
     // Publish the lock only after owner metadata exists. Atomic directory rename
@@ -95,12 +141,10 @@ export class FileRecordStorage implements StoragePort {
       try { process.kill(owner, 0); throw Error('storage_busy'); }
       catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw Error('storage_busy'); }
       await fs.rm(lock, { recursive: true });
-      return this.exclusive(fn);
+      return this.locked(fn);
     }
     try {
-      const sizes = new Map<string, number>();
-      for (const key of await this.list('')) sizes.set(key, (await this.read(key))?.length || 0);
-      this.sizes = sizes;
+      this.sizes = await this.scan();
       return await fn();
     } finally { this.sizes = undefined; await fs.rm(lock, { recursive: true }); }
   }

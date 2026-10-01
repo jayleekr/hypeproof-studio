@@ -81,3 +81,57 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     },
   },
 ];
+
+/**
+ * Curriculum Runtime Experiment Browser tools (CR-04, CR-06; recon R1). Injected next
+ * to BROWSER_TOOLS only when the profile has BOTH `browser_control.enabled` and the
+ * CR switch `curriculum_runtime.enabled` (CR-02). The SDK coach exposes the same five
+ * short names as `mcp__hypeproof__<name>` (browserMcp.ts `MCP_CR_BROWSER_TOOLS`), so
+ * one contract (`_curriculum-runtime-browser-contract.md`) serves both runtimes.
+ * With the switch on, every action also returns the resulting observation.
+ */
+export const CR_BROWSER_TOOLS: BrowserToolDef[] = [
+  {
+    name: "browser_observe",
+    description:
+      "현재 페이지를 관찰한다: URL·경로, [ref=eN] 스냅샷, 화면 캡쳐, 뷰포트, 문서 세대, 이 문서의 콘솔·오류·실패한 요청, 산출물 버전.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_select",
+    description: "ref 선택 상자(select)의 값을 고른다. value는 option의 value 또는 보이는 글자.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "관찰 스냅샷의 [ref=eN]" },
+        value: { type: "string", description: "고를 option의 value 또는 글자" },
+      },
+      required: ["ref", "value"],
+    },
+  },
+  {
+    name: "browser_scroll",
+    description: "ref 요소가 보이도록 스크롤한다. ref 없이 dy(픽셀)만 주면 페이지를 그만큼 스크롤한다.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "관찰 스냅샷의 [ref=eN] (선택)" },
+        dy: { type: "number", description: "ref가 없을 때 세로 스크롤 픽셀" },
+      },
+    },
+  },
+  {
+    name: "browser_hover",
+    description: "ref 요소 위에 마우스를 올린다.",
+    input_schema: {
+      type: "object",
+      properties: { ref: { type: "string", description: "관찰 스냅샷의 [ref=eN]" } },
+      required: ["ref"],
+    },
+  },
+  {
+    name: "browser_reload",
+    description: "현재 페이지를 새로 고친다. 새 문서가 되므로 이전 ref는 모두 무효가 된다.",
+    input_schema: { type: "object", properties: {} },
+  },
+];

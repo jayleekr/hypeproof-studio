@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  Redirect fixture (cr-browser #1391, CR-T11 / CR-T04). An in-scope page that sends
+  itself to ?to=<url> ?ms=<n> milliseconds after load: inside a step's settle wait,
+  in the middle of an observation, or after the step returned.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>잠시 뒤 이동</title>
+</head>
+<body>
+  <p>곧 다른 곳으로 가요</p>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var to = q.get("to") || "";
+    if (to) setTimeout(function () { location.replace(to); }, Number(q.get("ms") || 0));
+  </script>
+</body>
+</html>

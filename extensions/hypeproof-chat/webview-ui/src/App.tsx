@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, useRef } from "react";
-import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import type { ChatConfig, ChatMessage, Citation, ElementPreview, HostMessage } from "../../src/protocol";
 import {
   emptyTimeline,
   timelineCitations,
@@ -29,6 +29,8 @@ interface State {
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
+  /** CR-09 — the picked element queued for the next turn; the student can remove it. */
+  elementPreview: ElementPreview | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -50,6 +52,7 @@ type Action =
   | { type: "streamCitations"; citations: Citation[] }
   | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
+  | { type: "elementAttached"; element: ElementPreview | null }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamStopped"; by?: "instructor" }
@@ -73,6 +76,7 @@ const initialState: State = {
   errorRequestId: null,
   errorRunbookUrl: null,
   pageNotice: null,
+  elementPreview: null,
   aiNotice: null,
   stopNotice: null,
   openWorldId: null,
@@ -109,6 +113,8 @@ function reducer(state: State, action: Action): State {
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
+    case "elementAttached":
+      return { ...state, elementPreview: action.element };
     case "worldOpened":
       // 세상이 바뀌면 직전 발행 결과는 더 이상 이 세상 얘기가 아니다 — 지운다.
       // (안 지우면 초코 세상을 열었는데 뽀로 세상의 "올렸어요" 링크가 남는다.)
@@ -162,6 +168,7 @@ function reducer(state: State, action: Action): State {
       return {
         ...state,
         pageNotice: null,   // #308 — clear the "붙였어요" notice once the user sends
+        elementPreview: null, // CR-09 — the picked element went with this turn
         stopNotice: null,   // #497 — 다시 입력했으면 중지 안내는 역할을 다했다
         timeline: {
           ...state.timeline,
@@ -214,6 +221,7 @@ export function App() {
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
+        case "elementAttached": dispatch({ type: "elementAttached", element: msg.element }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -331,6 +339,11 @@ export function App() {
         config={state.config}
         messages={messages}
         pageNotice={state.pageNotice}
+        elementPreview={state.elementPreview}
+        onRemoveElement={() => {
+          dispatch({ type: "elementAttached", element: null });
+          postToHost({ type: "removeElementContext" });
+        }}
         aiNotice={state.aiNotice}
         stopNotice={state.stopNotice}
         openWorldId={state.openWorldId}

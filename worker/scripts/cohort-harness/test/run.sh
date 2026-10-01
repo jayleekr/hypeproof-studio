@@ -55,7 +55,7 @@ rc="$(run_rc "$FIX/fail.json")"
 [ "$rc" -eq 1 ] && ok "fail.json → exit 1" || bad "fail.json → exit $rc (want 1)"
 
 # T4: the safety-critical checks actually fire on fail.json
-required_checks="child_log_user_messages child_upload_session_logs publishing_promise_contradiction child_missing_url_ban id_unique asset_enum_unknown series_index_range hours_positive cohort_series_total_consistent child_per_user_pages publishing_strategy_unknown child_sdk_write_without_runtime child_sdk_browser child_sdk_subagents"
+required_checks="child_log_user_messages child_upload_session_logs publishing_promise_contradiction child_missing_url_ban id_unique asset_enum_unknown series_index_range hours_positive cohort_series_total_consistent child_per_user_pages publishing_strategy_unknown child_sdk_write_without_runtime child_sdk_browser child_sdk_subagents child_curriculum_runtime child_browser_control cr_without_observation_format"
 got="$("$PY" "$VALIDATE" --json "$FIX/fail.json" 2>/dev/null \
       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(sorted({f["check"] for f in d["findings"] if f["severity"]=="fail"})))')"
 miss=""
@@ -94,6 +94,18 @@ if "$PY" "$VALIDATE" --json "$FIX/promise-deferred-adjacent.json" 2>/dev/null \
 else
   bad "promise-deferred-adjacent wrongly flagged publishing_promise_contradiction"
 fi
+
+# T9 (cr-browser #1391): a 13-17 workshop cohort and a mixed-age [15, 40] one with the
+# Curriculum Runtime switch on both fail, although they are above the child threshold;
+# the adult twin in pass.json passes.
+rc="$(run_rc "$FIX/teen-cr.json")"
+[ "$rc" -eq 1 ] && ok "teen-cr.json → exit 1" || bad "teen-cr.json → exit $rc (want 1)"
+got_t="$("$PY" "$VALIDATE" --json "$FIX/teen-cr.json" 2>/dev/null \
+       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(sorted({f["check"] for f in d["findings"] if f["severity"]=="fail"})))')"
+[ "$got_t" = "minor_curriculum_runtime" ] && ok "teen-cr fires exactly minor_curriculum_runtime" || bad "teen-cr FAIL checks: '$got_t' (want minor_curriculum_runtime)"
+n_t="$("$PY" "$VALIDATE" --json "$FIX/teen-cr.json" 2>/dev/null \
+       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(len({f["profile"] for f in d["findings"] if f["check"]=="minor_curriculum_runtime"}))')"
+[ "$n_t" = "2" ] && ok "teen-cr: the 14-17 and the mixed-age 15-40 cohort both fail" || bad "teen-cr: $n_t cohort(s) flagged (want 2)"
 
 echo
 echo "Totals: PASS=$pass FAIL=$fail"
