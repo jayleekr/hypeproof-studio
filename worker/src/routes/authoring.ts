@@ -323,7 +323,10 @@ authoring.post(root + '/versions/:version/rehearsals', async (c) => {
   if (prior) {
     // A retried request (lost response) gets a fresh signature for the SAME rehearsal and jti; a reused id elsewhere is refused.
     if (prior.version !== version || prior.learner_id !== b.learner || prior.created_by !== a.payload.u) return c.json({ error: 'request id reused with different content' }, 409);
-    const { token } = await issue({ u: prior.learner_id, c: cohort, p: prior.profile_id, lesson: ref, rehearsal: prior.rehearsal_id }, Math.max(0, prior.expires_at - Date.now()) / 3600_000, c.env.HPS_SIGNING_SECRET, { jti: prior.token_jti });
+    // A retry after the code expired would re-sign a token that is already dead (exp=now); say so instead of issuing one.
+    const left = prior.expires_at - Date.now();
+    if (left <= 0) return c.json({ error: 'this rehearsal expired; issue a new rehearsal with a new request_id', reason: 'rehearsal_expired', rehearsal_id: prior.rehearsal_id }, 410);
+    const { token } = await issue({ u: prior.learner_id, c: cohort, p: prior.profile_id, lesson: ref, rehearsal: prior.rehearsal_id }, left / 3600_000, c.env.HPS_SIGNING_SECRET, { jti: prior.token_jti });
     return c.json({ token, rehearsal_id: prior.rehearsal_id, lesson: ref, learner: prior.learner_id, expires_at: prior.expires_at, state: 'running' });
   }
   const rid = 'rh-' + crypto.randomUUID(), jti = crypto.randomUUID(), now = Date.now(), expires = now + Math.floor(hours * 3600) * 1000;
@@ -333,7 +336,8 @@ authoring.post(root + '/versions/:version/rehearsals', async (c) => {
     .bind(rid, cohort, course, version, lesson.sha256, d.profile_id, b.learner, jti, digest, a.payload.u, now, expires, b.request_id, cohort, course, version).run() as { meta?: { changes?: number } };
   if ((made.meta?.changes ?? 0) !== 1) return c.json({ error: 'rehearsal could not be recorded; nothing was issued' }, 409);
   const { token } = await issue({ u: b.learner, c: cohort, p: d.profile_id, lesson: ref, rehearsal: rid }, Math.floor(hours * 3600) / 3600, c.env.HPS_SIGNING_SECRET, { jti });
-  await recordTokenIssue(c.env, { jti, cohort, student: b.learner, profile: d.profile_id, issuedBy: a.payload.u, hours: Math.max(1, Math.ceil(hours)) });
+  // A rehearsal code is not a new login generation for the learner: it must not fence their live class connection.
+  await recordTokenIssue(c.env, { jti, cohort, student: b.learner, profile: d.profile_id, issuedBy: a.payload.u, hours: Math.max(1, Math.ceil(hours)) }, { advanceEpoch: false });
   return c.json({ token, rehearsal_id: rid, lesson: ref, learner: b.learner, expires_at: expires, state: 'running' });
 });
 

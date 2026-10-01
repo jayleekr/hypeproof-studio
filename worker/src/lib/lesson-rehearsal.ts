@@ -100,6 +100,7 @@ export interface Verdict {
     turns: { total: number; completed: number; with_step: number; other_lesson: number; help_modes: string[] };
     /** `none` = the candidate has no mission, so no mission-linked claim is made either way. */
     mission: { expected: RenderedMission | null; observed: RenderedMission | null; result: 'match' | 'mismatch' | 'not_reported' | 'none' };
+    /** `runtime` is `mixed` when completed turns ran on more than one runtime; `server_enforced` only when every one was proxy. */
     tools: { runtime: string; observed: string[]; boundary: 'held' | 'violated' | 'server_enforced' | 'not_observed'; write_expected: boolean };
   };
 }
@@ -145,14 +146,18 @@ export function judgeRehearsal(o: { content: SessionDesign; lessonSha: string; p
   if (!turns.completed) reasons.push('no_completed_request');
   else if (!turns.with_step) reasons.push('step_not_sent');
 
-  const runtime = completed[0]?.runtime ?? '';
+  // One rehearsal may span runtimes (e.g. a proxy turn, then an Agent SDK turn). Every completed agent-sdk turn is read, not
+  // just the first turn's runtime: a later SDK turn that carried a forbidden tool must not hide behind an earlier proxy turn.
+  const runtimes = [...new Set(completed.map((t) => t.runtime))];
+  const runtime = runtimes.length > 1 ? 'mixed' : runtimes[0] ?? '';
   const observed = [...new Set(completed.flatMap((t) => t.tool_names))].sort();
+  const sdk = completed.filter((t) => t.runtime === 'agent-sdk'), sdkObserved = new Set(sdk.flatMap((t) => t.tool_names));
   const keys = new Set(permittedFeatureKeys(o.profile).filter((k) => !o.content.features || o.content.features.allowed.includes(k)));
   const writeExpected = keys.has('write');
   let boundary: Verdict['checks']['tools']['boundary'] = 'not_observed';
   if (runtime === 'proxy') boundary = 'server_enforced';
-  else if (runtime === 'agent-sdk' && completed.length) {
-    const has = (names: string[]) => observed.some((n) => names.includes(n));
+  else if (sdk.length) {
+    const has = (names: string[]) => names.some((n) => sdkObserved.has(n));
     const violated = (!writeExpected && has(WRITE_TOOLS)) || (!keys.has('shell') && has(SHELL_TOOLS)) || (!keys.has('web_search') && has(SEARCH_TOOLS))
       || (!keys.has('read') && has(['Read', 'Grep', 'Glob']));
     // A lesson that keeps writing must actually carry a write tool to the model; otherwise the learner could not do the task.
