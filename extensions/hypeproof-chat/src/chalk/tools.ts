@@ -389,7 +389,7 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
       audience_tier: {
         type: "string",
         enum: ["lv1", "lv2", "adult"],
-        description: "학습자 연령 층 (선택). lv1=11~13세, lv2=14~16세, adult=성인 (매핑 미확정; 강사 직접 선택)",
+        description: "학습자 연령 층 (선택). 반드시 강사에게 묻는다 — 대상 연령으로 추측하지 않는다. lv1/lv2/adult 중 강사가 직접 선택.",
       },
       duration_min: {
         type: "integer",
