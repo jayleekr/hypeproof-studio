@@ -274,6 +274,19 @@ try {
       assert.deepEqual(degraded.json.ops, { epoch_advanced: false }, 'storage outage is reported without blocking lesson entry');
     } finally { e.close(); }
   });
+  await check('#751 G2 a rehearsal code is recorded in the issuance ledger but is not a login generation: the learner\'s live connection epoch stays', async () => {
+    const e = await localOps(); try {
+      await e.freeze(); assert.equal((await e.configure(seats2)).status, 201);
+      const a = (await e.pair('A1', 1)).conn.json;
+      const rh = await e.request(`/admin/cohorts/${e.cohort}/authoring/${e.lesson.course_id}/versions/${e.lesson.version}/rehearsals`, 'POST', { learner: 'student-a', request_id: crypto.randomUUID() });
+      assert.equal(rh.status, 200, rh.raw);
+      assert.equal(e.db.prepare("SELECT count(*) n FROM ops_token_issues WHERE student_id='student-a'").get().n, 1, 'the issuance is still on the ledger');
+      assert.equal((await e.sync(a.credential)).json.connection_epoch, a.connection_epoch, 'a rehearsal issue must not fence the learner\'s real connection');
+      // Positive control: an ordinary token re-issue for the same learner still advances the epoch.
+      await e.request('/admin/tokens/issue', 'POST', { u: 'student-a', c: e.cohort, p: e.profile, hours: 2 });
+      assert.equal((await e.sync(a.credential)).json.connection_epoch, a.connection_epoch + 1);
+    } finally { e.close(); }
+  });
   await check('AT-32 lesson participant mint with operations OFF preserves the existing route without a ledger', async () => {
     const e = await localOps({ enabled: false }); try {
       const { issueIssuer } = await import('../src/lib/tokens.ts');
