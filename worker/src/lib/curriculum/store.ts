@@ -364,12 +364,26 @@ export async function linksOfExperiment(db: DB, experimentId: string): Promise<T
  * the experiment is closed with the time its data was deleted. The Experiment record itself
  * stays: it is Venture Memory, and cr-memory reads it (CR-35, CR-39).
  */
+/**
+ * Close an experiment for the deletion of its test data, BEFORE its record is scanned (CR-69):
+ * links revoked, counters reset, the Experiment record closed with `data_deleted_at` and
+ * `data_deletion_pending`. From here a note, draft or review sees the deletion (409
+ * `experiment_data_deleted`, or `deletedMeanwhile` for one already writing) and no participant
+ * session can open. `finishExperimentDeletion` clears the pending mark once the record is clean.
+ */
 export async function closeExperimentAfterDeletion(db: DB, experiment: Experiment, now: number): Promise<Experiment> {
+  const next: Experiment = { ...experiment, status: "closed", data_deleted_at: now, data_deletion_pending: true };
+  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, open_start_key = NULL, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
   await db.prepare("UPDATE cr_test_links SET revoked_at = ? WHERE experiment_id = ? AND revoked_at IS NULL").bind(now, experiment.id).run();
   await db.prepare("UPDATE cr_test_links SET sessions_opened = 0 WHERE experiment_id = ?").bind(experiment.id).run();
   await db.prepare("DELETE FROM cr_link_rates WHERE kind LIKE 'session:%' AND link_id IN (SELECT id FROM cr_test_links WHERE experiment_id = ?)").bind(experiment.id).run();
-  const next: Experiment = { ...experiment, status: "closed", data_deleted_at: now };
-  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, open_start_key = NULL, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
+  return next;
+}
+
+/** The record of a closed experiment is clean: its deletion is no longer pending. */
+export async function finishExperimentDeletion(db: DB, experiment: Experiment, now: number): Promise<Experiment> {
+  const { data_deletion_pending: _pending, ...next } = experiment;
+  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
   return next;
 }
 
@@ -391,9 +405,14 @@ export async function touchExperiment(db: DB, experimentId: string, now: number)
     .run();
 }
 
-/** The sweep deleted what an experiment that never had a link held: nothing is left to date. */
-export async function forgetExperimentRecords(db: DB, experimentId: string): Promise<void> {
-  await db.prepare("DELETE FROM cr_experiment_records WHERE experiment_id = ?").bind(experimentId).run();
+/**
+ * The sweep deleted what an experiment that never had a link held: nothing is left to date.
+ * Only when no record was written after the time the sweep acted on (`endedAt`): a note or
+ * draft written while the sweep ran moved `last_record_at` past it (the routes touch before
+ * they write), so the row stays and the experiment is due again 30 days after that record.
+ */
+export async function forgetExperimentRecords(db: DB, experimentId: string, endedAt: number): Promise<void> {
+  await db.prepare("DELETE FROM cr_experiment_records WHERE experiment_id = ? AND last_record_at <= ?").bind(experimentId, endedAt).run();
 }
 
 /** Are the curriculum-runtime tables there (migrations 0032 and 0033 applied)? One read of the schema, no table touched. */
@@ -434,7 +453,13 @@ export async function experimentsDueForDeletion(
     if (!hadLinks && lastRecord === null) continue;
     const experiment = parse<Experiment>(r);
     const project = parse<Project>({ doc: r.project_doc });
-    if (!experiment || !project || experiment.data_deleted_at !== undefined) continue;
+    if (!experiment || !project) continue;
+    // A deletion that failed half-way (CR-69) is due again at once, whatever the period.
+    if (experiment.data_deletion_pending === true) {
+      out.push({ experiment, project, ended_at: experiment.data_deleted_at ?? 0, had_links: hadLinks });
+      continue;
+    }
+    if (experiment.data_deleted_at !== undefined) continue;
     const endedAt = Math.max(hadLinks ? Number(r.link_end) : -Infinity, lastRecord ?? -Infinity);
     if (now - endedAt >= periodFor(project.cohort_id)) out.push({ experiment, project, ended_at: endedAt, had_links: hadLinks });
   }

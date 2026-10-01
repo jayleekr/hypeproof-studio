@@ -623,6 +623,17 @@ export class LocalRecord {
     return keys;
   }
 
+  /**
+   * Write a keys-only deletion tombstone, keeping every key an earlier deletion under the same
+   * tombstone already named (a task deleted twice, or swept again, keeps both deletions' keys).
+   * `quota: "none"`: a tombstone is bounded by the records it names, and a full record must
+   * still be deletable.
+   */
+  async #tombstone(key: string, value: Record<string, unknown> & { evidence: readonly string[] }): Promise<void> {
+    const before = (await this.#read<{ evidence?: string[] }>(key))?.evidence ?? [];
+    await this.#write(key, { ...value, evidence: [...new Set([...before, ...value.evidence])] }, false, "none");
+  }
+
   async #deletedEvidence(): Promise<Set<string>> {
     const keys = new Set<string>();
     for (const k of await this.#keys("deleted/")) for (const e of (await this.#read<{ evidence: string[] }>(k))?.evidence ?? []) keys.add(e);
@@ -711,7 +722,15 @@ export class LocalRecord {
         check(!held?.link || !link.attribution.link || held.link === link.attribution.link, "pseudonym_from_other_link");
       }
     }
-    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) return { created: true };
+    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) {
+      // CR-69: the task was deleted while this session was being linked (`deleteTask` removes
+      // the task first, then its session keys): the key just written must not outlive it.
+      if ((await this.#read(`tasks/${taskId}`)) === null) {
+        await this.#remove(key);
+        throw new Error("unknown_task");
+      }
+      return { created: true };
+    }
     check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
     return { created: false };
   }
@@ -1179,12 +1198,19 @@ export class LocalRecord {
     check(isObj(input) && input.by === "user", "delete_requires_user");
     check(text(host, 100) && text(sessionId, 200), "invalid_session_link");
     const sessionKey = `sessions/${enc(host)}/${enc(sessionId)}`;
-    const link = await this.#read<{ task: string }>(sessionKey);
+    const link = await this.#read<{ task: string; pseudonym?: string }>(sessionKey);
     check(link, "unknown_session");
     const taskId = link.task;
     const removed = { observations: 0, interpretations: 0, drafts: 0, sessions: 0 };
     const evidence: string[] = [sessionKey];
     const sessionSeg = enc(sessionId);
+    const tombstone = `deleted/sessions/${enc(host)}/${sessionSeg}`;
+    // Refuse new writes before scanning for content (CR-69): the tombstone first, then the
+    // session key. A batch whose post-write check runs after this point finds the session gone
+    // and removes what it wrote (`appendObservations`); one that wrote earlier is in the scan below.
+    await this.#tombstone(tombstone, { task: taskId, session: sessionId, at: input.at, evidence });
+    await this.#remove(sessionKey);
+    removed.sessions = 1;
     for (const k of await this.#keys(`observations/${enc(host)}/`)) {
       if (k.split("/")[3] !== sessionSeg) continue;
       await this.#remove(k);
@@ -1207,10 +1233,16 @@ export class LocalRecord {
       await this.#remove(k);
       removed.drafts++;
     }
+    // CR-65: the session's pseudonym index key goes with it, unless another live session of the
+    // task still carries that pseudonym (a declared repeated-use device's other visits).
+    const pseudonym = link.pseudonym;
+    if (pseudonym) {
+      const others = (await this.sessionLinks(host)).some((s) => s.task === taskId && s.pseudonym === pseudonym);
+      const pKey = `pseudonyms/${enc(host)}/${pseudonym}`;
+      if (!others && (await this.#read<{ task: string }>(pKey))?.task === taskId) await this.#remove(pKey);
+    }
     // Keys only, no content, under the deleted/ prefix every append and draft check reads.
-    await this.#write(`deleted/sessions/${enc(host)}/${sessionSeg}`, { task: taskId, session: sessionId, at: input.at, evidence }, false, "none");
-    await this.#remove(sessionKey);
-    removed.sessions = 1;
+    await this.#tombstone(tombstone, { task: taskId, session: sessionId, at: input.at, evidence });
     return { task: taskId, removed, not_covered: DELETE_NOT_COVERED };
   }
 
@@ -1389,12 +1421,36 @@ export class LocalRecord {
     };
   }
 
-  /** Deletes what the core manages for one task and says what it cannot reach (MC-31). */
+  /**
+   * Deletes what the core manages for one task and says what it cannot reach (MC-31).
+   *
+   * cr-evidence (CR-69): the record stops taking writes for the task before it is scanned. The
+   * tombstone is written and the task and its session keys removed first, so a participant
+   * batch whose post-write check runs after that removes what it wrote, and a session open
+   * that lands after it is refused (`linkSessionKey`). A task deleted before (its tombstone
+   * stands) can be deleted again: that sweeps whatever a racing write left, and a delete
+   * interrupted half-way can be retried.
+   */
   async deleteTask(taskId: string, input: { by: "user"; at: number }): Promise<{ removed: Record<string, number>; not_covered: readonly string[] }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
-    await this.getTask(taskId);
+    const tombstone = `deleted/${taskId}`;
+    try {
+      await this.getTask(taskId);
+    } catch (e) {
+      if (!(e instanceof Error) || e.message !== "unknown_task" || (await this.#read(tombstone)) === null) throw e;
+    }
     const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0, drafts: 0 };
     const evidence: string[] = [];
+    await this.#tombstone(tombstone, { task: taskId, at: input.at, evidence });
+    await this.#remove(`tasks/${taskId}`);
+    for (const k of await this.#keys("sessions/")) {
+      if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
+      await this.#remove(k);
+      evidence.push(k);
+      removed.sessions++;
+    }
+    // cr-evidence (CR-65): the task's pseudonym index keys go with its sessions.
+    for (const k of await this.#keys("pseudonyms/")) if ((await this.#read<{ task: string }>(k))?.task === taskId) await this.#remove(k);
     // CR-10 — the stored bytes this task's observations name go with them.
     const named = new Set<string>();
     const namesOf = (o: ObservationRecord | null): string[] =>
@@ -1449,21 +1505,13 @@ export class LocalRecord {
       await this.#remove(k);
       removed.improvements++;
     }
-    for (const k of await this.#keys("sessions/")) {
-      if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
-      await this.#remove(k);
-      removed.sessions++;
-    }
-    // cr-evidence (CR-65): the task's pseudonym index keys go with its sessions.
-    for (const k of await this.#keys("pseudonyms/")) if ((await this.#read<{ task: string }>(k))?.task === taskId) await this.#remove(k);
     if (named.size) {
       // Bytes another remaining observation still names stay (content-addressed, shared).
       for (const k of await this.#keys("observations/")) for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.delete(d);
       removed.browser_result_bytes = (await this.deleteBlobs({ by: "user", at: input.at, digests: [...named] })).removed;
     }
     // Keys only, no content: lets later collection and reinterpretation refuse the deleted evidence.
-    await this.#write(`deleted/${taskId}`, { task: taskId, at: input.at, evidence }, false);
-    await this.#remove(`tasks/${taskId}`);
+    await this.#tombstone(tombstone, { task: taskId, at: input.at, evidence });
     return { removed, not_covered: DELETE_NOT_COVERED };
   }
 

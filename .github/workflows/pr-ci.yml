@@ -123,7 +123,7 @@ jobs:
         run: npm run test:cr-publish:d1
       # cr-evidence (#1394) — participant evidence, notes, drafts, deletion and controls on local workerd D1 and R2.
       # Keep this step LAST in the job: its Miniflare round trips (the 120-session and 30x120 cases)
-      # leave ~15,000 sockets in TIME_WAIT for about a minute, and a local D1 suite started right
+      # leave several thousand sockets in TIME_WAIT for about a minute, and a local D1 suite started right
       # after it can fail with EADDRNOTAVAIL (measured on macOS; see the note in the test file).
       - name: Run Evidence capture against local D1 and R2
         working-directory: worker

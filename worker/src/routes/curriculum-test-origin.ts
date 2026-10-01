@@ -31,7 +31,7 @@ import type { Env } from "../env";
 import { resolveProfile } from "../lib/modules";
 import { curriculumRuntimeAllowed } from "../lib/moderation";
 import { LINK_ID, linkState, pinnedVersion } from "../lib/curriculum/venture";
-import { admitLinkRate, getExperiment, getLink, getProject, getVersion, releaseSession, reserveSession } from "../lib/curriculum/store";
+import { admitLinkRate, getCohortControls, getExperiment, getLink, getProject, getVersion, releaseSession, reserveSession } from "../lib/curriculum/store";
 import { matchTestOrigin, parseTestOrigin, projectLabel } from "../lib/curriculum/test-origin";
 import { EVIDENCE_LIMITS, PUBLISHED_HOST, appendParticipantEvents, openParticipantSession, participantEvents, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
 import { newSessionId, signSessionToken, verifySessionToken } from "../lib/curriculum/session-token";
@@ -138,7 +138,7 @@ async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
   if (c.req.header("service-worker") !== undefined) return absent();
   const live = await liveLink(c, linkId);
   if (live instanceof Response) return live;
-  const { link, experiment, version, now } = live;
+  const { link, project, experiment, version, now } = live;
   if (rest === "") {
     // The entry page by its own path, so its relative references resolve.
     return new Response(null, { status: 302, headers: { ...baseHeaders(), location: `/l/${link.id}/${version.entry_html.split("/").map(encodeURIComponent).join("/")}` } });
@@ -156,7 +156,10 @@ async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
   const headers = { ...pageHeaders(devices), "content-type": typeOf(path) };
   if (!/\.html?$/i.test(path)) return new Response(await object.arrayBuffer(), { status: 200, headers });
   const html = await object.text();
-  const rawInput = experiment.declarations?.raw_input?.fields;
+  // CR-67, CR-70: a declared field is collected only while the cohort's admin allows raw input
+  // (turning it off stops collection for running experiments too).
+  const declaredInput = experiment.declarations?.raw_input?.fields;
+  const rawInput = declaredInput?.length && (await getCohortControls(c.env.HPS_DB, project.cohort_id)).raw_input_allowed ? declaredInput : undefined;
   const cfg = { link: link.id, experiment: experiment.id, repeated_use: experiment.declarations?.repeated_use === true, link_expires_at: link.expires_at, ...(rawInput?.length ? { raw_input: rawInput } : {}) };
   if (path !== version.entry_html) return new Response(injectSnippet(html, cfg), { status: 200, headers });
   // The entry page offers a candidate session (random id, signed token) and records nothing:
@@ -260,7 +263,8 @@ async function recordEvents(c: Ctx, linkId: string): Promise<Response> {
   // cannot spend the link's shared window that other participants' events need.
   if (!(await admitLinkRate(c.env.HPS_DB, link.id, `session:${claims.session}`, now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerSessionWindow))) return refused(429, "rate_limited");
   if (!(await admitLinkRate(c.env.HPS_DB, link.id, "event", now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerWindow))) return refused(429, "rate_limited");
-  const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now, pagePaths: new Set(version.files.map((f) => f.path)) });
+  const rawInputAllowed = experiment.declarations?.raw_input?.fields?.length ? (await getCohortControls(c.env.HPS_DB, project.cohort_id)).raw_input_allowed : false;
+  const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now, pagePaths: new Set(version.files.map((f) => f.path)), pageEntry: version.entry_html, rawInputAllowed });
   if (!built.ok) return refused(built.code === "session_event_limit" || built.code === "too_many_events" ? 413 : 400, built.code);
   try {
     await appendParticipantEvents(record, experiment.id, claims.session, built.events);

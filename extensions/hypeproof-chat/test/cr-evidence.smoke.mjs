@@ -147,7 +147,13 @@ if (!status.available) {
   const measured = visibleText(await renderComponent("EvidencePanel", props(view({ returns: { status: "measured", devices: [{ pseudonym: "pp-" + "a".repeat(32), return_count: 2, intervals_ms: [86_400_000, 86_400_000], source_refs: [] }] } }))));
   assert.match(measured, /다시 온 기기: aaaaaa 2번 \(간격 1일, 1일\)/);
   assert.match(measured, /사람 수가 아니에요/);
-  ok("panel: four sections, claims that open on click, 확인 필요 for a dead source, returns labelled per device and 'not measured' when undeclared");
+  // Unnamed task events: the line names the publish panel's term and shows only when there are some.
+  const withUnnamed = await renderComponent("EvidencePanel", props(view({ sessions: SESSIONS.map((x, i) => ({ ...x, unnamed: i === 0 ? 2 : 0 })) })));
+  assert.equal((withUnnamed.match(/data-testid="evidence-session-unnamed"/g) ?? []).length, 1, "one session has unnamed events");
+  assert.match(visibleText(withUnnamed), /기록할 과제 이름에 없는 이름 2개는 이름 없이 기록했어요/);
+  const noneUnnamed = await renderComponent("EvidencePanel", props(view({ sessions: SESSIONS.map((x) => ({ ...x, unnamed: 0 })) })));
+  assert.doesNotMatch(noneUnnamed, /evidence-session-unnamed/, "no line when nothing was unnamed");
+  ok("panel: four sections, claims that open on click, 확인 필요 for a dead source, returns labelled per device and 'not measured' when undeclared, the unnamed-events line only when there are some");
 }
 
 console.log(`\ncr-evidence smoke: ${passed} passed`);

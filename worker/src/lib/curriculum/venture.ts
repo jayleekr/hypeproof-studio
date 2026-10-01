@@ -9,6 +9,8 @@
 // cr-publish creates Project, Hypothesis, Experiment (CR-39, every PRD §10.1 field),
 // ProductVersion (the R4 published file set) and TestLink. Pure: no env, no storage.
 
+import { identityFieldProblems } from "../measurement-core/learning-events.ts";
+
 export const VENTURE_SCHEMA = "hps-venture/1";
 
 export const HYPOTHESIS_STATUSES = ["open", "supported", "refuted", "revised"] as const;
@@ -78,6 +80,11 @@ export interface Experiment {
   declarations?: ExperimentDeclarations;
   /** When the experiment's test data was deleted (cr-evidence, CR-69); absent until then. */
   data_deleted_at?: number;
+  /**
+   * Set with `data_deleted_at` before the record is scanned and cleared once the scan finished
+   * (cr-evidence, CR-69): a deletion that failed half-way is due again on the next sweep.
+   */
+  data_deletion_pending?: true;
   created_at: number;
 }
 
@@ -191,6 +198,8 @@ export function declarationProblems(d: unknown): string[] {
   if (d.raw_input !== undefined) {
     const r = d.raw_input;
     if (!isObj(r) || !Array.isArray(r.fields) || r.fields.length === 0 || !r.fields.every((x) => str(x, 60))) problems.push("invalid:declarations.raw_input");
+    // CR-65: no name, e-mail or phone field, so an identity-like field is never declared for keeping.
+    else if (identityFieldProblems((r.fields as string[]).map((x) => x.trim())).length) problems.push("invalid:declarations.raw_input");
   }
   if (d.labels !== undefined) {
     const ls = d.labels;

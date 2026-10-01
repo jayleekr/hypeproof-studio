@@ -63,7 +63,8 @@ import {
 import { hypeproofTokensIn, judgeToken, scanFile, type ScanHit } from "../lib/curriculum/publish-scan";
 import { originFor, parseTestOrigin, shareUrl } from "../lib/curriculum/test-origin";
 import { EVIDENCE_LIMITS, addNote, ensureExperimentTask, experimentEvidence, noteEvent, participantRecord, PUBLISHED_HOST, type R2Like } from "../lib/curriculum/participant-record";
-import { closeExperimentAfterDeletion, getCohortControls, releaseErasedSession, touchExperiment } from "../lib/curriculum/store";
+import { getCohortControls, releaseErasedSession, touchExperiment } from "../lib/curriculum/store";
+import { deleteExperimentData } from "../lib/curriculum/retention";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
 
@@ -495,6 +496,9 @@ curriculum.post("/experiments/:id/links", async (c) => {
   if (experiment.status !== "running") return refuse(c, 409, "experiment_not_running");
   const origin = testOrigin(c.env);
   if (!origin.ok) return refuse(c, 503, "test_origin_unavailable", { problem: origin.problem });
+  // The record task its sessions link to: a no-link experiment whose manual records the sweep
+  // deleted (decision 6) lost it with them, and stays running so it can still be tested.
+  await ensureExperimentTask(participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), experiment, now);
   const link = await createLink(c.env.HPS_DB, {
     project_id: project.id,
     experiment_id: experiment.id,
@@ -594,8 +598,10 @@ curriculum.get("/experiments/:id/evidence", async (c) => {
 
 /**
  * Was the experiment's test data deleted while this request was writing (CR-69, decision 6)?
- * A note or draft written after the delete read the experiment would otherwise outlive it in
- * a fresh task. When it was, what the record holds for the experiment now goes too.
+ * The delete closes the experiment (`data_deleted_at`) before it scans the record, so a write
+ * that finished before the close is in the scan, and one checked here after the close sees it.
+ * When it was deleted, what the record holds for the experiment now goes too (the write's own
+ * record included). Also answers a write that lost its record task to the deletion (`unknown_task`).
  */
 async function deletedMeanwhile(c: Ctx, r: { experiment: { id: string }; record: { deleteTask(id: string, input: { by: "user"; at: number }): Promise<unknown> } }): Promise<boolean> {
   const fresh = await getExperiment(c.env.HPS_DB, r.experiment.id);
@@ -625,17 +631,19 @@ curriculum.post("/experiments/:id/notes", async (c) => {
   const built = noteEvent({ experiment: r.experiment, note: body, id: newVentureId("note"), now });
   if (!built.ok) return refuse(c, 400, built.code);
   if ((await r.record.observationsOf("notes", r.experiment.id)).length >= EVIDENCE_LIMITS.maxNotesPerExperiment) return refuse(c, 409, "note_limit", { max: EVIDENCE_LIMITS.maxNotesPerExperiment });
+  // The experiment's last record moves (when it ends for automatic deletion, decision 6)
+  // BEFORE the write: a sweep running meanwhile then keeps the row and the note stays due.
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   await ensureExperimentTask(r.record, r.experiment, now);
   try {
     await addNote(r.record, r.experiment, built.event);
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
     if (/^(invalid_|missing_|identity_field|ai_text_as_student|unsupported_)/.test(code)) return refuse(c, 400, code);
+    if (code === "unknown_task" && (await deletedMeanwhile(c, r))) return refuse(c, 409, "experiment_data_deleted");
     throw e;
   }
   if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
-  // The experiment's last record moved (when it ends for automatic deletion, decision 6).
-  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ note: built.event }, 201);
 });
 
@@ -676,16 +684,17 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
     draft = { format: "hps-evidence-draft/1", id, revision: 1, supersedes: null, experiment: r.experiment.id, author: body.author, created_at: now, items: body.items };
   }
   let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   try {
     saved = await r.record.saveEvidenceDraft(r.experiment.id, draft, { quota: "none", repeatedUse: r.experiment.declarations?.repeated_use === true });
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
     if (/^(invalid_|unsupported_|missing_)/.test(code)) return refuse(c, 400, code);
+    if (code === "unknown_task" && (await deletedMeanwhile(c, r))) return refuse(c, 409, "experiment_data_deleted");
     throw e;
   }
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
   if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
-  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ draft: saved.draft }, 201);
 });
 
@@ -714,10 +723,16 @@ curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
   }
   if (r.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
   const now = Date.now();
-  const saved = await r.record.saveEvidenceDraft(r.experiment.id, next, { quota: "none", repeatedUse: r.experiment.declarations?.repeated_use === true });
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
+  let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
+  try {
+    saved = await r.record.saveEvidenceDraft(r.experiment.id, next, { quota: "none", repeatedUse: r.experiment.declarations?.repeated_use === true });
+  } catch (e) {
+    if (e instanceof Error && e.message === "unknown_task" && (await deletedMeanwhile(c, r))) return refuse(c, 409, "experiment_data_deleted");
+    throw e;
+  }
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
   if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
-  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ draft: saved.draft }, 201);
 });
 
@@ -732,13 +747,7 @@ curriculum.delete("/experiments/:id", async (c) => {
   const r = await evidenceDeleter(c, c.req.param("id"));
   if (r instanceof Response) return r;
   const now = Date.now();
-  let report: Awaited<ReturnType<typeof r.record.deleteTask>> | null = null;
-  try {
-    report = await r.record.deleteTask(r.experiment.id, { by: "user", at: now });
-  } catch (e) {
-    if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
-  }
-  const experiment = await closeExperimentAfterDeletion(c.env.HPS_DB, r.experiment, now);
+  const { experiment, report } = await deleteExperimentData(c.env.HPS_DB, r.record, r.experiment, now);
   return c.json({ receipt: { kind: "experiment_test_data_deleted", experiment_id: experiment.id, at: now, deleted_by: r.by, removed: report?.removed ?? {}, not_covered: report?.not_covered ?? [], links_revoked: true }, experiment });
 });
 

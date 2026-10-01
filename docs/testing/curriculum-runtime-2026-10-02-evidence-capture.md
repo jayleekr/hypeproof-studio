@@ -107,6 +107,62 @@ Planted defects for the round, each applied alone, `cr-evidence.test.mjs` run, s
 | `python3 scripts/next-work.py --check`; `python3 scripts/check-registry.py`; `node --experimental-strip-types worker/test/cr-traceability.test.mjs` | 0, 0, 0 |
 | Harness `align.py check --doc curriculum-runtime` | 1: `BROKEN cr-recon` only, as above |
 
+## Review round 3 (2026-10-02)
+
+Findings of the third review applied on the same branch. The common cause: a deletion scanned the record while it still took writes, so a write landing between the scan and the end of the deletion outlived it. A deletion now refuses writes before it scans:
+
+- `deleteSession` writes its tombstone and removes the session key first, then scans; it also removes the session's pseudonym index key when no other live session of the task carries it.
+- Deleting an experiment (the student's action and the sweep, one function `deleteExperimentData`) closes it first (`data_deleted_at` and an additive `data_deletion_pending`, links revoked), then runs `deleteTask`, then clears the pending mark. A deletion that fails half-way stays pending and is due on the next tick.
+- `deleteTask` writes its tombstone and removes the task and its session keys before the scans; `linkSessionKey` takes back a session key written after the task was removed (`experiment_data_deleted` at the open). A task with a tombstone can be deleted again. Tombstones merge, so a second deletion keeps the first one's keys.
+- Notes, drafts and reviews move the last-record time before they write, and catch a task lost to the deletion. The no-link sweep forgets its row only when `last_record_at` is not later than what it acted on. The links route re-creates the record task the no-link sweep removed.
+- Minor: blank task names and blank input fields are kept like undeclared ones; the link's root path is stored as its entry page; turning `raw_input_allowed` off stops collection for running experiments; an identity-like field cannot be declared as raw input; the panel line uses the publish panel's term ("기록할 과제 이름에 없는 이름 N개는 이름 없이 기록했어요").
+
+Controls added to `cr-evidence.test.mjs`: the two session-erase windows (a batch landing at the erase's observation and gap listings: 409 `session_deleted`, no key, a draft citing the event 422; a live session's batch stored, the control); the experiment-delete windows (a batch at the drafts listing and a note at the observation listing refused with nothing left; a note, a draft and a review that read the experiment before the delete and write after it: 409 `experiment_data_deleted` and nothing left; after the delete a note and a draft are refused with zero R2 puts; an undeleted experiment takes a note, the control); the sweep races (the no-link row forgotten and not listed again; a note written right before the sweep forgets the row keeps it due, deleted 30 days later; a new link after the sweep records a participant; both deletions' note references stay `deleted`; an injected storage failure leaves the experiment pending and the next tick deletes it); the record-level deletion (a batch landing during `deleteTask`'s scan refused, a session key written after the delete taken back, a never-created task still `unknown_task`). CR-T25 adds a made-up `note:` and `event:` reference (both `unresolved_source_ref`); CR-T64 adds an interpretation per session (only the erased one goes), the pseudonym key, a draft citing only the note removed by the experiment delete, and no `tasks/` key left; CR-T62 adds the retroactive raw-input switch and identity-like declarations; CR-T62 labels adds blank names and fields; page paths adds the landing view. `cr-evidence.smoke.mjs` checks the panel line renders only when a session has unnamed events.
+
+Planted defects for the round, each applied alone, `cr-evidence.test.mjs` (or the smoke) run, source restored (23 of 23 caught):
+
+| | Plant | Red |
+|---|---|---|
+| T1 | the session key removed last in `deleteSession` | CR-69 races, session erase (and four more) |
+| T2 | `deleteTask` keeps the task key | CR-T64; CR-69 at the record |
+| T3 | `deleteTask` removes sessions after its scans | CR-69 at the record (and three more) |
+| T4 | `linkSessionKey` without its post-write check | CR-69 at the record |
+| T5 | `deletedMeanwhile` never fires | CR-69 races, experiment delete |
+| T6 | no pre-check on the notes route | CR-69 races, experiment delete |
+| T7 | no pre-check on the drafts route | CR-69 races, experiment delete |
+| T8 | the experiment closed after `deleteTask` (the old order) | CR-69 races, experiment delete |
+| T9 | a missing `note:` or `event:` reference resolves | CR-T25; session erase |
+| T10 | drafts survive `deleteTask` | CR-T64; experiment delete |
+| T11 | interpretations survive a session erase | CR-T64 |
+| T12 | the pseudonym key kept on a session erase | CR-T64 |
+| T13 | the no-link sweep does not forget its row | sweep races |
+| T14 | the row forgotten unconditionally | sweep races |
+| T15 | the links route does not re-create the task | sweep races |
+| T16 | a tombstone overwritten, not merged | sweep races |
+| T17 | a pending deletion never due | sweep races |
+| T18 | no last-record move on a note | decision 6 (three tests) |
+| T19 | raw input kept after the admin turned it off | CR-T62 |
+| T20 | an identity-like raw-input field accepted | CR-T62 |
+| T21 | a blank task name refuses the batch | CR-T62 labels |
+| T22 | the root path dropped | page paths |
+| T23 | the unnamed line always rendered (panel) | `cr-evidence.smoke.mjs` |
+
+Residual, not fixed: if `deleteSession` fails after removing the session key, a retry of the same DELETE answers 404 (the session is no longer linked); what is left is removed by the experiment's deletion or its 30-day sweep. A session open racing the no-link sweep's `deleteTask` between the links route's re-creation and the sweep's removal answers 404 at the open until the student publishes the link again.
+
+### Gates for review round 3 (exit codes, on the review-round-3 tree)
+
+| Command | Exit |
+|---|---|
+| `worker`: `npm test` | 0 |
+| `worker`: `node … test/cr-evidence.test.mjs`, `test:cr-evidence:d1`, `test:cr-publish:d1` | 0, 0 (73 s), 0 |
+| `worker`: `npx tsc --noEmit`; `npm run validate-profiles` | 0, 0 |
+| `packages/measurement`: `npm test` | 0 |
+| `extensions/hypeproof-chat`: `tsc --noEmit`, `webview-ui` `tsc --noEmit`, `vite build` | 0, 0, 0 |
+| `extensions/hypeproof-chat`: `npm test` | 1 at `test:instructor-render` only (0 of 14), the environment cause recorded in round 2 (`/Users/jaylee/node_modules/react` 19.1.0); every smoke, `test:classroom-ops:review` and `test:chalk-tools` passed. The first run also caught a real defect, `venture.ts` importing `learning-events` without its `.ts` extension (an extension smoke loads it under Node), fixed before the rerun |
+| `e2e`: `npm run test:cr-evidence`, `npm run test:cr-publish` (Chromium) | 0, 0 |
+| in-app `evidence-app` (gated, idle, screen unlocked; the prepared copy with this tree's extension and webview injected) | 0: 2 passed in 12.6 s |
+| `python3 scripts/next-work.py --check`; `python3 scripts/check-registry.py`; `node --experimental-strip-types worker/test/cr-traceability.test.mjs` | 0, 0, 0 |
+
 ## Pre-change tree (`efb27f40`)
 
 `worker/test/cr-evidence.test.mjs` does not load there (`src/routes/curriculum-admin.ts` absent). A probe of the same controls through the pre-change router: the events route 404, notes 404, evidence 404, drafts 404, experiment delete 404, admin controls 404, a link without a variant in a comparison experiment 201 (accepted), the validator refuses a participant kind (`invalid_kind`), and the core exports neither `reviewInput` nor `identityFieldProblems`. Every control above was therefore red before this change.

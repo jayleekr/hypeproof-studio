@@ -100,7 +100,7 @@ export async function ensureExperimentTask(record: LocalRecord, experiment: Pick
   }
 }
 
-export type SessionRefusal = "session_experiment_mismatch" | "session_version_mismatch" | "session_project_mismatch" | "session_deleted" | "pseudonym_in_other_experiment";
+export type SessionRefusal = "session_experiment_mismatch" | "session_version_mismatch" | "session_project_mismatch" | "session_deleted" | "pseudonym_in_other_experiment" | "experiment_data_deleted";
 
 /** A fresh random pseudonym, made on the Service (CR-65: never derived from anything). */
 function freshPseudonym(): string {
@@ -160,6 +160,8 @@ export async function openParticipantSession(
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
     if (code === "session_deleted" || code === "pseudonym_in_other_experiment") return { ok: false, code };
+    // The experiment's test data is being deleted (CR-69): its record task is gone, so nothing opens.
+    if (code === "unknown_task") return { ok: false, code: "experiment_data_deleted" };
     throw e;
   }
 }
@@ -241,8 +243,12 @@ function describe(kind: ParticipantEventKind, e: { label?: string; target?: { ro
   return "session_start";
 }
 
-/** A page_view path kept only when it names one of the version's files (or no list was given). */
-function publishedPath(path: unknown, files: ReadonlySet<string> | undefined): string | undefined {
+/**
+ * A page_view path kept only when it names one of the version's files (or no list was given).
+ * A directory path is the file the test origin serves for it: the link's root is the entry
+ * page, any other directory its index.html.
+ */
+function publishedPath(path: unknown, files: ReadonlySet<string> | undefined, entry?: string): string | undefined {
   if (typeof path !== "string") return undefined;
   if (!files) return path;
   let file: string;
@@ -251,7 +257,9 @@ function publishedPath(path: unknown, files: ReadonlySet<string> | undefined): s
   } catch {
     return undefined;
   }
-  return files.has(file) ? path : undefined;
+  if (file !== "" && !file.endsWith("/")) return files.has(file) ? path : undefined;
+  file = file === "" && entry ? entry : file + "index.html";
+  return files.has(file) ? "/" + file : undefined;
 }
 
 /**
@@ -280,6 +288,10 @@ export function participantEvents(
      * the page made up, which could carry typed text) is stored without its path.
      */
     pagePaths?: ReadonlySet<string>;
+    /** The version's entry page, the file a page_view of the link's root path is about. */
+    pageEntry?: string;
+    /** Does the cohort's admin allow raw input now (CR-70)? false keeps no typed value, whatever was declared. */
+    rawInputAllowed?: boolean;
   },
 ): { ok: true; events: ObservationEvent[]; values_dropped: number; labels_dropped: number } | { ok: false; code: EventRefusal } {
   const raw = input.events;
@@ -292,7 +304,7 @@ export function participantEvents(
   }
   const a = input.link.attribution;
   if (isComparison(input.experiment.declarations) && !a.variant) return { ok: false, code: "variant_required" };
-  const declared = new Set(input.experiment.declarations?.raw_input?.fields ?? []);
+  const declared = new Set(input.rawInputAllowed === false ? [] : (input.experiment.declarations?.raw_input?.fields ?? []));
   const labels = new Set((input.experiment.declarations?.labels ?? []).map((l) => l.trim()));
   let labelsDropped = 0;
   const when = new Date(input.now).toISOString();
@@ -306,17 +318,20 @@ export function participantEvents(
     if (!Number.isSafeInteger(e.seq) || (e.seq as number) < 1) return { ok: false, code: "invalid_event" };
     if ((e.seq as number) > EVIDENCE_LIMITS.maxEventsPerSession) return { ok: false, code: "session_event_limit" };
     const labelled = kind === "task_start" || kind === "task_complete" || kind === "milestone";
-    if (labelled ? !str(e.label, 80) : e.label !== undefined) return { ok: false, code: "invalid_event" };
+    // A blank task or milestone name is kept like an undeclared one: the fact survives, unnamed (CR-67).
+    if (labelled ? !(typeof e.label === "string" && e.label.length <= 80) : e.label !== undefined) return { ok: false, code: "invalid_event" };
     const targeted = kind === "click" || kind === "input";
     const t = e.target;
     if (targeted ? !(isObj(t) && Object.keys(t).length === 2 && str(t.role, 40) && str(t.path, 300)) : t !== undefined) return { ok: false, code: "invalid_event" };
     if (kind !== "input" && (e.field !== undefined || e.value !== undefined)) return { ok: false, code: "invalid_event" };
-    if (e.field !== undefined && !str(e.field, 60)) return { ok: false, code: "invalid_event" };
+    if (e.field !== undefined && !(typeof e.field === "string" && e.field.length <= 60)) return { ok: false, code: "invalid_event" };
+    // A blank input name is left out, not a reason to refuse the batch.
+    const field = str(e.field, 60) ? e.field : undefined;
     if (e.value !== undefined && !(typeof e.value === "string" && e.value.length <= 2000)) return { ok: false, code: "invalid_event" };
     if (kind === "page_view" ? !(e.path === undefined || (typeof e.path === "string" && e.path.startsWith("/") && e.path.length <= 300)) : e.path !== undefined) return { ok: false, code: "invalid_event" };
     const named = labelled && labels.has((e.label as string).trim());
     if (labelled && !named) labelsDropped++;
-    const keep = kind === "input" && typeof e.value === "string" && typeof e.field === "string" && declared.has(e.field);
+    const keep = kind === "input" && typeof e.value === "string" && field !== undefined && declared.has(field);
     if (kind === "input" && e.value !== undefined && !keep) dropped++;
     out.push({
       id: `e${e.seq}`,
@@ -324,7 +339,7 @@ export function participantEvents(
       task: input.experiment.id,
       at: input.now,
       kind,
-      text: describe(kind, { ...(named ? { label: (e.label as string).trim() } : {}), ...(targeted ? { target: t as { role: string; path: string } } : {}), ...(typeof e.field === "string" ? { field: e.field } : {}) }, publishedPath(e.path, input.pagePaths)),
+      text: describe(kind, { ...(named ? { label: (e.label as string).trim() } : {}), ...(targeted ? { target: t as { role: string; path: string } } : {}), ...(field !== undefined ? { field } : {}) }, publishedPath(e.path, input.pagePaths, input.pageEntry)),
       actor: "external_user",
       assistance: "unknown",
       evidence_type: "action",

@@ -11,7 +11,7 @@
 //
 // Run: node --experimental-strip-types --experimental-sqlite test/cr-evidence.test.mjs [--d1]
 //
-// --d1 opens a new local socket per Miniflare round trip, about 15,000 in one run, which stay in
+// --d1 opens a new local socket per Miniflare round trip, several thousand in one run, which stay in
 // TIME_WAIT for about a minute. Another --d1 suite started right after it can then fail with
 // EADDRNOTAVAIL (a false red); wait a minute between them. CI keeps this step last for that reason.
 
@@ -435,11 +435,28 @@ await test("CR-T62: typed text is kept only for a declared field; an undeclared 
     // Negative control: an event builder that keeps every value is caught by the same verdict.
     const leaky = participantEvents({ experiment: { id: drop.experiment.id, declarations: { raw_input: { fields: ["memo"] } } }, sessionId: "ps-" + "0".repeat(32), link: { attribution: { project: drop.project.id, experiment: drop.experiment.id, product_version: drop.version } }, linkId: drop.link.id, events: [{ kind: "input", seq: 1, target: { role: "input", path: "x" }, field: "memo", value: "x" }], now: 1 });
     assert.deepEqual(undeclaredTypedText(leaky.events, []), ["e1"], "a planted keep-all builder is caught");
+    // CR-65: an identity-like field can never be declared for keeping.
+    const other = keep;
+    for (const field of ["email", "phone", " name "]) {
+      const r = await f.api("/v1/curriculum/experiments", { method: "POST", token: other.token, body: { project_id: other.project.id, product_version_id: other.version, week: 1, question: "q", method: "task_test", success_criteria: ["c"], hypothesis: `연락처 ${field}`, declarations: { raw_input: { fields: ["memo", field] } } } });
+      assert.equal(r.status, 400, `${field}: ${r.text}`);
+      assert.ok(r.json.error.problems.includes("invalid:declarations.raw_input"), r.text);
+    }
+    const memo = await f.api("/v1/curriculum/experiments", { method: "POST", token: other.token, body: { project_id: other.project.id, product_version_id: other.version, week: 1, question: "q", method: "task_test", success_criteria: ["c"], hypothesis: "메모만", declarations: { raw_input: { fields: ["memo"] } } } });
+    assert.equal(memo.status, 201, "control: an ordinary field is accepted");
     // The cohort's admin can refuse raw-input declarations altogether (CR-70).
     const ctl = await f.admin(`/admin/curriculum/cohorts/${keep.project.cohort_id}/controls`, { method: "PUT", body: { expected_revision: 0, retention_days_after_end: 30, raw_input_allowed: false, link_expiry_default_days: null, student_deletion: true, team_ceilings: {} } });
     assert.equal(ctl.status, 200, ctl.text);
     const refused = await f.api("/v1/curriculum/experiments", { method: "POST", token: keep.token, body: { project_id: keep.project.id, product_version_id: keep.version, week: 1, question: "q", method: "task_test", success_criteria: ["c"], hypothesis: "다른 가설", declarations: { raw_input: { fields: ["memo"] } } } });
     assert.deepEqual([refused.status, refused.json?.error?.code], [403, "raw_input_not_allowed"]);
+    // Turning it off stops collection for a running experiment too: the page is told no field,
+    // and a value sent anyway is not kept.
+    const off = await participant(f, { seed: 7 }).tab().load(keep.url);
+    assert.deepEqual(off.cfg.raw_input ?? [], [], "the running experiment's page is told no field");
+    const sent = await f.raw(new URL(`/l/${keep.link.id}/__hp/events`, keep.url).href, { method: "POST", body: { token: off.cfg.session_token, events: [{ kind: "input", seq: 91, target: { role: "input", path: "body>input" }, field: "memo", value: "끈 뒤에 보낸 글" }] } });
+    assert.equal(sent.status, 204);
+    assert.ok(!JSON.stringify(await storedEvents(f, keep)).includes("끈 뒤에"), "no value kept after the admin turned raw input off");
+    assert.ok(JSON.stringify(await storedEvents(f, keep)).includes("배달 말고 포장이요"), "control: what was kept before stays until the experiment's data is deleted");
   } finally {
     f.close();
   }
@@ -525,10 +542,13 @@ await test("CR-T25: a draft whose three observed statements cite real events and
       { id: "x2", section: "observation", text: "다른 팀 참가자도 멈췄다", source_refs: [`session:${elsewhere.sessions[0]}`], review: "draft" },
       { id: "x3", section: "observation", text: "세 번째 참가자는 포기했다", source_refs: [`session:${s.sessions[2]}`], review: "draft" },
       { id: "x4", section: "observation", text: "다음 실험 참가자도 멈췄다", source_refs: [`session:${sibSession}`], review: "draft" },
+      // What an AI summary is most likely to make up: a note or an event id that does not exist.
+      { id: "x5", section: "observation", text: "인터뷰에서 가격이 비싸다고 했다", source_refs: ["note:note-" + "0".repeat(32)], review: "draft" },
+      { id: "x6", section: "observation", text: "첫 참가자가 결제까지 갔다", source_refs: [`event:${s.sessions[0]}/e999`], review: "draft" },
     ];
     const bad = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "ai", items: planted } });
     assert.equal(bad.status, 422, bad.text);
-    assert.deepEqual(bad.json.error.refusals.map((r) => [r.item, r.code]).sort(), [["x1", "unresolved_source_ref"], ["x2", "unresolved_source_ref"], ["x3", "deleted_source_ref"], ["x4", "foreign_source_ref"]], "exactly the planted statements (a sibling experiment's session is foreign)");
+    assert.deepEqual(bad.json.error.refusals.map((r) => [r.item, r.code]).sort(), [["x1", "unresolved_source_ref"], ["x2", "unresolved_source_ref"], ["x3", "deleted_source_ref"], ["x4", "foreign_source_ref"], ["x5", "unresolved_source_ref"], ["x6", "unresolved_source_ref"]], "exactly the planted statements (a sibling experiment's session is foreign)");
     // An observed statement with no reference at all is refused as well, and an AI cannot mark its own item reviewed.
     const none = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "ai", items: [{ id: "n", section: "observation", text: "다들 좋아했다", source_refs: [], review: "draft" }] } });
     assert.deepEqual(none.json.error.refusals, [{ item: "n", code: "missing_source_refs" }]);
@@ -684,10 +704,21 @@ await test("CR-T64: deleting a session or an experiment's test data removes even
     assert.deepEqual(await rawHashes(f, s), before, "nothing removed by another team");
     const draft = (await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { from_runtime: true } })).json.draft;
     assert.ok(draft.items.some((i) => i.source_refs.includes(`session:${s.sessions[0]}`)));
+    // An hps-interpretation/1 about the session to be erased, and one about another session.
+    const prefix = `curriculum/${encodeURIComponent(s.project.cohort_id)}/${encodeURIComponent(s.project.id)}/`;
+    for (const [id, sid] of [["i-gone", s.sessions[0]], ["i-kept", s.sessions[1]]]) await f.r2.put(`${prefix}interpretations/${s.experiment.id}/${id}@1`, JSON.stringify({ format: "hps-local-record/1", kind: "interpretation", task: s.experiment.id, interpretation: { id, revision: 1, batch: { session: sid } } }));
+    const rec0 = await recordOf(f, s);
+    const ppOf = async (sid) => (await rec0.sessionLink(PUBLISHED_HOST, sid)).pseudonym;
+    const [pp0, pp1] = [await ppOf(s.sessions[0]), await ppOf(s.sessions[1])];
+    assert.ok((await recordKeys(f, s, "pseudonyms/")).some((k) => k.endsWith(pp0)), "control: the session's pseudonym is indexed");
     const one = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/sessions/${s.sessions[0]}`, { method: "DELETE", token: s.token });
     assert.equal(one.status, 200, one.text);
     assert.equal(one.json.receipt.kind, "participant_session_deleted");
     assert.ok(one.json.receipt.removed.observations >= 2 && one.json.receipt.removed.drafts >= 1, JSON.stringify(one.json.receipt));
+    assert.equal(one.json.receipt.removed.interpretations, 1, JSON.stringify(one.json.receipt));
+    assert.deepEqual((await recordKeys(f, s, "interpretations/")).map((k) => k.split("/").at(-1)), ["i-kept@1"], "only the erased session's interpretation goes");
+    const pKeys = await recordKeys(f, s, "pseudonyms/");
+    assert.ok(!pKeys.some((k) => k.endsWith(pp0)) && pKeys.some((k) => k.endsWith(pp1)), "the erased session's pseudonym key goes; another session's stays");
     const ev = (await evidence(f, s)).json.evidence;
     assert.ok(!ev.sessions.some((x) => x.session_id === s.sessions[0]));
     assert.ok(!ev.drafts.some((d) => d.items.some((i) => i.source_refs.some((r) => r.includes(s.sessions[0])))), "no derived draft still cites the deleted session");
@@ -697,11 +728,18 @@ await test("CR-T64: deleting a session or an experiment's test data removes even
     // A retried delivery of a deleted event is refused (tombstone).
     const rec = await recordOf(f, s);
     assert.equal(await rec.resolveEvidenceRef(s.experiment.id, `session:${s.sessions[0]}`), "deleted");
+    // A draft that cites only the note survives the session erase; the experiment's deletion takes it.
+    const noteDraft = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "user", items: [{ id: "n", section: "observation", text: "메뉴가 많다는 말을 들었다", source_refs: [`note:${s.note.id}`], review: "draft" }] } });
+    assert.equal(noteDraft.status, 201, noteDraft.text);
+    assert.ok((await recordKeys(f, s, "drafts/")).length >= 1, "control: a draft is stored before the experiment's deletion");
     // The whole experiment.
     const all = await f.api(`/v1/curriculum/experiments/${s.experiment.id}`, { method: "DELETE", token: s.token });
     assert.equal(all.status, 200, all.text);
     assert.equal(all.json.receipt.kind, "experiment_test_data_deleted");
-    assert.ok(all.json.receipt.removed.observations >= 1 && all.json.receipt.removed.sessions >= 2, JSON.stringify(all.json.receipt));
+    assert.ok(all.json.receipt.removed.observations >= 1 && all.json.receipt.removed.sessions >= 2 && all.json.receipt.removed.drafts >= 1, JSON.stringify(all.json.receipt));
+    assert.deepEqual(await recordKeys(f, s, "drafts/"), [], "no derived draft left");
+    assert.deepEqual(await recordKeys(f, s, "tasks/"), [], "the record task goes too");
+    assert.equal(all.json.experiment.data_deletion_pending, undefined, "the deletion finished");
     assert.deepEqual(Object.keys(await rawHashes(f, s)), [], "no event, note or session left");
     assert.deepEqual(await recordKeys(f, s, "pseudonyms/"), [], "no pseudonym index key left");
     const after = (await evidence(f, s)).json.evidence;
@@ -1040,6 +1078,13 @@ await test("CR-T62 labels: a task or milestone label is stored only when the exp
     const direct = participantEvents({ experiment: { id: undeclared.experiment.id, declarations: {} }, sessionId: "ps-" + "1".repeat(32), link: { attribution: { project: undeclared.project.id, experiment: undeclared.experiment.id, product_version: undeclared.version } }, linkId: undeclared.link.id, events: [{ kind: "task_start", seq: 1, label: typed[1] }, { kind: "task_complete", seq: 2, label: typed[1] }], now: 1 });
     assert.deepEqual([direct.events.map((e) => [e.kind, e.label, e.text]), direct.labels_dropped], [[["task_start", undefined, "task_start"], ["task_complete", undefined, "task_complete"]], 2], "a start and a finish with an undeclared name are both kept, nameless");
     assert.deepEqual((await storedEvents(f, declared)).filter((e) => e.kind === "task_start" && e.label).map((e) => e.label), ["주문하기"], "positive: the declared label is stored");
+    // A blank name or a blank input field is kept like an undeclared one, not a reason to drop the batch.
+    const blank = participantEvents({ experiment: { id: declared.experiment.id, declarations: { labels: ["주문하기"] } }, sessionId: "ps-" + "2".repeat(32), link: { attribution: { project: declared.project.id, experiment: declared.experiment.id, product_version: declared.version } }, linkId: declared.link.id, events: [{ kind: "task_start", seq: 1, label: "" }, { kind: "milestone", seq: 2, label: "  " }, { kind: "input", seq: 3, target: { role: "input", path: "body>input" }, field: "  " }, { kind: "click", seq: 4, target: { role: "button", path: "body>button" } }], now: 1 });
+    assert.ok(blank.ok, JSON.stringify(blank));
+    assert.deepEqual([blank.events.map((e) => e.text), blank.labels_dropped], [["task_start", "milestone", "input: body>input", "click: button body>button"], 2]);
+    const page = await participant(f, { seed: 9 }).tab().load(declared.url);
+    await page.task("", "start");
+    assert.ok((await storedEvents(f, declared)).some((e) => e.participant.session_id === page.cfg.session_id && e.kind === "task_start" && e.text === "task_start"), "the page's blank task name is stored as an unnamed start");
     // Negative control: the pre-fix rule (any label of 80 characters) is caught by the same verdict.
     const keepAll = participantEvents({ experiment: { id: declared.experiment.id, declarations: { labels: [typed[0]] } }, sessionId: "ps-" + "0".repeat(32), link: { attribution: { project: declared.project.id, experiment: declared.experiment.id, product_version: declared.version } }, linkId: declared.link.id, events: [{ kind: "milestone", seq: 1, label: typed[0] }], now: 1 });
     assert.notDeepEqual(leaks(keepAll.events), []);
@@ -1314,11 +1359,281 @@ await test("page paths: a page_view path is stored only when it names one of the
     const page = await participant(f, { seed: 91 }).tab().load(s.url);
     const views = async () => (await storedEvents(f, s)).filter((e) => e.kind === "page_view" && e.participant.session_id === page.cfg.session_id).map((e) => e.text);
     const send = (seq, path) => f.raw(new URL(`/l/${s.link.id}/__hp/events`, s.url).href, { method: "POST", body: { token: page.cfg.session_token, events: [{ kind: "page_view", seq, path }] } });
+    assert.ok((await views()).includes("page_view: /index.html"), "the landing view (the link's root path) is the entry page");
+    assert.equal((await send(88, "/")).status, 204);
+    assert.equal((await views()).filter((t) => t === "page_view: /index.html").length, 2, "a root path is stored as the entry page");
     assert.equal((await send(89, "/app.js")).status, 204);
     assert.ok((await views()).includes("page_view: /app.js"), "control: a published file's path is kept");
     assert.equal((await send(90, "/주문메모-땅콩알레르기")).status, 204);
-    assert.equal((await views()).filter((t) => t === "page_view").length, (await views()).length - 1, "every other view is stored without a path");
+    assert.equal((await views()).filter((t) => t === "page_view").length, 1, "the made-up path's view is stored without a path");
     assert.ok(!JSON.stringify(await storedEvents(f, s)).includes("땅콩"), "the made-up path is not stored");
+  } finally {
+    f.close();
+  }
+});
+
+// ── CR-69 races, round 3: the record refuses writes before it is scanned ─────
+
+/**
+ * Run `req` with the Service's bucket wrapped: the first `list` whose prefix matches `when`
+ * returns its listing only after `fn` ran to completion on the plain bucket (a write landing
+ * right after the scan read that prefix). Every `put` while the wrapper is installed is counted.
+ */
+async function interleaved(f, when, fn, req) {
+  const bucket = f.env.HPS_TRACES;
+  const seen = { fired: false, out: null };
+  f.env.HPS_TRACES = {
+    get: (...a) => bucket.get(...a),
+    put: (...a) => bucket.put(...a),
+    delete: (...a) => bucket.delete(...a),
+    head: (...a) => bucket.head(...a),
+    async list(opts) {
+      const r = await bucket.list(opts);
+      if (!seen.fired && when(String(opts?.prefix ?? ""))) {
+        seen.fired = true;
+        const saved = f.env.HPS_TRACES;
+        f.env.HPS_TRACES = bucket;
+        try {
+          seen.out = await fn();
+        } finally {
+          f.env.HPS_TRACES = saved;
+        }
+      }
+      return r;
+    },
+  };
+  try {
+    return { res: await req(), ...seen };
+  } finally {
+    f.env.HPS_TRACES = bucket;
+  }
+}
+/** Run `req` with the bucket wrapped so `fn` runs right before the first `put` whose key matches `when` (a write that started before a deletion and lands after it). */
+async function beforePut(f, when, fn, req) {
+  const bucket = f.env.HPS_TRACES;
+  const seen = { fired: false, out: null };
+  f.env.HPS_TRACES = {
+    get: (...a) => bucket.get(...a),
+    list: (...a) => bucket.list(...a),
+    delete: (...a) => bucket.delete(...a),
+    head: (...a) => bucket.head(...a),
+    async put(key, value, opts) {
+      if (!seen.fired && when(key)) {
+        seen.fired = true;
+        const saved = f.env.HPS_TRACES;
+        f.env.HPS_TRACES = bucket;
+        try {
+          seen.out = await fn();
+        } finally {
+          f.env.HPS_TRACES = saved;
+        }
+      }
+      return bucket.put(key, value, opts);
+    },
+  };
+  try {
+    return { res: await req(), ...seen };
+  } finally {
+    f.env.HPS_TRACES = bucket;
+  }
+}
+const milestone = (f, s, page, seq) => f.raw(new URL(`/l/${s.link.id}/__hp/events`, s.url).href, { method: "POST", body: { token: page.cfg.session_token, events: [{ kind: "milestone", seq, label: "x" }] } });
+
+await test("CR-69 races, session erase: a batch landing after the erase scanned observations or gaps is removed and refused (409 session_deleted); a draft citing its event is refused", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f);
+    for (const [seed, seq, when] of [[81, 50, (p) => p.endsWith("/observations/published/")], [82, 60, (p) => p.endsWith("/gaps/published/")]]) {
+      const page = await participant(f, { seed }).tab().load(s.url);
+      const sid = page.cfg.session_id;
+      const run = await interleaved(f, when, () => milestone(f, s, page, seq), () => f.api(`/v1/curriculum/experiments/${s.experiment.id}/sessions/${sid}`, { method: "DELETE", token: s.token }));
+      assert.ok(run.fired, "the batch landed inside the erase");
+      assert.equal(run.res.status, 200, run.res.text);
+      assert.deepEqual([run.out.status, run.out.headers.get("x-hp-refusal")], [409, "session_deleted"], `seq ${seq}`);
+      assert.deepEqual([...(await recordKeys(f, s, "observations/")), ...(await recordKeys(f, s, "assignments/"))].filter((k) => k.includes(sid)), [], `no key of the erased session (seq ${seq})`);
+      assert.notEqual(await (await recordOf(f, s)).resolveEvidenceRef(s.experiment.id, `event:${sid}/e${seq}`), "ok");
+      const d = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "user", items: [{ id: "o", section: "observation", text: "지운 세션의 마일스톤", source_refs: [`event:${sid}/e${seq}`], review: "draft" }] } });
+      assert.equal(d.status, 422, d.text);
+    }
+    // Control: the same batch on a live session is stored.
+    const live = await participant(f, { seed: 83 }).tab().load(s.url);
+    assert.equal((await milestone(f, s, live, 50)).status, 204);
+    assert.equal(await (await recordOf(f, s)).resolveEvidenceRef(s.experiment.id, `event:${live.cfg.session_id}/e50`), "ok");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-69 races, experiment delete: a batch or note landing while the record is scanned is refused and leaves nothing; a note, draft or review that started before the delete and lands after it is removed with 409 experiment_data_deleted; after it, they are refused and write nothing", async () => {
+  const f = await fixture();
+  try {
+    // A participant batch fired while deleteTask lists the experiment's drafts (after both observation scans).
+    const s = await started(f);
+    const page = await participant(f, { seed: 84 }).tab().load(s.url);
+    const run = await interleaved(f, (p) => p.endsWith(`/drafts/${s.experiment.id}/`), () => milestone(f, s, page, 77), () => f.api(`/v1/curriculum/experiments/${s.experiment.id}`, { method: "DELETE", token: s.token }));
+    assert.ok(run.fired && run.res.status === 200, run.res.text);
+    assert.ok([409, 410].includes(run.out.status), `the batch is refused: ${run.out.status}`);
+    assert.deepEqual(await recordKeys(f, s, "observations/"), [], "no participant event left");
+    // A note fired while deleteTask lists observations: the experiment is already closed.
+    const t = await started(f);
+    const noteRun = await interleaved(f, (p) => p.endsWith("/observations/"), () => f.api(`/v1/curriculum/experiments/${t.experiment.id}/notes`, { method: "POST", token: t.token, body: INTERVIEW }), () => f.api(`/v1/curriculum/experiments/${t.experiment.id}`, { method: "DELETE", token: t.token }));
+    assert.ok(noteRun.fired && noteRun.res.status === 200, noteRun.res.text);
+    assert.deepEqual([noteRun.out.status, noteRun.out.json?.error?.code], [409, "experiment_data_deleted"]);
+    assert.deepEqual(await recordKeys(f, t, "observations/"), [], "no note left");
+    // A note, a draft and a draft review that read the experiment before the delete and write after it.
+    const u = await started(f, { noLink: true });
+    const dr = (await f.api(`/v1/curriculum/experiments/${u.experiment.id}/drafts`, { method: "POST", token: u.token, body: { author: "user", items: [{ id: "i", section: "interpretation", text: "메뉴가 많은 것 같다", source_refs: [], review: "draft" }] } })).json.draft;
+    const del = () => f.api(`/v1/curriculum/experiments/${u.experiment.id}`, { method: "DELETE", token: u.token });
+    const v = await started(f, { noLink: true });
+    const vNote = await beforePut(f, (k) => k.includes("/observations/notes/"), () => f.api(`/v1/curriculum/experiments/${v.experiment.id}`, { method: "DELETE", token: v.token }), () => f.api(`/v1/curriculum/experiments/${v.experiment.id}/notes`, { method: "POST", token: v.token, body: INTERVIEW }));
+    assert.ok(vNote.fired && vNote.out.status === 200, vNote.out?.text);
+    assert.deepEqual([vNote.res.status, vNote.res.json?.error?.code], [409, "experiment_data_deleted"], "note");
+    assert.deepEqual(await recordKeys(f, v, "observations/"), [], "the note written after the delete is gone");
+    const review = await beforePut(f, (k) => k.includes(`/drafts/${u.experiment.id}/`), del, () => f.api(`/v1/curriculum/experiments/${u.experiment.id}/drafts/${dr.id}/review`, { method: "POST", token: u.token, body: { revision: 1, actions: [{ item: "i", action: "accept" }] } }));
+    assert.ok(review.fired && review.out.status === 200, review.out?.text);
+    assert.deepEqual([review.res.status, review.res.json?.error?.code], [409, "experiment_data_deleted"], "review");
+    assert.deepEqual(await recordKeys(f, u, "drafts/"), [], "the revision written after the delete is gone");
+    const w = await started(f, { noLink: true });
+    const wDraft = await beforePut(f, (k) => k.includes(`/drafts/${w.experiment.id}/`), () => f.api(`/v1/curriculum/experiments/${w.experiment.id}`, { method: "DELETE", token: w.token }), () => f.api(`/v1/curriculum/experiments/${w.experiment.id}/drafts`, { method: "POST", token: w.token, body: { author: "user", items: [{ id: "i", section: "interpretation", text: "메뉴가 많은 것 같다", source_refs: [], review: "draft" }] } }));
+    assert.ok(wDraft.fired && wDraft.out.status === 200, wDraft.out?.text);
+    assert.deepEqual([wDraft.res.status, wDraft.res.json?.error?.code], [409, "experiment_data_deleted"], "draft");
+    assert.deepEqual(await recordKeys(f, w, "drafts/"), [], "the draft written after the delete is gone");
+    // After the delete: refused before anything is written.
+    let puts = 0;
+    const bucket = f.env.HPS_TRACES;
+    f.env.HPS_TRACES = { get: (...a) => bucket.get(...a), list: (...a) => bucket.list(...a), delete: (...a) => bucket.delete(...a), head: (...a) => bucket.head(...a), put: (...a) => (puts++, bucket.put(...a)) };
+    try {
+      const after = [
+        await f.api(`/v1/curriculum/experiments/${v.experiment.id}/notes`, { method: "POST", token: v.token, body: INTERVIEW }),
+        await f.api(`/v1/curriculum/experiments/${w.experiment.id}/drafts`, { method: "POST", token: w.token, body: { author: "user", items: [{ id: "i", section: "interpretation", text: "다시", source_refs: [], review: "draft" }] } }),
+      ];
+      assert.deepEqual(after.map((r) => [r.status, r.json?.error?.code]), [[409, "experiment_data_deleted"], [409, "experiment_data_deleted"]]);
+    } finally {
+      f.env.HPS_TRACES = bucket;
+    }
+    assert.equal(puts, 0, "a refused write stores nothing");
+    // Control: an experiment that was not deleted takes a note.
+    const x = await started(f, { noLink: true });
+    assert.equal((await f.api(`/v1/curriculum/experiments/${x.experiment.id}/notes`, { method: "POST", token: x.token, body: INTERVIEW })).status, 201);
+  } finally {
+    f.close();
+  }
+});
+
+await test("decision 6, sweep races: a note written while a no-link sweep runs keeps the experiment due and is deleted later; a swept row is forgotten and not listed again; a new link after the sweep records participants; an earlier deletion's references stay 'deleted'; a deletion that failed half-way is due again", async () => {
+  const f = await fixture();
+  try {
+    const DB = f.env.HPS_DB;
+    const rowOf = (id) => DB.prepare("SELECT last_record_at FROM cr_experiment_records WHERE experiment_id = ?").bind(id).first();
+    const backdate = (id) => DB.prepare("UPDATE cr_experiment_records SET last_record_at = ? WHERE experiment_id = ?").bind(Date.now() - 40 * DAY, id).run();
+    const d = await started(f, { noLink: true });
+    const n1 = (await f.api(`/v1/curriculum/experiments/${d.experiment.id}/notes`, { method: "POST", token: d.token, body: INTERVIEW })).json.note;
+    await backdate(d.experiment.id);
+    assert.ok((await runCurriculumRetention(f.env, Date.now())).deleted.includes(d.experiment.id));
+    assert.equal(await rowOf(d.experiment.id), null, "the swept experiment's row is forgotten");
+    assert.ok(!(await runCurriculumRetention(f.env, Date.now() + 1)).deleted.includes(d.experiment.id), "and it is not listed on the next tick");
+    const rec = await recordOf(f, d);
+    assert.equal(await rec.resolveEvidenceRef(d.experiment.id, `note:${n1.id}`), "deleted");
+    // A note written while the sweep runs, right before it forgets the row.
+    const n2 = (await f.api(`/v1/curriculum/experiments/${d.experiment.id}/notes`, { method: "POST", token: d.token, body: { ...INTERVIEW, text: "두 번째 인터뷰" } })).json.note;
+    await backdate(d.experiment.id);
+    let fired = false;
+    let during = null;
+    f.env.HPS_DB = new Proxy(DB, {
+      get(t, k) {
+        if (k !== "prepare") {
+          const v = t[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        }
+        return (sql) => {
+          const st = t.prepare(sql);
+          if (fired || !/^DELETE FROM cr_experiment_records/.test(sql)) return st;
+          return { bind: (...a) => ({ run: async () => {
+            fired = true;
+            f.env.HPS_DB = DB;
+            during = await f.api(`/v1/curriculum/experiments/${d.experiment.id}/notes`, { method: "POST", token: d.token, body: { ...INTERVIEW, text: "세 번째 인터뷰" } });
+            return st.bind(...a).run();
+          } }) };
+        };
+      },
+    });
+    let swept;
+    try {
+      swept = await runCurriculumRetention(f.env, Date.now());
+    } finally {
+      f.env.HPS_DB = DB;
+    }
+    assert.ok(fired && swept.deleted.includes(d.experiment.id) && during.status === 201, during?.text);
+    assert.notEqual(await rowOf(d.experiment.id), null, "the row stays: the note written meanwhile keeps the experiment due");
+    assert.deepEqual((await evidence(f, d)).json.evidence.notes.map((x) => x.text), ["세 번째 인터뷰"]);
+    assert.ok((await runCurriculumRetention(f.env, Date.now() + 31 * DAY)).deleted.includes(d.experiment.id), "30 days after that note it is deleted");
+    assert.deepEqual((await evidence(f, d)).json.evidence.notes, []);
+    // Both deletions' keys stay in the tombstone.
+    for (const n of [n1, n2]) assert.equal(await rec.resolveEvidenceRef(d.experiment.id, `note:${n.id}`), "deleted", n.id);
+    // After the sweep the experiment is still running: a new link opens sessions and records events.
+    const l = await f.api(`/v1/curriculum/experiments/${d.experiment.id}/links`, { method: "POST", token: d.token, body: { expires_at: Date.now() + 3600_000 } });
+    assert.equal(l.status, 201, l.text);
+    const s = { ...d, link: l.json.link, url: l.json.share_url };
+    const page = await participant(f, { seed: 85 }).tab().load(s.url);
+    await page.task("주문하기", "start");
+    assert.ok((await storedEvents(f, s)).some((e) => e.participant.session_id === page.cfg.session_id && e.kind === "task_start"), "the new link's participant is recorded");
+    // A deletion that fails half-way stays pending and is due on the next tick.
+    const p = await withEvidence(f);
+    await f.api(`/v1/curriculum/links/${p.link.id}/revoke`, { method: "POST", token: p.token });
+    const bucket = f.env.HPS_TRACES;
+    let broke = false;
+    f.env.HPS_TRACES = { get: (...a) => bucket.get(...a), list: (...a) => bucket.list(...a), put: (...a) => bucket.put(...a), head: (...a) => bucket.head(...a), async delete(k) { if (!broke && String(k).includes("/observations/")) { broke = true; throw new Error("injected"); } return bucket.delete(k); } };
+    try {
+      assert.ok(!(await runCurriculumRetention(f.env, Date.now() + 31 * DAY)).deleted.includes(p.experiment.id), "the failed deletion is not reported");
+    } finally {
+      f.env.HPS_TRACES = bucket;
+    }
+    assert.ok(broke && Object.keys(await rawHashes(f, p)).length > 0, "control: data is left after the failure");
+    assert.ok((await runCurriculumRetention(f.env, Date.now() + 31 * DAY)).deleted.includes(p.experiment.id), "due again on the next tick");
+    assert.deepEqual(Object.keys(await rawHashes(f, p)), []);
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-69 at the record: deleteTask closes the record before it scans (a batch landing during its observation scan removes itself; a session linked during the delete is taken back); it removes the task key and can run again", async () => {
+  const f = await fixture();
+  try {
+    const bucket = f.r2;
+    const wrapped = (hooks) => ({ get: (...a) => bucket.get(...a), head: (...a) => bucket.head(...a), delete: (...a) => bucket.delete(...a), list: hooks.list ?? ((...a) => bucket.list(...a)), put: hooks.put ?? ((...a) => bucket.put(...a)) });
+    // A batch of a live session that lands right after deleteTask listed the observations.
+    const s = await started(f);
+    const page = await participant(f, { seed: 86 }).tab().load(s.url);
+    const sid = page.cfg.session_id;
+    const plain = await recordOf(f, s);
+    const link = await plain.sessionLink(PUBLISHED_HOST, sid);
+    const built = participantEvents({ experiment: s.experiment, sessionId: sid, link: { attribution: link.attribution }, linkId: s.link.id, events: [{ kind: "milestone", seq: 40, label: "x" }], now: Date.now() });
+    let batch = null;
+    const scanning = participantRecord(wrapped({ async list(opts) {
+      const r = await bucket.list(opts);
+      if (batch === null && String(opts?.prefix ?? "").endsWith("/observations/")) batch = await appendParticipantEvents(plain, s.experiment.id, sid, built.events).then(() => "stored", (e) => e.message);
+      return r;
+    } }), s.project.cohort_id, s.project.id);
+    await scanning.deleteTask(s.experiment.id, { by: "user", at: Date.now() });
+    assert.match(String(batch), /^session_(deleted|not_open)$/, `the batch is refused: ${batch}`);
+    assert.deepEqual((await recordKeys(f, s, "observations/")).filter((k) => k.includes(sid)), [], "nothing of the batch is left");
+    assert.deepEqual((await recordKeys(f, s, "tasks/")).filter((k) => k.includes(s.experiment.id)), [], "the task key is gone");
+    // A session open that read the task before the delete and writes its key after it.
+    const t = await started(f);
+    const tRec = await recordOf(f, t);
+    const opening = participantRecord(wrapped({ async put(key, value, opts) {
+      if (String(key).includes("/sessions/published/")) await tRec.deleteTask(t.experiment.id, { by: "user", at: Date.now() });
+      return bucket.put(key, value, opts);
+    } }), t.project.cohort_id, t.project.id);
+    const opened = await openParticipantSession(opening, { link: t.link, experiment: t.experiment, sessionId: "ps-" + "9".repeat(32), at: Date.now() });
+    assert.deepEqual(opened, { ok: false, code: "experiment_data_deleted" });
+    assert.deepEqual(await recordKeys(f, t, "sessions/published/"), [], "the session key written after the delete is taken back");
+    // Control: the same open on a live experiment links its session.
+    const u = await started(f);
+    assert.equal((await openParticipantSession(await recordOf(f, u), { link: u.link, experiment: u.experiment, sessionId: "ps-" + "8".repeat(32), at: Date.now() })).ok, true);
+    // A deleted task can be deleted again (a retry, or a sweep after a racing write); one never created cannot.
+    assert.ok(await tRec.deleteTask(t.experiment.id, { by: "user", at: Date.now() }));
+    await assert.rejects(tRec.deleteTask("exp-" + "0".repeat(16), { by: "user", at: Date.now() }), /unknown_task/);
   } finally {
     f.close();
   }
