@@ -67,7 +67,7 @@ const recordLines = (text) => text.split("\n").filter((l) => /^- \[(console|exce
 const blocks = (content) => (typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : []);
 const textOf = (content) => blocks(content).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 
-const state = { requests: [], runs: {} };
+const state = { requests: [], runs: {}, verify: [] };
 
 /** The next move for one upstream request: a tool call or the final text. */
 function agent(body) {
@@ -82,6 +82,13 @@ function agent(body) {
   const images = start >= 0 ? blocks(msgs[start].content).filter((b) => b.type === "image").length : 0;
   state.requests.push({ at: Date.now(), tools: (body.tools ?? []).map((t) => t.name), userText, images, system: JSON.stringify(body.system ?? "").slice(0, 200000) });
   if (/\[cr:again\]/.test(userText)) return again(msgs.slice(start + 1));
+  // cr-verify (#1392): a run started from the "내 제품 테스트" panel, a fix request, a proposal.
+  if (/\[Studio 제품 테스트 [^\]]+\]/.test(userText)) return verifyRun(userText, msgs.slice(start + 1));
+  if (/\[hps-fix-request\/1\]/.test(userText)) {
+    state.verify.push({ kind: "fix", text: userText.slice(0, 4000) });
+    return { text: "[로컬 시험 응답] 그 결과를 보고 고칠게요." };
+  }
+  if (/\[cr:propose\]/.test(userText)) return propose(msgs.slice(start + 1));
   const scenario = /\[cr:flow(?::([a-z0-9-]+))?\]/.exec(userText);
   if (!scenario) return { text: "[로컬 시험 응답] 받았어요." };
   const plant = scenario[1] ?? "";
@@ -141,6 +148,44 @@ function again(after) {
   run.steps = 1;
   return finish(run, null, "끝까지 됨");
 }
+// ── cr-verify: the scripted agent's plans, chosen by words in the student's criterion ──
+// The plan is the agent's interpretation of a criterion; the runner, not the agent, judges.
+const ORDER = [
+  { action: "click", target: { role: "button", name: "주문 시작" } },
+  { action: "select", target: { role: "combobox", name: "음료 고르기" }, value: "아이스티" },
+  { action: "click", target: { role: "button", name: "수량 늘리기" } },
+  { action: "click", target: { role: "button", name: "장바구니에 담기" } },
+  { action: "click", target: { role: "button", name: "주문하기" } },
+];
+function planFor(text) {
+  if (/흔들/.test(text)) return { steps: [{ action: "navigate", path: "/index.html?plant=flaky" }, ...ORDER], expect: [{ kind: "text", text: "주문이 완료되었어요" }] };
+  if (/바깥|외부/.test(text)) return { steps: [{ action: "navigate", path: "https://example.com/" }], expect: [{ kind: "text", text: "x" }] };
+  if (/결제 완료/.test(text)) return { steps: ORDER, expect: [{ kind: "text", text: "결제 완료" }] };
+  if (/오류/.test(text)) return { steps: ORDER, expect: [{ kind: "no_errors" }] };
+  if (/주문이 완료/.test(text)) return { steps: ORDER, expect: [{ kind: "text", text: "주문이 완료되었어요" }] };
+  return { steps: [ORDER[0]], expect: [{ kind: "element", role: "combobox", name: "음료 고르기" }] };
+}
+/** One verify_criterion per criterion of the run, in order, then a short answer. */
+function verifyRun(userText, after) {
+  const criteria = [...userText.matchAll(/^- ([0-9a-f-]{36}): (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
+  const round = after.filter((m) => m.role === "assistant").length;
+  const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  if (round > 0) state.verify.push({ kind: "result", round, isError: last?.is_error === true, text: textOf(last?.content).slice(0, 2000) });
+  if (round < criteria.length) {
+    const c = criteria[round];
+    state.verify.push({ kind: "call", id: c.id, text: c.text, at: Date.now() });
+    return { tool: "verify_criterion", input: { criterion_id: c.id, plan: JSON.stringify(planFor(c.text)) } };
+  }
+  return { text: `[로컬 시험 응답] 기대 조건 ${criteria.length}개를 테스트했어요. 결과는 테스트 창에 있어요.` };
+}
+function propose(after) {
+  const round = after.filter((m) => m.role === "assistant").length;
+  if (round === 0) return { tool: "verify_propose_criteria", input: { criteria: JSON.stringify(["주문 시작을 누르면 음료 고르기가 보인다"]) } };
+  const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  state.verify.push({ kind: "proposed", isError: last?.is_error === true, text: textOf(last?.content).slice(0, 500) });
+  return { text: "[로컬 시험 응답] 조건 하나를 제안했어요. 확인해 주세요." };
+}
+
 function finish(run, failedAt, why) {
   run.failedAt = failedAt;
   run.done = true;
@@ -183,7 +228,7 @@ globalThis.fetch = async (input, init) => {
 const server = createServer(async (req, res) => {
   try {
     if (req.url === "/__cr/state") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(state));
-    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; return res.writeHead(204).end(); }
+    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; state.verify = []; return res.writeHead(204).end(); }
     const parts = [];
     for await (const p of req) parts.push(p);
     const body = Buffer.concat(parts);

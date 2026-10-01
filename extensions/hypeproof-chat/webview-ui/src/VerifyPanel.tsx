@@ -121,7 +121,7 @@ export function VerifyPanel(props: {
             {view.report.artifact_version_id === view.version ? "이 버전의 테스트 결과" : "이전 버전의 테스트 결과"}
           </div>
           {view.report.criteria.map((c) => (
-            <div className={`hps-verify-result hps-verify-${c.status}`} key={c.id} data-testid="verify-result" data-status={c.status} data-criterion={c.id}>
+            <div className={`hps-verify-result hps-verify-${c.status}`} key={c.id} data-testid="verify-result" data-status={c.status} data-criterion={c.id} data-test-kind={c.test_kind ?? ""}>
               <div>
                 <span className="hps-verify-badge">{STATUS_LABEL[c.status] ?? c.status}</span> {c.text}
                 {c.method === "vision" && <span className="hps-verify-vision"> · 화면 판단</span>}
