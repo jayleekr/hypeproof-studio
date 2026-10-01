@@ -8,24 +8,33 @@
 //
 // Each request re-reads the link: a revoked or expired link answers 410 with no body, for
 // every path it used to serve (CR-19), and every response is `Cache-Control: no-store` so no
-// cache can keep serving it. A link serves only its experiment's pinned version (the
-// variant's when it names one), never the project's newest (CR-22). Camera and microphone
-// are denied by Permissions-Policy unless the experiment declares them, and then only the
-// participant's own browser prompt can grant them (CR-66). The entry page load opens a
-// participant session attributed to project, experiment, version and channel (CR-21, CR-73)
-// and carries its session token in the injected snippet.
+// cache can keep serving it. No service worker can be installed on a test origin: a request
+// carrying `Service-Worker: script` is answered as an absent file, so a student page that
+// registers one (an offline PWA) cannot keep serving the product from its own cache after
+// the link ends; a 410 also asks the browser to clear the origin's cache and storage. A link
+// serves only its experiment's pinned version (the variant's when it names one), never the
+// project's newest (CR-22). Camera and microphone are denied by Permissions-Policy unless the
+// experiment declares them, and then only the participant's own browser prompt can grant them
+// (CR-66).
+//
+// Participant sessions (CR-21, CR-73): the entry page carries a candidate session id and its
+// signed session token, and writes nothing. The injected snippet keeps the visit's session in
+// sessionStorage (a reload, a back navigation or a link back to the entry page reuses it) and
+// opens it once, with `POST /l/:link/__hp/session`, which records it attributed to project,
+// experiment, version and channel. A fetch that runs no script (a link-preview bot) opens no
+// session. The open is constant cost: one counter row in D1, one session key on R2.
 
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { resolveProfile } from "../lib/modules";
 import { curriculumRuntimeAllowed } from "../lib/moderation";
 import { LINK_ID, linkState, pinnedVersion } from "../lib/curriculum/venture";
-import { getExperiment, getLink, getProject, getVersion } from "../lib/curriculum/store";
+import { getExperiment, getLink, getProject, getVersion, releaseSession, reserveSession } from "../lib/curriculum/store";
 import { matchTestOrigin, parseTestOrigin, projectLabel } from "../lib/curriculum/test-origin";
-import { openParticipantSession, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
-import { newSessionId, signSessionToken } from "../lib/curriculum/session-token";
+import { PUBLISHED_HOST, openParticipantSession, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
+import { newSessionId, signSessionToken, verifySessionToken } from "../lib/curriculum/session-token";
 import { injectSnippet } from "../lib/curriculum/participant-snippet";
-import { testFileKey } from "./curriculum";
+import { PUBLISH_LIMITS, testFileKey } from "./curriculum";
 
 type Ctx = Context<{ Bindings: Env; Variables: { requestId: string } }>;
 
@@ -76,13 +85,23 @@ export function pageHeaders(devices: readonly string[]): Record<string, string> 
   };
 }
 
-const gone = () => new Response(null, { status: 410, headers: baseHeaders() });
+/** A link that ended. Clear-Site-Data drops anything the page kept on its origin (CR-19 "including from a cache"). */
+const gone = () => new Response(null, { status: 410, headers: { ...baseHeaders(), "clear-site-data": '"cache", "storage"' } });
 /** What a test origin answers for anything it does not serve: an unknown path, link or file. */
 export const absent = () => new Response(null, { status: 404, headers: baseHeaders() });
 
 export const testOriginApp = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 
-async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
+type Live = {
+  link: NonNullable<Awaited<ReturnType<typeof getLink>>>;
+  project: NonNullable<Awaited<ReturnType<typeof getProject>>>;
+  experiment: NonNullable<Awaited<ReturnType<typeof getExperiment>>>;
+  version: NonNullable<Awaited<ReturnType<typeof getVersion>>>;
+  now: number;
+};
+
+/** The link as served right now, or the answer for it (absent, or gone once it ended). */
+async function liveLink(c: Ctx, linkId: string): Promise<Live | Response> {
   const origin = parseTestOrigin(c.env.HPS_TEST_ORIGIN, c.env.ENVIRONMENT);
   if (!origin.ok) return absent();
   const match = matchTestOrigin(origin.config, new URL(c.req.url));
@@ -103,6 +122,16 @@ async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
   const versionId = experiment ? pinnedVersion(experiment, link.variant_id) : null;
   const version = versionId ? await getVersion(db, project.id, versionId) : null;
   if (!experiment || !version) return absent();
+  return { link, project, experiment, version, now };
+}
+
+async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
+  // No service worker on a test origin (CR-19): its script fetch is answered as absent, so
+  // registration fails and nothing can answer for the Service after the link ends.
+  if (c.req.header("service-worker") !== undefined) return absent();
+  const live = await liveLink(c, linkId);
+  if (live instanceof Response) return live;
+  const { link, experiment, version, now } = live;
   if (rest === "") {
     // The entry page by its own path, so its relative references resolve.
     return new Response(null, { status: 302, headers: { ...baseHeaders(), location: `/l/${link.id}/${version.entry_html.split("/").map(encodeURIComponent).join("/")}` } });
@@ -122,19 +151,49 @@ async function serve(c: Ctx, linkId: string, rest: string): Promise<Response> {
   const html = await object.text();
   const cfg = { link: link.id, experiment: experiment.id, repeated_use: experiment.declarations?.repeated_use === true, link_expires_at: link.expires_at };
   if (path !== version.entry_html) return new Response(injectSnippet(html, cfg), { status: 200, headers });
-  // The entry page load is a new participant session (CR-21): random id, attributed on the record.
+  // The entry page offers a candidate session (random id, signed token) and records nothing:
+  // the snippet keeps the visit's existing session when it has one, and opens a new one with
+  // POST /l/:link/__hp/session only when it has none (CR-21: one visit, one session).
   const sessionId = newSessionId();
-  const opened = await openParticipantSession(participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), {
-    link,
-    experiment,
-    sessionId,
-    at: now,
-  });
-  if (!opened.ok) return absent();
   const token = await signSessionToken({ link: link.id, session: sessionId, linkExpiresAt: link.expires_at, now }, c.env.HPS_SIGNING_SECRET);
   return new Response(injectSnippet(html, { ...cfg, session_id: sessionId, session_token: token.token }), { status: 200, headers });
 }
 
+/**
+ * Open the participant session a served entry page offered (CR-21, CR-73). Idempotent: a
+ * session already recorded answers 204 and counts once. Constant cost whatever the project
+ * holds: the link's counter row (bounded per link) and one session key on R2.
+ */
+async function openSession(c: Ctx, linkId: string): Promise<Response> {
+  const live = await liveLink(c, linkId);
+  if (live instanceof Response) return live;
+  const { link, project, experiment, now } = live;
+  let token: unknown;
+  try {
+    const raw = await c.req.text();
+    if (raw.length > 2048) return absent();
+    token = (JSON.parse(raw) as { token?: unknown })?.token;
+  } catch {
+    return absent();
+  }
+  const claims = await verifySessionToken(token, link.id, now, c.env.HPS_SIGNING_SECRET);
+  if (!claims) return new Response(null, { status: 403, headers: baseHeaders() });
+  const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+  if ((await record.taskForSession(PUBLISHED_HOST, claims.session)) !== null) return new Response(null, { status: 204, headers: baseHeaders() });
+  if (!(await reserveSession(c.env.HPS_DB, link.id, PUBLISH_LIMITS.maxSessionsPerLink))) return new Response(null, { status: 429, headers: baseHeaders() });
+  let opened: Awaited<ReturnType<typeof openParticipantSession>>;
+  try {
+    opened = await openParticipantSession(record, { link, experiment, sessionId: claims.session, at: now });
+  } catch (e) {
+    await releaseSession(c.env.HPS_DB, link.id);
+    throw e;
+  }
+  if (!opened.ok || !opened.created) await releaseSession(c.env.HPS_DB, link.id);
+  if (!opened.ok) return absent();
+  return new Response(null, { status: 204, headers: baseHeaders() });
+}
+
+testOriginApp.post("/l/:link/__hp/session", (c) => openSession(c, c.req.param("link")));
 testOriginApp.get("/l/:link", (c) => serve(c, c.req.param("link"), ""));
 testOriginApp.get("/l/:link/", (c) => serve(c, c.req.param("link"), ""));
 testOriginApp.get("/l/:link/*", (c) => {

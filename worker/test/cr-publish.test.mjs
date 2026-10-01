@@ -21,8 +21,8 @@ const { parseTestOrigin, originFor, matchTestOrigin } = await import("../src/lib
 const { signSessionToken, verifySessionToken } = await import("../src/lib/curriculum/session-token.ts");
 const { PARTICIPANT_SNIPPET } = await import("../src/lib/curriculum/participant-snippet.ts");
 const { participantRecord, openParticipantSession, sessionsByChannel, PUBLISHED_HOST } = await import("../src/lib/curriculum/participant-record.ts");
-const { CURRICULUM_ROUTES } = await import("../src/routes/curriculum.ts");
-const { CR_SURFACES, CR_TEST_ORIGIN_ROUTE } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
+const { CURRICULUM_ROUTES, PUBLISH_LIMITS } = await import("../src/routes/curriculum.ts");
+const { CR_SURFACES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
 const { issue, issueIssuer } = await import("../src/lib/tokens.ts");
 const { scrubSecrets } = await import("../src/lib/scrub-secrets.ts");
 const { redactText } = await import("../src/lib/measurement-core/local-record.ts");
@@ -83,10 +83,21 @@ async function openEntry(f, url) {
 }
 const hpTest = (html) => JSON.parse(/window\.__hpTest=(\{.*?\});<\/script>/.exec(html)?.[1] ?? "null");
 
+/** What the participant snippet does once per visit: open the session the entry page offered. */
+const openSessionOf = (f, url, token) => f.raw(new URL(`/l/${new URL(url).pathname.split("/")[2]}/__hp/session`, url).href, { method: "POST", body: { token } });
+
+/** One visit like a phone: the entry page, then the snippet's one session open. */
+async function openVisit(f, url) {
+  const page = await openEntry(f, url);
+  const cfg = page.status === 200 ? hpTest(page.text) : null;
+  const opened = cfg ? await openSessionOf(f, url, cfg.session_token) : null;
+  return { page, cfg, opened, status: page.status };
+}
+
 // ── CR-T02, Worker half ──────────────────────────────────────────────────────
 
 await test("CR-T02 inventory: the App's switch-off inventory lists every curriculum route the Worker mounts, and the test origin", () => {
-  assert.deepEqual([...CR_SURFACES.workerRoutes].sort(), [...CURRICULUM_ROUTES, CR_TEST_ORIGIN_ROUTE].sort());
+  assert.deepEqual([...CR_SURFACES.workerRoutes].sort(), [...CURRICULUM_ROUTES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE].sort());
   // Every inventoried /v1 route is really mounted under that method (a planted typo is caught below).
   const src = readFileSync(new URL("../src/routes/curriculum.ts", import.meta.url), "utf8");
   const mounted = [...src.matchAll(/curriculum\.(get|post|put|delete)\("([^"]+)"/g)].map((m) => `${m[1].toUpperCase()} /v1/curriculum${m[2]}`);
@@ -99,8 +110,10 @@ async function switchOffProblems(f, method, path, token) {
   const got = await f.api(path, { method, token, ...(method === "GET" ? {} : { body: {} }) });
   const unknown = await f.api("/v1/cr-never-registered", { method, token, ...(method === "GET" ? {} : { body: {} }) });
   const shape = (r) => JSON.stringify({ s: r.status, t: r.json?.error?.type, m: r.json?.error?.message, keys: Object.keys(r.json?.error ?? {}).sort() });
+  const headers = (r) => JSON.stringify([...(r.headers ?? [])].filter(([k]) => k !== "x-request-id").sort());
   const problems = [];
   if (shape(got) !== shape(unknown)) problems.push(`${method} ${path}: ${shape(got)} vs unknown ${shape(unknown)}`);
+  if (headers(got) !== headers(unknown)) problems.push(`${method} ${path}: headers ${headers(got)} vs unknown ${headers(unknown)}`);
   if (got.json?.error?.path !== new URL("https://x" + path).pathname) problems.push(`${method} ${path}: path differs`);
   return problems;
 }
@@ -125,6 +138,9 @@ await test("CR-T02 switch OFF: every curriculum route, with real ids of a live p
     const unknownPath = await f.open(new URL("/cr-never-registered", s.url).href);
     assert.deepEqual([entry.status, entry.text], [unknownPath.status, unknownPath.text]);
     assert.equal(entry.status, 404);
+    const sessionOpen = await f.raw(new URL(`/l/${s.link.id}/__hp/session`, s.url).href, { method: "POST", body: { token: "x" } });
+    const unknownPost = await f.raw(new URL("/cr-never-registered", s.url).href, { method: "POST", body: { token: "x" } });
+    assert.deepEqual([sessionOpen.status, sessionOpen.text], [unknownPost.status, unknownPost.text], "the session route of a switched-off link = an unknown path");
     // Switch ON again: every route is reachable (not the unknown answer).
     f.setSwitch(true);
     const on = await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token });
@@ -134,6 +150,10 @@ await test("CR-T02 switch OFF: every curriculum route, with real ids of a live p
     f.setSwitch(false);
     const planted = { ...f, api: (path, o) => (path.startsWith("/v1/curriculum/planted") ? Promise.resolve({ status: 200, json: { ok: true } }) : f.api(path, o)) };
     assert.ok((await switchOffProblems(planted, "GET", "/v1/curriculum/planted", s.token)).length > 0, "a route that ignores the switch must be caught");
+    // A planted router-wide no-store (the unknown route's status and body, one extra header) is caught too.
+    const headerPlant = { ...f, api: async (path, o) => { const r = await f.api(path.replace("/v1/curriculum/hdr", "/v1/cr-never-registered"), o); if (!path.startsWith("/v1/curriculum/hdr")) return r; const h = new Headers(r.headers); h.set("cache-control", "no-store"); return { ...r, headers: h, json: { error: { ...r.json.error, path } } }; } };
+    const hp = await switchOffProblems(headerPlant, "GET", "/v1/curriculum/hdr", s.token);
+    assert.deepEqual([hp.length, /headers/.test(hp[0] ?? "")], [1, true], JSON.stringify(hp));
   } finally {
     f.close();
   }
@@ -287,6 +307,12 @@ await test("CR-T19: live links serve; revoked and expired links answer 410 with 
     assert.equal((await openEntry(f, s.url)).status, 200, "positive: before revocation the link serves");
     const assetBefore = await f.open(asset);
     assert.deepEqual([assetBefore.status, assetBefore.headers.get("cache-control")], [200, "no-store"]);
+    // No service worker can install on a test origin: the fetch a registration makes for its
+    // script (`Service-Worker: script`) is answered as an absent file, on any path of the set.
+    for (const path of [asset, new URL(`/l/${s.link.id}/index.html`, s.url).href]) {
+      const sw = await f.open(path, { headers: { "service-worker": "script" } });
+      assert.deepEqual([sw.status, sw.bytes.length], [404, 0], `service-worker fetch of ${path}`);
+    }
     // Another team's student revoking: 404, and the link keeps serving.
     const intruder = await f.api(`/v1/curriculum/links/${s.link.id}/revoke`, { method: "POST", token: await f.student("cr-c"), body: {} });
     assert.equal(intruder.status, 404);
@@ -295,8 +321,10 @@ await test("CR-T19: live links serve; revoked and expired links answer 410 with 
     assert.deepEqual([rv.status, rv.json.link.state], [200, "revoked"]);
     for (const url of [s.url, new URL(`/l/${s.link.id}/index.html`, s.url).href, asset]) {
       const r = await f.open(url);
-      assert.deepEqual([r.status, r.bytes.length, r.headers.get("cache-control")], [410, 0, "no-store"], url);
+      assert.deepEqual([r.status, r.bytes.length, r.headers.get("cache-control"), r.headers.get("clear-site-data")], [410, 0, "no-store", '"cache", "storage"'], url);
     }
+    // A revoked link opens no session either.
+    assert.equal((await openSessionOf(f, s.url, "hpsts1.x.y")).status, 410);
     // Expiry: a link whose time has passed answers the same 410.
     const e = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 150 } });
     assert.equal(e.status, 201, e.text);
@@ -320,14 +348,29 @@ await test("CR-T19: live links serve; revoked and expired links answer 410 with 
 
 // ── CR-T21 ───────────────────────────────────────────────────────────────────
 
-await test("CR-T21: opening the v0 link creates a participant session record carrying project, experiment and version; a session whose version is not the experiment's is refused", async () => {
+await test("CR-T21: opening the v0 link creates one participant session record carrying project, experiment and version; a fetch that runs no script opens none; a session whose version is not the experiment's is refused", async () => {
   const f = await fixture();
   try {
     const s = await started(f, { channel: "학교 게시판" });
-    const page = await openEntry(f, s.url);
-    const cfg = hpTest(page.text);
-    assert.match(cfg.session_id, /^ps-[0-9a-f]{32}$/);
     const record = participantRecord(f.r2, f.cohort, s.project.id);
+    const sessionKeys = () => [...f.r2.map.keys()].filter((k) => k.includes("/sessions/published/"));
+    const counted = async () => (await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels["학교 게시판"] ?? 0;
+    // A fetch of the entry page alone (a link-preview bot, a prefetch) records nothing.
+    const bot = await openEntry(f, s.url);
+    assert.equal(bot.status, 200);
+    assert.deepEqual([sessionKeys().length, await counted()], [0, 0], "the entry page load writes no session");
+    const { page, cfg, opened } = await openVisit(f, s.url);
+    assert.equal(page.status, 200);
+    assert.match(cfg.session_id, /^ps-[0-9a-f]{32}$/);
+    assert.equal(opened.status, 204, opened.text);
+    // Idempotent: the same visit opening again (a retry, a second tab of the visit) counts once.
+    assert.equal((await openSessionOf(f, s.url, cfg.session_token)).status, 204);
+    assert.deepEqual([sessionKeys().length, await counted()], [1, 1], "one visit, one session, counted once");
+    // A forged or another link's token opens nothing.
+    assert.equal((await openSessionOf(f, s.url, cfg.session_token.slice(0, -2) + "xx")).status, 403);
+    const other = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, channel: "단톡방" } });
+    assert.equal((await openSessionOf(f, other.json.share_url, cfg.session_token)).status, 403, "a token is bound to its link");
+    assert.deepEqual([sessionKeys().length, await counted()], [1, 1]);
     assert.deepEqual(await record.sessionAttribution(PUBLISHED_HOST, cfg.session_id), { project: s.project.id, experiment: s.experiment.id, product_version: s.version, link: s.link.id, channel: "학교 게시판" });
     assert.equal(await record.taskForSession(PUBLISHED_HOST, cfg.session_id), s.experiment.id, "the session is linked to the experiment's task (same id, R6)");
     const task = await record.getTask(s.experiment.id);
@@ -373,7 +416,7 @@ await test("CR-T22: publishing v1 while the v0 experiment runs leaves its link, 
     assert.notEqual(v1.id, s.version);
     assert.equal(await servesMarker(f, s.url, "버전 0"), true, "the running experiment's link keeps v0");
     assert.equal(await servesMarker(f, demo.json.share_url, "버전 0"), true, "a demo pinned to v0 keeps showing v0");
-    const cfg = hpTest((await openEntry(f, s.url)).text);
+    const { cfg } = await openVisit(f, s.url);
     assert.equal((await participantRecord(f.r2, f.cohort, s.project.id).sessionAttribution(PUBLISHED_HOST, cfg.session_id)).product_version, s.version);
     // A new experiment on v1 serves v1 beside it.
     const e1 = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: v1.id, week: 2, question: "q", method: "task_test", success_criteria: ["c"], hypothesis_id: s.hypothesis.id } });
@@ -399,16 +442,19 @@ await test("CR-T68: two channel-labelled links attribute their sessions to their
     const s = await started(f, { channel: "학교 게시판" });
     const dm = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, channel: "1:1 메시지" } });
     const plain = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000 } });
-    await openEntry(f, s.url);
-    await openEntry(f, s.url);
-    await openEntry(f, dm.json.share_url);
-    await openEntry(f, plain.json.share_url);
+    await openVisit(f, s.url);
+    await openVisit(f, s.url);
+    await openVisit(f, dm.json.share_url);
+    await openVisit(f, plain.json.share_url);
     const record = participantRecord(f.r2, f.cohort, s.project.id);
     // A session linked with no recorded link (an App-side or legacy link): "unknown channel", never guessed.
     await record.linkSession(s.experiment.id, { host: PUBLISHED_HOST, session_id: "ps-no-link", by: "adapter_explicit", at: Date.now() });
     const read = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token });
-    assert.deepEqual(read.json.sessions_opened, { channels: { "학교 게시판": 2, "1:1 메시지": 1 }, unlabelled: 1, unknown: 1 });
+    // The route counts what the published links opened (the per-link index): never a session without a link.
+    assert.deepEqual(read.json.sessions_opened, { channels: { "학교 게시판": 2, "1:1 메시지": 1 }, unlabelled: 1, unknown: 0 });
     assert.equal(read.json.note, "usage_observation");
+    // The index agrees with the record it indexes; the record's own reading keeps the unlinked session "unknown".
+    assert.deepEqual(await sessionsByChannel(record, s.experiment.id), { channels: { "학교 게시판": 2, "1:1 메시지": 1 }, unlabelled: 1, unknown: 1 });
     // A session claiming an experiment other than its link's is refused and writes nothing.
     const other = await started(f, { token: s.token });
     const before = f.r2.map.size;
@@ -422,6 +468,10 @@ await test("CR-T68: two channel-labelled links attribute their sessions to their
     // Instrument negative control: a counter that assigned unlinked sessions to a channel would differ.
     const counts = await sessionsByChannel(record, s.experiment.id);
     assert.notEqual(counts.unknown, 0, "the unlinked session stays unknown");
+    // A visit to the revoked link's channel no longer counts; the live one still does.
+    await openVisit(f, s.url);
+    await openVisit(f, dm.json.share_url);
+    assert.deepEqual((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels, { "학교 게시판": 2, "1:1 메시지": 2 });
     // Channel labels are the student's short words, bounded.
     assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 1000_000, channel: "가".repeat(41) } })).json.error.code, "invalid_channel");
   } finally {
@@ -490,6 +540,23 @@ function browser({ ua = "Mozilla/5.0 (iPhone)", seed = 1 } = {}) {
   const store = (m) => ({ getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) });
   return {
     local,
+    /** One tab: its sessionStorage lives across page loads; `fetch` answers the session open with `status`. */
+    tab({ status = 204 } = {}) {
+      const session = new Map();
+      const posts = [];
+      return {
+        posts,
+        session,
+        async load(cfg, snippet = PARTICIPANT_SNIPPET) {
+          const fetch = (url, init) => { posts.push({ url, body: JSON.parse(init.body) }); return Promise.resolve({ ok: status >= 200 && status < 300 }); };
+          const win = { __hpTest: { ...cfg }, sessionStorage: store(session), localStorage: store(local), navigator: { userAgent: ua }, fetch };
+          const crypto = { getRandomValues: (b) => { for (let i = 0; i < b.length; i++) b[i] = (n = (n * 1103515245 + 12345) & 0x7fffffff) & 255; return b; } };
+          vm.runInNewContext(snippet, { window: win, navigator: win.navigator, crypto, JSON, Date, Object, Uint8Array });
+          await new Promise((r) => setImmediate(r));
+          return win.hypeproof.test;
+        },
+      };
+    },
     visit(cfg, snippet = PARTICIPANT_SNIPPET) {
       const win = { __hpTest: { ...cfg }, sessionStorage: store(new Map()), localStorage: store(local), navigator: { userAgent: ua } };
       const crypto = { getRandomValues: (b) => { for (let i = 0; i < b.length; i++) b[i] = (n = (n * 1103515245 + 12345) & 0x7fffffff) & 255; return b; } };
@@ -530,6 +597,29 @@ function pseudonymProblems(snippet) {
   return problems;
 }
 
+/** The one-visit verdict on a snippet: problems found, empty when it holds. */
+async function oneVisitProblems(snippet) {
+  const problems = [];
+  const cfg = (session, entry = true) => ({ link: "L1", experiment: "exp-a", repeated_use: false, link_expires_at: Date.now() + 3600_000, ...(entry ? { session_id: session, session_token: `tok-${session}` } : {}) });
+  const tab = browser({ seed: 3 }).tab();
+  const home = await tab.load(cfg("ps-1"), snippet);
+  const menu = await tab.load(cfg(null, false), snippet);
+  const back = await tab.load(cfg("ps-2"), snippet);
+  const reload = await tab.load(cfg("ps-3"), snippet);
+  if (new Set([home, menu, back, reload].map((t) => t.session_id)).size !== 1) problems.push(`a second session in one visit: ${[home, menu, back, reload].map((t) => t.session_id)}`);
+  if (new Set([home, menu, back, reload].map((t) => t.pseudonym)).size !== 1) problems.push("a second pseudonym in one visit");
+  if (tab.posts.length !== 1 || tab.posts[0]?.body.token !== "tok-ps-1" || tab.posts[0]?.url !== "/l/L1/__hp/session") problems.push(`the session is not opened exactly once: ${JSON.stringify(tab.posts)}`);
+  // A refused open (429, network) is retried by the next page load of the same visit, with the same session.
+  const busy = browser({ seed: 5 }).tab({ status: 429 });
+  await busy.load(cfg("ps-9"), snippet);
+  await busy.load(cfg("ps-10"), snippet);
+  if (busy.posts.length !== 2 || busy.posts.some((p) => p.body.token !== "tok-ps-9")) problems.push(`a refused open is not retried with the visit's session: ${JSON.stringify(busy.posts)}`);
+  // Two tabs are two visits.
+  const other = await browser({ seed: 3 }).tab().load(cfg("ps-4"), snippet);
+  if (other.session_id === home.session_id) problems.push("two tabs share a session");
+  return problems;
+}
+
 await test("CR-T60 pseudonym: random, one experiment, shared across sessions only when repeated use is declared, ended with its link; planted defects are caught", async () => {
   assert.deepEqual(pseudonymProblems(PARTICIPANT_SNIPPET), [], "positive: the shipped snippet holds");
   assert.ok(new TextEncoder().encode(PARTICIPANT_SNIPPET).length < 2048, "under 2 KB");
@@ -545,6 +635,14 @@ await test("CR-T60 pseudonym: random, one experiment, shared across sessions onl
   assert.ok(pseudonymProblems(globalKey).some((p) => /two experiments/.test(p)), "one pseudonym across experiments is caught");
   const noLinkCheck = PARTICIPANT_SNIPPET.replace("s.link===C.link&&", "");
   assert.ok(pseudonymProblems(noLinkCheck).some((p) => /new link/.test(p)), "reusing a pseudonym under a later link is caught");
+  // One visit, one session (CR-21): home → menu → home → reload in one tab keeps the first
+  // session and pseudonym, and the session is opened on the Service once.
+  assert.deepEqual(await oneVisitProblems(PARTICIPANT_SNIPPET), [], "positive: the shipped snippet keeps one session per visit");
+  const overwrite = PARTICIPANT_SNIPPET.replace("x=g(S,K);if(!(x&&V.test(x.pseudonym)&&x.session_id))x=null;", "x=null;");
+  assert.notEqual(overwrite, PARTICIPANT_SNIPPET, "plant applied");
+  assert.ok((await oneVisitProblems(overwrite)).some((p) => /second session/.test(p)), "a snippet that adopts every candidate (the old behaviour) is caught");
+  const noRetry = PARTICIPANT_SNIPPET.replace("if(q.ok){x.o=1;p(S,K,x)}", "x.o=1;p(S,K,x)");
+  assert.ok((await oneVisitProblems(noRetry)).some((p) => /retried/.test(p)), "a snippet that marks a refused open as done is caught");
   // The Service serves two different session ids to two loads of one link.
   const f = await fixture();
   try {
@@ -764,6 +862,187 @@ await test("CR-T11 published-origin cases: agent actions and runner steps may ac
     assert.equal(ver.id, st.product_version_id);
     assert.equal(mine.session.publishedArtifactVersion(`${foreign}/l/AAAAAAAAAAAAAAAAAAAAAA/index.html`), null);
     rmSync(otherRoot, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    f.close();
+  }
+});
+
+// ── CR-18/CR-20 at classroom scale: the open path is constant cost ───────────
+
+/** R2 calls made by `fn`, counted on the fixture's bucket. */
+async function r2Calls(f, fn) {
+  const n = { get: 0, put: 0, list: 0, delete: 0 };
+  const orig = {};
+  for (const k of Object.keys(n)) {
+    orig[k] = f.r2[k];
+    f.r2[k] = (...a) => { n[k]++; return orig[k].apply(f.r2, a); };
+  }
+  try {
+    await fn();
+  } finally {
+    for (const k of Object.keys(n)) f.r2[k] = orig[k];
+  }
+  return n;
+}
+
+await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and the 500th session, and the task document never grows; the old append-and-scan path would not", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f, { channel: "학교 게시판" });
+    const taskKey = [...f.r2.map.keys()].find((k) => k.endsWith(`tasks/${s.experiment.id}`));
+    assert.ok(taskKey, "the experiment's record task exists");
+    const taskBytes = () => f.r2.map.get(taskKey).byteLength;
+    const before = taskBytes();
+    const first = await r2Calls(f, () => openVisit(f, s.url));
+    for (let i = 0; i < 498; i++) await openVisit(f, s.url);
+    const last = await r2Calls(f, () => openVisit(f, s.url));
+    assert.deepEqual(last, first, `R2 calls per visit: first ${JSON.stringify(first)}, 500th ${JSON.stringify(last)}`);
+    assert.ok(first.get + first.put + first.list <= 8, `a small constant: ${JSON.stringify(first)}`);
+    assert.equal(first.list, 0, "no listing on the open path");
+    assert.equal(taskBytes(), before, "the task document is not rewritten per open");
+    const channels = await r2Calls(f, () => f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token }));
+    assert.deepEqual(channels, { get: 0, put: 0, list: 0, delete: 0 }, "the per-channel counts read no session");
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels["학교 게시판"], 500);
+    // Negative control: the pre-fix path (linkSession: quota scan plus task append) grows with N.
+    const record = participantRecord(f.r2, f.cohort, s.project.id);
+    const old = await r2Calls(f, () => record.linkSession(s.experiment.id, { host: PUBLISHED_HOST, session_id: "ps-old-path", by: "adapter_explicit", at: Date.now(), attribution: { project: s.project.id, experiment: s.experiment.id, product_version: s.version } }));
+    assert.ok(old.get > 500 && old.list > 0, `the planted old path must be caught: ${JSON.stringify(old)}`);
+    // The per-link bound: a full link opens no more sessions and answers 429; its pages still serve.
+    if (f.db) f.db.prepare("UPDATE cr_test_links SET sessions_opened = ? WHERE id = ?").run(PUBLISH_LIMITS.maxSessionsPerLink, s.link.id);
+    else await f.env.HPS_DB.prepare("UPDATE cr_test_links SET sessions_opened = ? WHERE id = ?").bind(PUBLISH_LIMITS.maxSessionsPerLink, s.link.id).run();
+    const full = await openVisit(f, s.url);
+    assert.deepEqual([full.status, full.opened.status], [200, 429]);
+  } finally {
+    f.close();
+  }
+});
+
+// ── Ownership guards on the student routes (R5) ──────────────────────────────
+
+await test("guards: a revoked student token or one whose student is off the roster publishes, links and revokes nothing; a director scoped to another profile cannot set the team; the test origin is matched on its port", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f);
+    const writes = async (token) => [
+      (await f.upload(s.project.id, V1, token)).status,
+      (await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token, body: { expires_at: Date.now() + 3600_000 } })).status,
+      (await f.api(`/v1/curriculum/links/${s.link.id}/revoke`, { method: "POST", token, body: {} })).status,
+      (await f.api("/v1/curriculum/projects", { method: "POST", token, body: { title: "x" } })).status,
+    ];
+    const state = async () => JSON.stringify([(await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token })).json, f.r2.map.size]);
+    // Positive control: a fresh token of the same member is accepted.
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: await f.student() })).status, 200);
+    const before = await state();
+    const { revokeToken } = await import("../src/lib/kv.ts");
+    const revoked = await f.student();
+    await revokeToken(f.env.HPS_KV, JSON.parse(Buffer.from(revoked.split(".")[0], "base64url")).jti, { reason: "synthetic" }, 3600);
+    assert.deepEqual(await writes(revoked), [401, 401, 401, 401], "revoked token");
+    const { setRoster } = await import("../src/lib/kv.ts");
+    await setRoster(f.env.HPS_KV, f.cohort, ["cr-b", "cr-c"]);
+    assert.deepEqual(await writes(await f.student()), [403, 403, 403, 403], "student no longer on the roster");
+    await setRoster(f.env.HPS_KV, f.cohort, ["cr-a", "cr-b", "cr-c"]);
+    assert.equal(await state(), before, "nothing was written");
+    // The director's scope must name the Project's profile, not only its cohort.
+    const offProfile = await f.issuer(f.cohort, f.other.id);
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/members`, { method: "PUT", token: offProfile, body: { members: ["cr-a", "cr-b"] } })).status, 404);
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a", "cr-b"] } })).status, 200, "control: the scoped director can");
+    // The test origin is its host AND its port: another port of the same host is not it.
+    const cfg = parseTestOrigin(TEST_ORIGIN, "development").config;
+    const label = new URL(s.url).hostname;
+    assert.ok(matchTestOrigin(cfg, new URL(`http://${label}:8799/l/x/`)), "control: the configured port matches");
+    assert.equal(matchTestOrigin(cfg, new URL(`http://${label}:8800/l/x/`)), null);
+    assert.equal(matchTestOrigin(cfg, new URL(`http://${label}/l/x/`)), null);
+    const otherPort = await f.open(s.url.replace(":8799", ":8800"));
+    assert.notEqual(otherPort.status, 302, "a request on another port is not served as the test origin");
+  } finally {
+    f.close();
+  }
+});
+
+// ── The publish scan on ordinary student code ────────────────────────────────
+
+await test("CR-T17 scan precision: a login-form mockup, a random-id helper and an env read publish; a literal value under the same names is still refused; a forged token's refusal names its real line", async () => {
+  const ctx = { projectId: "prj-0000000000000000", testOrigin: "http://prj-0000000000000000.test.invalid" };
+  for (const ordinary of [
+    "const password = document.querySelector('#pw').value;",
+    "let token = Math.random().toString(36).slice(2);",
+    "const API_KEY = process.env.API_KEY;",
+    "const secret = getSecretFromForm();",
+    "user.password = form.password.value;",
+  ]) assert.deepEqual(scanFile("app.js", ordinary, ctx), [], ordinary);
+  for (const literal of ['const password = "hunter2hunter2";', "API_KEY=abcdefghijkl", "let token = 'abcdefgh12345678';", "SECRET: `a1b2c3d4e5f6`"]) {
+    assert.ok(scanFile("app.js", literal, ctx).some((h) => h.rule === "secret_assignment"), `a literal must still be refused: ${literal}`);
+  }
+  const f = await fixture();
+  try {
+    const s = await started(f);
+    const origin = originFor(parseTestOrigin(TEST_ORIGIN, "development").config, s.project.id);
+    const forged = `${b64u({ u: "a", c: "x", p: "y", role: "app", project: s.project.id, origin })}.${"s".repeat(43)}`;
+    const r = await f.upload(s.project.id, { ...V0, "app.js": `// 1\n// 2\nconst t="${forged}";` }, s.token);
+    assert.deepEqual([r.status, r.json.error.hits[0].detail, r.json.error.hits[0].line], [422, "signature", 3], r.text);
+    assert.match(scanRefusalText({ file: "app.js", line: 3, rule: "hypeproof_token", detail: "student" }), /참여 코드/);
+    assert.match(scanRefusalText({ file: "app.js", line: 3, rule: "hypeproof_token", detail: "issuer" }), /강사용 코드/);
+  } finally {
+    f.close();
+  }
+});
+
+// ── The App never forks or orphans the student's Project ─────────────────────
+
+await test("App project: a transient failure aborts instead of creating a second Project; a switch-off answer keeps the remembered id; a teammate adopts the team's Project; a declared device reaches the served policy", async () => {
+  const f = await fixture();
+  const root = workspace(V0);
+  try {
+    const a = appSession(f, root);
+    assert.equal((await a.session.submit(FORM)).ok, true);
+    const first = a.project();
+    const projectsOf = async (u) => (await f.api("/v1/curriculum/projects", { token: await f.student(u) })).json.projects.map((p) => p.id);
+    // One transient 503 on the project read: the publish stops with a message, no second Project.
+    const flaky = appSession(f, root);
+    await flaky.session.submit(FORM);
+    const remembered = flaky.project();
+    let fail = true;
+    const inner = flaky.session.ports.fetchImpl;
+    flaky.session.ports.fetchImpl = async (url, init) => {
+      if (fail && (init?.method ?? "GET") === "GET" && new URL(url).pathname.endsWith(`/projects/${remembered}`)) {
+        fail = false;
+        return new Response(JSON.stringify({ error: { type: "upstream", code: "unavailable" } }), { status: 503 });
+      }
+      return inner(url, init);
+    };
+    const r = await flaky.session.submit(FORM);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /503/);
+    assert.equal(flaky.project(), remembered, "the remembered Project is kept");
+    assert.deepEqual((await projectsOf("cr-a")).filter((id) => id !== first && id !== remembered), [], "no new Project was created");
+    // Control: with the network back the same publish goes into the same Project.
+    assert.equal((await flaky.session.submit(FORM)).ok, true);
+    assert.equal(flaky.project(), remembered);
+    // The switch off for a lesson: every route answers 404; the id stays, and comes back with the switch.
+    f.setSwitch(false);
+    await flaky.session.view();
+    assert.equal(flaky.project(), remembered, "a switch-off 404 does not erase the remembered Project");
+    f.setSwitch(true);
+    const back = await flaky.session.view();
+    assert.equal(back.project.id, remembered);
+    // A teammate the director adds finds the team Project instead of making a solo one.
+    await f.api(`/v1/curriculum/projects/${first}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a", "cr-c"] } });
+    const mate = appSession({ ...f, student: () => f.student("cr-c") }, root);
+    assert.equal((await mate.session.view()).project.id, first, "the team Project is adopted");
+    assert.equal((await mate.session.submit(FORM)).ok, true);
+    assert.deepEqual(await projectsOf("cr-c"), [first], "no solo Project for the teammate");
+    // A remembered Project the student was removed from, with no other: forgotten, a new one is made on publish.
+    await f.api(`/v1/curriculum/projects/${first}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a"] } });
+    assert.equal((await mate.session.view()).project, null);
+    assert.equal(mate.project(), undefined);
+    // Declared devices from the panel reach the served Permissions-Policy (CR-66 declared path).
+    const cam = appSession(f, root);
+    const cr = await cam.session.submit({ ...FORM, devices: ["camera"], repeated_use: true });
+    assert.equal(cr.ok, true, JSON.stringify(cr));
+    const page = await openEntry(f, cr.share_url);
+    assert.match(page.headers.get("permissions-policy"), /camera=\(self\), microphone=\(\)/);
+    assert.equal(hpTest(page.text).repeated_use, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
     f.close();

@@ -18,7 +18,6 @@ import { getRoster, isTokenRevoked } from "../lib/kv";
 import { resolveProfile } from "../lib/modules";
 import { profileServesCohort } from "../lib/cohort-binding";
 import { curriculumRuntimeAllowed } from "../lib/moderation";
-import { getProfile } from "../profiles";
 import { makeErrorBody } from "../middleware/request-id";
 import { digestOf } from "../lib/measurement-core/local-record";
 import {
@@ -34,6 +33,7 @@ import {
   type TestLink,
 } from "../lib/curriculum/venture";
 import {
+  channelCounts,
   createExperiment,
   createHypothesis,
   createLink,
@@ -54,7 +54,7 @@ import {
 } from "../lib/curriculum/store";
 import { hypeproofTokensIn, judgeToken, scanFile, type ScanHit } from "../lib/curriculum/publish-scan";
 import { originFor, parseTestOrigin, shareUrl } from "../lib/curriculum/test-origin";
-import { ensureExperimentTask, participantRecord, sessionsByChannel, type R2Like } from "../lib/curriculum/participant-record";
+import { ensureExperimentTask, participantRecord, type R2Like } from "../lib/curriculum/participant-record";
 
 type Ctx = Context<{ Bindings: Env; Variables: { requestId: string } }>;
 
@@ -65,6 +65,8 @@ export const PUBLISH_LIMITS = {
   maxSetBytes: 20 * 1024 * 1024,
   /** A link's expiry is chosen by the student; this only bounds it. */
   maxLinkLifetimeMs: 90 * 24 * 3600_000,
+  /** Participant sessions one link may open (each one fixed-size session key on R2). */
+  maxSessionsPerLink: 5000,
 } as const;
 
 /** Exactly what an unknown route answers (src/index.ts `app.notFound`). */
@@ -94,6 +96,7 @@ async function student(c: Ctx): Promise<Student | Response> {
   if ((payload.role !== undefined && payload.role !== "student") || payload.account || !payload.c) return unknownRoute(c);
   const resolved = await resolveProfile(c.env, payload.p);
   if (!resolved || !curriculumRuntimeAllowed(resolved.profile)) return unknownRoute(c);
+  noStore(c);
   if (payload.jti && (await isTokenRevoked(c.env.HPS_KV, payload.jti))) return refuse(c, 401, "revoked");
   if (!(await profileServesCohort(c.env, resolved.profile, payload)).ok) return refuse(c, 401, "cohort_profile_mismatch");
   if (!(await getRoster(c.env.HPS_KV, payload.c))?.users.includes(payload.u)) return refuse(c, 403, "not_in_roster");
@@ -106,6 +109,14 @@ async function memberProject(c: Ctx, s: Student, projectId: unknown): Promise<Pr
   const project = await getProject(c.env.HPS_DB, projectId);
   if (!project || !isMember(project, s.payload)) return unknownRoute(c);
   return project;
+}
+
+/**
+ * `no-store` on every answer once the switch is known to be on, and only then: a switch-off
+ * answer carries exactly the unknown route's headers (CR-T02 compares them).
+ */
+function noStore(c: Ctx): void {
+  c.header("cache-control", "no-store");
 }
 
 const testOrigin = (env: Env) => parseTestOrigin(env.HPS_TEST_ORIGIN, env.ENVIRONMENT);
@@ -123,10 +134,6 @@ function b64ToBytes(s: string): Uint8Array | null {
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export const curriculum = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
-curriculum.use("*", async (c, next) => {
-  c.header("cache-control", "no-store");
-  await next();
-});
 
 // ── Projects (R5) ────────────────────────────────────────────────────────────
 
@@ -188,9 +195,12 @@ curriculum.put("/projects/:id/members", async (c) => {
   const id = c.req.param("id");
   if (!isVentureId(id)) return unknownRoute(c);
   const project = await getProject(c.env.HPS_DB, id);
-  if (!project || !(payload.scopes ?? []).some((sc) => sc.cohort === project.cohort_id)) return unknownRoute(c);
-  const profile = getProfile(project.profile_id);
-  if (!profile || !curriculumRuntimeAllowed(profile)) return unknownRoute(c);
+  // The issuer's scope must cover the Project's cohort AND its profile; the switch is the
+  // served profile's, read exactly as the student routes and the test origin read it.
+  if (!project || !(payload.scopes ?? []).some((sc) => sc.cohort === project.cohort_id && (sc.profiles ?? []).includes(project.profile_id))) return unknownRoute(c);
+  const resolved = await resolveProfile(c.env, project.profile_id);
+  if (!resolved || !curriculumRuntimeAllowed(resolved.profile)) return unknownRoute(c);
+  noStore(c);
   if (payload.jti && (await isTokenRevoked(c.env.HPS_KV, payload.jti))) return refuse(c, 401, "revoked");
   let body: { members?: unknown } = {};
   try {
@@ -266,11 +276,11 @@ curriculum.put("/projects/:id/versions/:digest", async (c) => {
     const text = new TextDecoder().decode(d.data);
     hits.push(...scanFile(d.meta.path, text, ctx));
     for (const t of hypeproofTokensIn(text)) {
-      if (judgeToken(t, ctx) !== null) continue; // already a hit above
+      if (judgeToken(t.value, ctx) !== null) continue; // already a hit above
       try {
-        await verify(t, c.env.HPS_SIGNING_SECRET);
+        await verify(t.value, c.env.HPS_SIGNING_SECRET);
       } catch {
-        hits.push({ file: d.meta.path, line: 0, rule: "hypeproof_token", detail: "signature" });
+        hits.push({ file: d.meta.path, line: t.line, rule: "hypeproof_token", detail: "signature" });
       }
     }
   }
@@ -343,8 +353,9 @@ curriculum.get("/experiments/:id/channels", async (c) => {
   if (!experiment) return unknownRoute(c);
   const project = await memberProject(c, s, experiment.project_id);
   if (project instanceof Response) return project;
-  const counts = await sessionsByChannel(participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), experiment.id);
-  // Link opens per channel: a usage observation, never a demand claim (SX-58).
+  // Sessions opened per channel, from the per-link counters (one query, no session read):
+  // a usage observation, never a demand claim (SX-58).
+  const counts = await channelCounts(c.env.HPS_DB, experiment.id);
   return c.json({ experiment_id: experiment.id, sessions_opened: counts, note: "usage_observation" });
 });
 

@@ -117,6 +117,10 @@ jobs:
       - name: Run remote classroom operations against local D1
         working-directory: worker
         run: npm run test:classroom-ops:d1
+      # cr-publish (#1393) — Publish for User Test (CR-T80 and the publish routes) on local workerd/D1.
+      - name: Run Publish for User Test against local D1
+        working-directory: worker
+        run: npm run test:cr-publish:d1
 
   worker-typecheck:
     name: worker / typecheck

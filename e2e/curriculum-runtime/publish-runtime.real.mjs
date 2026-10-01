@@ -14,7 +14,14 @@
 //           device permission is caught by the source check.
 //   CR-T60  in one browser: a declared experiment keeps one pseudonym across two sessions
 //           with two session ids; another experiment and an undeclared one do not share it.
-//   CR-T19  after revocation the same tab gets 410 and no content.
+//   CR-T19  after revocation the same tab gets 410 and no content. A page that registers a
+//           cache-first service worker (an offline PWA) cannot install it, so a reload and a
+//           new tab after revocation get 410 and no product. Negative: the old behaviour
+//           (the test origin ignores `Service-Worker: script` and sends no Clear-Site-Data),
+//           planted on one origin, lets the worker keep serving the product and is caught.
+//   CR-T21  one visit (home → menu → home by a link → reload, one tab) is one session with
+//           one pseudonym, counted once. Negative: the pre-fix snippet, which adopts every
+//           entry load's candidate, is planted on another link and counts several.
 //   CR-T22  a v0 link keeps showing v0 after v1 is published.
 //   CR-T20  (synthetic half) publish → first render on the emulated phone, timed; the
 //           real-phone run is NOT RUN here.
@@ -33,6 +40,10 @@ import { createRequire } from "node:module";
 const here = dirname(fileURLToPath(import.meta.url));
 const ext = join(here, "../../extensions/hypeproof-chat");
 const { localCurriculum } = await import("../../worker/test/harness/curriculum.mjs");
+const { PARTICIPANT_SNIPPET } = await import("../../worker/src/lib/curriculum/participant-snippet.ts");
+// The pre-fix snippet's behaviour: every entry load adopts the server's candidate session.
+const OLD_SNIPPET = PARTICIPANT_SNIPPET.replace("x=g(S,K);if(!(x&&V.test(x.pseudonym)&&x.session_id))x=null;", "x=null;");
+if (OLD_SNIPPET === PARTICIPANT_SNIPPET) throw new Error("the old-snippet plant did not apply");
 const { qrModules, qrDataUrl } = await import(join(ext, "src/testQr.ts"));
 const jsQR = createRequire(join(ext, "package.json"))("jsqr");
 const outArg = process.argv.indexOf("--out");
@@ -46,16 +57,26 @@ const record = (id, verdict, detail) => {
 
 // ── the local Service on a real port ─────────────────────────────────────────
 let f = null;
+/** Hosts on which the pre-fix behaviour is planted (negative controls). */
+const plantedOldSw = new Set();
+const plantedOldSnippet = new Set();
 const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const c of req) chunks.push(c);
+  const host = (req.headers.host ?? "").split(":")[0];
+  // Planted: the test origin as it was before the fix, blind to the service-worker script fetch.
+  const headers = Object.entries(req.headers).filter(([k, v]) => typeof v === "string" && !(plantedOldSw.has(host) && k === "service-worker"));
   const r = await f.app.fetch(
-    new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: Object.entries(req.headers).filter(([, v]) => typeof v === "string"), body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined }),
+    new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined }),
     f.env,
     { waitUntil() {}, passThroughOnException() {} },
   );
-  res.writeHead(r.status, Object.fromEntries(r.headers));
-  res.end(Buffer.from(await r.arrayBuffer()));
+  const out = Object.fromEntries(r.headers);
+  if (plantedOldSw.has(host)) delete out["clear-site-data"];
+  let body = Buffer.from(await r.arrayBuffer());
+  if (plantedOldSnippet.has(host) && /text\/html/.test(out["content-type"] ?? "")) body = Buffer.from(body.toString("utf8").replace(PARTICIPANT_SNIPPET, OLD_SNIPPET));
+  res.writeHead(r.status, out);
+  res.end(body);
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const PORT = server.address().port;
@@ -118,7 +139,24 @@ const deviceDeclared = await publish(token, fixtureFiles, { devices: ["camera"] 
 const repeated = await publish(token, fixtureFiles, { repeated_use: true });
 const repeatedOther = await publish(token, fixtureFiles, { repeated_use: true });
 const plain = await publish(token, fixtureFiles);
-const secureOrigins = [s, deviceDeclared, repeated, repeatedOther, plain].map((x) => new URL(x.url).origin).join(",");
+// An offline PWA: app.js registers sw.js, a cache-first worker that caches every response.
+const PWA = {
+  "index.html": '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>PWA</title></head><body><h1>PRODUCT-CONTENT</h1><p id="sw">-</p><script src="app.js"></script></body></html>',
+  "app.js": 'navigator.serviceWorker.register("sw.js").then(function(){document.getElementById("sw").textContent="sw-registered"},function(e){document.getElementById("sw").textContent="sw-refused:"+e.name});',
+  "sw.js": 'self.addEventListener("install",function(e){self.skipWaiting()});self.addEventListener("activate",function(e){e.waitUntil(self.clients.claim())});self.addEventListener("fetch",function(e){e.respondWith(caches.open("v1").then(function(c){return c.match(e.request).then(function(hit){return hit||fetch(e.request).then(function(r){if(r.ok)c.put(e.request,r.clone());return r})})}))});',
+};
+const pwa = await publish(token, PWA);
+const pwaPlanted = await publish(token, PWA);
+plantedOldSw.add(new URL(pwaPlanted.url).hostname);
+// Two pages that link to each other, for the one-visit check.
+const TWO_PAGES = {
+  "index.html": '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>홈</title></head><body><h1>홈</h1><a id="go" href="menu.html">메뉴</a></body></html>',
+  "menu.html": '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>메뉴</title></head><body><h1>메뉴</h1><a id="home" href="index.html">처음으로</a></body></html>',
+};
+const visit = await publish(token, TWO_PAGES);
+const visitPlanted = await publish(token, TWO_PAGES);
+plantedOldSnippet.add(new URL(visitPlanted.url).hostname);
+const secureOrigins = [s, deviceDeclared, repeated, repeatedOther, plain, pwa, pwaPlanted, visit, visitPlanted].map((x) => new URL(x.url).origin).join(",");
 
 let browser;
 try {
@@ -255,6 +293,70 @@ try {
     await ctx.close();
     const gone = Object.values(after).every((r) => r.status === 410 && r.bytes === 0 && r.cache === "no-store");
     record("CR-T19 (browser)", gone && heading === null ? "PASS" : "FAIL", { after, reload, product_heading_after_reload: heading });
+  }
+
+  // ── CR-T19 with a service worker: nothing serves the product after revocation ──
+  {
+    /** Open, let any worker install and take control, revoke, then reload and open a new tab. */
+    async function swRun(target) {
+      const ctx = await browser.newContext(phone);
+      const page = await ctx.newPage();
+      await page.goto(target.url, { waitUntil: "load" });
+      await page.waitForFunction(() => document.getElementById("sw")?.textContent !== "-", null, { timeout: 5000 }).catch(() => {});
+      const registration = await page.evaluate(() => document.getElementById("sw")?.textContent ?? null);
+      await page.waitForTimeout(300);
+      await page.reload({ waitUntil: "load" }); // a worker, if installed, now controls the page and caches it
+      const controlledBefore = await page.evaluate(() => !!navigator.serviceWorker.controller);
+      const entry = page.url();
+      const rv = await f.api(`/v1/curriculum/links/${target.link.id}/revoke`, { method: "POST", token, body: {} });
+      const answer = async (p) => {
+        let res = null;
+        try {
+          res = await p.goto(entry, { waitUntil: "load" });
+        } catch (e) {
+          return { error: e.message.split("\n")[0], status: null, fromServiceWorker: false, product: false };
+        }
+        return { status: res?.status() ?? null, fromServiceWorker: res?.fromServiceWorker() ?? false, product: await p.evaluate(() => document.body?.innerText.includes("PRODUCT-CONTENT") ?? false).catch(() => false) };
+      };
+      const reload = await answer(page);
+      const tab = await answer(await ctx.newPage());
+      await ctx.close();
+      return { registration, controlledBefore, revoke: rv.status, reload, tab };
+    }
+    const fixed = await swRun(pwa);
+    const old = await swRun(pwaPlanted);
+    const served = (r) => r.product || r.status === 200 || r.fromServiceWorker;
+    const ok = /^sw-refused/.test(fixed.registration ?? "") && !fixed.controlledBefore && fixed.revoke === 200 && !served(fixed.reload) && !served(fixed.tab) && (fixed.reload.status === 410 || fixed.reload.status === null);
+    const caught = old.registration === "sw-registered" && (served(old.reload) || served(old.tab));
+    record("CR-T19 (service worker)", ok && caught ? "PASS" : "FAIL", { fixed, planted_old_behaviour: old, planted_caught: caught });
+  }
+
+  // ── CR-T21: one visit is one session ──
+  {
+    async function oneVisit(target) {
+      const ctx = await browser.newContext(phone);
+      const page = await ctx.newPage();
+      const seen = [];
+      const note = async () => seen.push(await page.evaluate(() => ({ ...window.hypeproof.test })));
+      await page.goto(target.url, { waitUntil: "networkidle" });
+      await note();
+      await page.click("#go");
+      await page.waitForLoadState("networkidle");
+      await note();
+      await page.click("#home");
+      await page.waitForLoadState("networkidle");
+      await note();
+      await page.reload({ waitUntil: "networkidle" });
+      await note();
+      await ctx.close();
+      const counts = (await f.api(`/v1/curriculum/experiments/${target.experiment.id}/channels`, { token })).json.sessions_opened;
+      return { seen, sessions: new Set(seen.map((x) => x.session_id)).size, pseudonyms: new Set(seen.map((x) => x.pseudonym)).size, counted: counts.channels["학교 게시판"] ?? 0 };
+    }
+    const fixed = await oneVisit(visit);
+    const old = await oneVisit(visitPlanted);
+    const ok = fixed.sessions === 1 && fixed.pseudonyms === 1 && fixed.counted === 1;
+    const caught = old.sessions > 1 || old.counted > 1;
+    record("CR-T21 (one visit, browser)", ok && caught ? "PASS" : "FAIL", { fixed: { sessions: fixed.sessions, pseudonyms: fixed.pseudonyms, counted: fixed.counted }, planted_old_snippet: { sessions: old.sessions, counted: old.counted }, planted_caught: caught });
   }
 } catch (err) {
   record("run", "FAIL", err.stack ?? String(err));

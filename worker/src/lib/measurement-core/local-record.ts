@@ -659,6 +659,27 @@ export class LocalRecord {
     });
   }
 
+  /**
+   * A session link written as its per-session key only (cr-publish #1393: participant
+   * sessions opened from a published test link). Constant cost per call, whatever the record
+   * holds: the task document is read once and never rewritten (it would otherwise grow by one
+   * entry per open), and the review quota is not scanned, because the caller bounds how many
+   * such keys exist (one fixed-size key per session, capped per link). Every read of a
+   * session (`taskForSession`, `sessionAttribution`, `sessionLinks`) uses this key.
+   * `created` is false when the session was already linked to this task (an idempotent retry).
+   */
+  async linkSessionKey(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution: SessionAttribution }): Promise<{ created: boolean }> {
+    check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    checkAttribution(link.attribution);
+    check(link.attribution.experiment === taskId, "invalid_session_attribution");
+    const task = await this.getTask(taskId);
+    check(task.project === link.attribution.project, "invalid_session_attribution");
+    const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
+    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at }, true, "none")) return { created: true };
+    check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
+    return { created: false };
+  }
+
   async taskForSession(host: string, sessionId: string): Promise<string | null> {
     return (await this.#read<{ task: string }>(`sessions/${enc(host)}/${enc(sessionId)}`))?.task ?? null;
   }

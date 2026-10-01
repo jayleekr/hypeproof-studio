@@ -212,3 +212,39 @@ export async function linksOf(db: DB, projectId: string): Promise<TestLink[]> {
 export async function revokeLink(db: DB, id: string, now: number): Promise<void> {
   await db.prepare("UPDATE cr_test_links SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, id).run();
 }
+
+// ── Participant sessions per link (CR-21, CR-73) ─────────────────────────────
+
+/**
+ * Reserve one participant session on a link, atomically and in one statement: false when the
+ * link already holds `max` (the per-link bound on session keys in the record). A reservation
+ * whose session turns out to exist already is handed back with `releaseSession`.
+ */
+export async function reserveSession(db: DB, linkId: string, max: number): Promise<boolean> {
+  const r = await db.prepare("UPDATE cr_test_links SET sessions_opened = sessions_opened + 1 WHERE id = ? AND sessions_opened < ?").bind(linkId, max).run();
+  return Number(r.meta?.changes ?? 0) > 0;
+}
+
+export async function releaseSession(db: DB, linkId: string): Promise<void> {
+  await db.prepare("UPDATE cr_test_links SET sessions_opened = sessions_opened - 1 WHERE id = ? AND sessions_opened > 0").bind(linkId).run();
+}
+
+/**
+ * Sessions opened per channel for one experiment, from the per-link counters: one indexed
+ * query, never a read of the sessions themselves (CR-73). A link without a label counts as
+ * "unlabelled". Every published session is opened through a link, so none is "unknown" here;
+ * `unknown` stays in the shape for sessions recorded without a link (participant-record.ts
+ * `sessionsByChannel`, the record-side reading).
+ */
+export async function channelCounts(db: DB, experimentId: string): Promise<{ channels: Record<string, number>; unlabelled: number; unknown: number }> {
+  const rows = await db.prepare("SELECT doc, sessions_opened FROM cr_test_links WHERE experiment_id = ?").bind(experimentId).all<{ doc: string; sessions_opened: number }>();
+  const out = { channels: {} as Record<string, number>, unlabelled: 0, unknown: 0 };
+  for (const r of rows.results ?? []) {
+    const n = Number(r.sessions_opened ?? 0);
+    const link = parse<TestLink>(r);
+    if (!link || n <= 0) continue;
+    if (link.channel) out.channels[link.channel] = (out.channels[link.channel] ?? 0) + n;
+    else out.unlabelled += n;
+  }
+  return out;
+}

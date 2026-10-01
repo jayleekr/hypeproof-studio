@@ -167,8 +167,13 @@ async function unknownRouteProblems(fetcher, origin, route, token) {
   const problems = [];
   if (res.status !== 404) problems.push(`${route}: status ${res.status}, not 404`);
   if (body?.error?.type !== "not_found" || body?.error?.path !== path) problems.push(`${route}: body differs from app.notFound`);
+  // The headers too (minus the per-request id): a header only CR routes send reveals them.
+  const unknown = await fetcher(origin + "/v1/cr-never-registered", { method, headers: { authorization: "Bearer " + token } });
+  if (headerShape(res) !== headerShape(unknown)) problems.push(`${route}: headers ${headerShape(res)} differ from the unknown route's ${headerShape(unknown)}`);
   return problems;
 }
+
+const headerShape = (res) => JSON.stringify([...res.headers].filter(([k]) => k !== "x-request-id").sort());
 
 /**
  * A published-runtime route (cr-publish) lives on a test origin, whose unknown-path answer
@@ -198,7 +203,19 @@ await test("switch OFF: every inventoried CR Worker route answers as an unknown 
   const planted = async (url, init) =>
     new URL(url).pathname === "/v1/cr-planted" ? new Response(JSON.stringify({ ok: true }), { status: 200 }) : local.fetcher(url, init);
   const caught = await unknownRouteProblems(planted, local.origin, "GET /v1/cr-planted", token);
-  assert.ok(caught.length === 2, `planted route must be caught: ${JSON.stringify(caught)}`);
+  assert.ok(caught.length >= 2, `planted route must be caught: ${JSON.stringify(caught)}`);
+  // A planted route whose status and body are the unknown route's but which adds a header
+  // (cache-control: no-store on a switch-off answer) is caught by the header comparison alone.
+  const headerPlant = async (url, init) => {
+    if (new URL(url).pathname !== "/v1/cr-header-plant") return local.fetcher(url, init);
+    const r = await local.fetcher(url, init);
+    const h = new Headers(r.headers);
+    h.set("cache-control", "no-store");
+    return new Response(await r.text(), { status: r.status, headers: h });
+  };
+  const headerCaught = await unknownRouteProblems(headerPlant, local.origin, "GET /v1/cr-header-plant", token);
+  assert.equal(headerCaught.length, 1, JSON.stringify(headerCaught));
+  assert.match(headerCaught[0], /headers/);
 });
 
 if (failed) {

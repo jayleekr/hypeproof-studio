@@ -1570,3 +1570,6 @@ html, body, #root {
 .hps-publish-link code, .hps-publish-done code { word-break: break-all; user-select: all; }
 .hps-publish-link img { background: #fff; padding: 4px; }
 .hps-publish-note, .hps-publish-timing { opacity: 0.8; font-size: 11px; }
+.hps-publish-declare { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); padding: 6px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.hps-publish-declare legend { padding: 0 4px; font-size: 12px; }
+.hps-publish-declare small { flex-basis: 100%; opacity: .8; }

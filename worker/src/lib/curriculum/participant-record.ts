@@ -4,13 +4,15 @@
 // Service host, over the existing R2 binding `HPS_TRACES` under `curriculum/<cohort>/<project>/`.
 // No new KV namespace, no traffic table, no validator copy (SX-48). One Experiment is one
 // record task (same id, `project` = the project id), created when the student starts the
-// test, so opening a link never races to create it. Opening a link creates the participant
-// session: `linkSession(experiment, {host: "published", session_id, attribution})`.
+// test, so opening a link never races to create it. A participant session is written as its
+// per-session key only (`LocalRecord.linkSessionKey`): constant cost per open, however many
+// sessions the project already holds. It never rewrites the task document and never scans
+// the review quota; how many such keys exist is bounded per link by the caller (the D1
+// counter `cr_test_links.sessions_opened`, store.ts `reserveSession`), which is also the
+// index the per-channel counts read (CR-73).
 //
-// This port is the minimum cr-publish needs. cr-evidence owns the rest of R6 (recon §7):
-// it confirms R2's atomic `ifAbsent` semantics, serialises writers per experiment (today's
-// `linkSession` read-modify-writes `task.sessions`; the per-session key, which every read
-// here uses, is written once), and gives the port a `usageBytes` that does not scan.
+// cr-evidence owns the rest of R6 (recon §7): it confirms R2's atomic `ifAbsent` semantics
+// for concurrent writers and adds the event half on top of these session keys.
 
 import { LocalRecord, type SessionAttribution, type StoragePort } from "../measurement-core/local-record.ts";
 import type { Experiment, TestLink } from "./venture.ts";
@@ -102,7 +104,7 @@ export async function openParticipantSession(
     at: number;
     claimed?: { experiment?: string; product_version?: string; project?: string };
   },
-): Promise<{ ok: true; attribution: SessionAttribution } | { ok: false; code: SessionRefusal }> {
+): Promise<{ ok: true; attribution: SessionAttribution; created: boolean } | { ok: false; code: SessionRefusal }> {
   const { link, experiment } = input;
   if (link.experiment_id !== experiment.id || (input.claimed?.experiment !== undefined && input.claimed.experiment !== link.experiment_id)) return { ok: false, code: "session_experiment_mismatch" };
   if (link.project_id !== experiment.project_id || (input.claimed?.project !== undefined && input.claimed.project !== link.project_id)) return { ok: false, code: "session_project_mismatch" };
@@ -116,8 +118,8 @@ export async function openParticipantSession(
     ...(link.channel ? { channel: link.channel } : {}),
     ...(link.variant_id ? { variant: link.variant_id } : {}),
   };
-  await record.linkSession(experiment.id, { host: PUBLISHED_HOST, session_id: input.sessionId, by: "adapter_explicit", at: input.at, attribution });
-  return { ok: true, attribution };
+  const { created } = await record.linkSessionKey(experiment.id, { host: PUBLISHED_HOST, session_id: input.sessionId, by: "adapter_explicit", at: input.at, attribution });
+  return { ok: true, attribution, created };
 }
 
 /**

@@ -53,6 +53,9 @@ export function PublishPanel(props: {
   const [channel, setChannel] = useState("");
   const [expiry, setExpiry] = useState<number | null>(null);
   const [extraFile, setExtraFile] = useState("");
+  const [devices, setDevices] = useState<Array<"camera" | "microphone">>([]);
+  const [repeatedUse, setRepeatedUse] = useState(false);
+  const toggleDevice = (d: "camera" | "microphone", on: boolean) => setDevices((cur) => (on ? [...cur.filter((x) => x !== d), d] : cur.filter((x) => x !== d)));
   const [more, setMore] = useState<Record<string, { channel: string; expiry: number | null }>>({});
   const disabled = props.busy || !view.available;
   const criteriaList = criteria.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -65,6 +68,8 @@ export function PublishPanel(props: {
       success_criteria: criteriaList,
       ...(channel.trim() ? { channel: channel.trim() } : {}),
       ...(expiry !== null ? { expires_in_days: expiry } : {}),
+      ...(devices.length ? { devices } : {}),
+      ...(repeatedUse ? { repeated_use: true } : {}),
       manifest: view.version.manifest_added,
     });
 
@@ -138,6 +143,19 @@ export function PublishPanel(props: {
             </select>
             <textarea value={criteria} onChange={(e) => setCriteria(e.target.value)} placeholder={"성공 기준, 한 줄에 하나 (예: 5명 중 3명이 주문 완료)"} aria-label="성공 기준" rows={2} />
             <input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="어디에 나눠 주나요? (예: 학교 게시판) — 비워 둬도 돼요" aria-label="채널" maxLength={40} />
+            <fieldset className="hps-publish-declare" data-testid="publish-declare">
+              <legend>제품이 쓰는 것 (쓰지 않으면 비워 두세요)</legend>
+              <label>
+                <input type="checkbox" checked={devices.includes("camera")} onChange={(e) => toggleDevice("camera", e.target.checked)} data-testid="publish-device-camera" /> 카메라
+              </label>
+              <label>
+                <input type="checkbox" checked={devices.includes("microphone")} onChange={(e) => toggleDevice("microphone", e.target.checked)} data-testid="publish-device-microphone" /> 마이크
+              </label>
+              <label>
+                <input type="checkbox" checked={repeatedUse} onChange={(e) => setRepeatedUse(e.target.checked)} data-testid="publish-repeated-use" /> 같은 사람이 다시 와서 쓰는지 볼래요
+              </label>
+              <small>카메라와 마이크는 참가자가 자기 휴대폰에서 직접 허락해야 켜져요.</small>
+            </fieldset>
             <ExpiryPicker value={expiry} onChange={setExpiry} name="publish-expiry" />
             <button type="button" data-testid="publish-submit" disabled={!canSubmit} onClick={submit}>
               공개하고 테스트 시작

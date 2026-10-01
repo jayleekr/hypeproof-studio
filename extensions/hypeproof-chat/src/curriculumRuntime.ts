@@ -82,8 +82,10 @@ export interface CrSurfaceInventory {
   switchOffWhileStored: readonly string[];
 }
 
-/** The published test runtime's route, on a test origin (cr-publish; recon §6). */
+/** The published test runtime's routes, on a test origin (cr-publish; recon §6). */
 export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
+/** The participant snippet opens the visit's session here, once (CR-21). */
+export const CR_TEST_ORIGIN_SESSION_ROUTE = "POST <test-origin>/l/:link/__hp/session";
 
 export const CR_SURFACES: CrSurfaceInventory = {
   // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17).
@@ -104,6 +106,7 @@ export const CR_SURFACES: CrSurfaceInventory = {
     "POST /v1/curriculum/experiments/:id/links",
     "POST /v1/curriculum/links/:id/revoke",
     CR_TEST_ORIGIN_ROUTE,
+    CR_TEST_ORIGIN_SESSION_ROUTE,
   ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };

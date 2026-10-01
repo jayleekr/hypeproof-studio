@@ -71,6 +71,7 @@ import {
   CR_BYTES_CONTEXT_KEY,
   CR_BYTES_OWNERS_STATE,
   CR_PROJECTS_STATE,
+  CrProjectMemory,
   crAllowedOrigins,
   crBytesOwner,
   crBytesOwnersAfter,
@@ -665,28 +666,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Publish for User Test (cr-publish, #1393) ─────────────────────────────
-  /** The signed-in person's key for their Project id (crBytesOwner: a digest, never the identity). */
-  private crPublishOwner: string | null = null;
-  private crProjects(): Record<string, { id?: string; origin?: string | null }> {
-    const v = this.context.workspaceState.get<unknown>(CR_PROJECTS_STATE);
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, { id?: string; origin?: string | null }>) : {};
-  }
-  private async setCrProject(patch: { id?: string; origin?: string | null }): Promise<void> {
-    if (!this.crPublishOwner) return;
-    const all = this.crProjects();
-    const next = { ...(all[this.crPublishOwner] ?? {}), ...patch };
-    if (!next.id) delete all[this.crPublishOwner];
-    else all[this.crPublishOwner] = next;
-    await this.context.workspaceState.update(CR_PROJECTS_STATE, all);
-  }
+  /** The signed-in person's Project id and test origin, keyed by crBytesOwner (a digest, never the identity). */
+  private readonly crProjectMemory = new CrProjectMemory(
+    {
+      get: () => this.context.workspaceState.get<unknown>(CR_PROJECTS_STATE),
+      update: (value) => this.context.workspaceState.update(CR_PROJECTS_STATE, value),
+    },
+    async () => (await this.context.secrets.get(TOKEN_KEY)) ?? null,
+  );
   /** "사용자 테스트용으로 공개": the session over the preview's files, the record and the Service. */
   private readonly publishSession = new PublishSession({
     switchOn: () => this.isCurriculumRuntimeEnabled(),
-    token: async () => {
-      const token = (await this.context.secrets.get(TOKEN_KEY)) ?? null;
-      this.crPublishOwner = token ? crBytesOwner(token) : null;
-      return token;
-    },
+    token: () => this.crProjectMemory.refresh(),
     base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
     root: () => this.liveServer.currentRoot() ?? null,
     entry: () => {
@@ -694,10 +685,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return base ? new URL(base).pathname || "/" : null;
     },
     events: async () => (await this.verifyRecorder())?.events() ?? [],
-    projectId: () => (this.crPublishOwner ? this.crProjects()[this.crPublishOwner]?.id : undefined),
-    setProjectId: (id) => this.setCrProject(id ? { id } : { id: undefined, origin: null }),
-    rememberedOrigin: () => (this.crPublishOwner ? this.crProjects()[this.crPublishOwner]?.origin ?? null : null),
-    rememberOrigin: (origin) => this.setCrProject({ origin }),
+    projectId: () => this.crProjectMemory.projectId(),
+    setProjectId: (id) => this.crProjectMemory.set(id ? { id } : { id: undefined, origin: null }),
+    rememberedOrigin: () => this.crProjectMemory.origin(),
+    rememberOrigin: (origin) => this.crProjectMemory.set({ origin }),
     week: () => {
       const w = this.cachedProfile?.lesson?.content?.learning?.week;
       return typeof w === "number" ? w : null;
@@ -780,7 +771,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly liveServer: LiveServer,
     /** #580 — the local session-log spool. Optional: tests and older callers run without recording. */
     private readonly spool?: SessionSpool,
-  ) {}
+  ) {
+    // cr-publish (CR-11 after a restart): know the signed-in person's published origin from
+    // activation on, and follow every change of the stored token.
+    void this.crProjectMemory.refresh().catch(() => undefined);
+    const sub = context.secrets.onDidChange?.((e) => {
+      if (e.key === TOKEN_KEY) void this.crProjectMemory.refresh().catch(() => undefined);
+    });
+    if (sub) context.subscriptions.push(sub);
+  }
 
   /**
    * Public accessor for the #64 report-problem flow. Returns the most recent

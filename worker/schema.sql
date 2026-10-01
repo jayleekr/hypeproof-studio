@@ -1347,6 +1347,10 @@ CREATE TABLE IF NOT EXISTS cr_test_links (
   doc           TEXT NOT NULL,
   expires_at    INTEGER NOT NULL,
   revoked_at    INTEGER,
+  -- Participant sessions opened through this link: the per-link bound on session keys and
+  -- the index of the per-channel counts (CR-73). The sessions themselves are on R2.
+  sessions_opened INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cr_test_links_experiment ON cr_test_links(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_cr_test_links_project ON cr_test_links(project_id);

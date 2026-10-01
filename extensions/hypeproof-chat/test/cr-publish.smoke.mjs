@@ -9,6 +9,8 @@
 //   CR-T11 (published) runner steps on the project's published test origin run; a step to
 //                      another project's origin is refused with a reason before any CDP call
 //   CR-T02 (session)   with the switch off the session sends nothing
+//   CR-T11 (restart)   a fresh App with a remembered Project allows its published origin
+//                      before the publish panel is opened; a changed token drops it
 //
 // Run: node --experimental-strip-types test/cr-publish.smoke.mjs
 
@@ -21,7 +23,7 @@ import { makeFakePage, fakePort } from "./fixtures/fake-cdp-page.mjs";
 const { buildPublishSet, publishSetRefusalText } = await import("../src/publishSet.ts");
 const { artifactVersionFor } = await import("../src/artifactVersion.ts");
 const { PublishSession } = await import("../src/publishSession.ts");
-const { crAllowedOrigins } = await import("../src/crHostWiring.ts");
+const { crAllowedOrigins, CrProjectMemory, crBytesOwner } = await import("../src/crHostWiring.ts");
 const { CrExecutor } = await import("../src/experimentBrowser.ts");
 const { runCriterionPlan } = await import("../src/verifyRunner.ts");
 const { curriculumBase } = await import("../src/galleryPublish.ts");
@@ -154,6 +156,42 @@ await test("CR-T02 session: with the switch off nothing is built or sent; curric
   // No expiry chosen: refused before anything else (CR-19).
   const on = new PublishSession({ switchOn: () => true, token: async () => { throw new Error("not reached"); }, base: () => "", root: () => null, entry: () => null, events: async () => [], projectId: () => undefined, setProjectId: async () => {}, week: () => null, defaultTitle: () => "t", qr: (u) => u });
   assert.deepEqual(await on.submit({ question: "q", method: "m", success_criteria: ["c"], hypothesis: "h" }), { ok: false, message: "링크를 언제까지 열어 둘지 골라 주세요." });
+});
+
+await test("CR-T11 after a restart: a fresh App with a remembered Project allows its published origin before the panel opens; a changed token drops it", async () => {
+  const tok = (u) => `${Buffer.from(JSON.stringify({ u, c: "cohort-a", p: "prof", iat: 1, exp: 9e9 })).toString("base64url")}.sig`;
+  const PUB = "http://prj-aaaaaaaaaaaaaaaa.test.invalid";
+  let stored = tok("cr-a");
+  // What workspaceState holds from an earlier run of the App.
+  let state = { [crBytesOwner(tok("cr-a"))]: { id: "prj-aaaaaaaaaaaaaaaa", origin: PUB } };
+  const memory = new CrProjectMemory({ get: () => state, update: (v) => { state = v; } }, async () => stored);
+  const session = new PublishSession({
+    switchOn: () => true,
+    token: () => memory.refresh(),
+    base: () => "https://api.test/v1/curriculum",
+    fetchImpl: async () => { throw new Error("no request: the origin comes from what was remembered"); },
+    root: () => null,
+    entry: () => null,
+    events: async () => [],
+    projectId: () => memory.projectId(),
+    setProjectId: (id) => memory.set(id ? { id } : { id: undefined, origin: null }),
+    rememberedOrigin: () => memory.origin(),
+    rememberOrigin: (o) => memory.set({ origin: o }),
+    week: () => 1,
+    defaultTitle: () => "t",
+    qr: (u) => u,
+  });
+  // Negative control: before the host reads the stored token (the old wiring), nothing is allowed.
+  assert.deepEqual(session.publishedOrigins(), []);
+  await memory.refresh(); // what the provider does at activation
+  assert.deepEqual(session.publishedOrigins(), [PUB], "positive: allowed without opening the publish panel");
+  assert.deepEqual(crAllowedOrigins(null, session.publishedOrigins()), [PUB]);
+  stored = tok("cr-b"); // another student signs in on the same Mac
+  await memory.refresh(); // the provider follows secrets.onDidChange
+  assert.deepEqual(session.publishedOrigins(), [], "the previous person's origin is dropped");
+  stored = null;
+  await memory.refresh();
+  assert.deepEqual(session.publishedOrigins(), [], "signed out: nothing");
 });
 
 console.log(`\n${passed} cr-publish smoke checks passed`);

@@ -52,7 +52,17 @@ interface Pattern {
   re: RegExp;
   /** Group holding a value that is judged by the token rule when it is token-shaped. */
   valueGroup?: number;
+  /** A match that is ordinary code, not a value (see `secret_assignment`). */
+  skip?: (m: RegExpExecArray) => boolean;
 }
+
+/**
+ * An unquoted value that is a JavaScript expression, not a literal: a member path or a call
+ * (`document.querySelector(`, `Math.random(`, `process.env.API_KEY`). A login-form mockup or a
+ * random-id helper is ordinary student code; a literal (quoted, or a bare env-file value such
+ * as `API_KEY=abcdefghijkl`) is still refused.
+ */
+const EXPRESSION = /^[A-Za-z_$][\w$]*(?:(?:\.[A-Za-z_$][\w$]*)+\(?|\()$/;
 
 // Order matters only for reporting; every pattern runs.
 const PATTERNS: readonly Pattern[] = [
@@ -71,8 +81,9 @@ const PATTERNS: readonly Pattern[] = [
   { rule: "bearer_token", re: /\bBearer\s+([A-Za-z0-9._~+/-]{20,}=*)/g, valueGroup: 1 },
   {
     rule: "secret_assignment",
-    re: /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIAL)S?)["']?\s*[=:]\s*["'`]?([^\s"'`&,;)]{8,})/gi,
-    valueGroup: 2,
+    re: /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIAL)S?)["']?\s*[=:]\s*(["'`]?)([^\s"'`&,;)]{8,})/gi,
+    valueGroup: 3,
+    skip: (m) => m[2] === "" && EXPRESSION.test(m[3] ?? ""),
   },
 ];
 
@@ -139,6 +150,7 @@ export function scanFile(file: string, text: string, ctx: ScanContext): ScanHit[
   for (const p of PATTERNS) {
     p.re.lastIndex = 0;
     for (let m = p.re.exec(text); m; m = p.re.exec(text)) {
+      if (p.skip?.(m)) continue;
       const value = p.valueGroup ? m[p.valueGroup] : undefined;
       if (value && isTokenShaped(value)) {
         // A token-shaped value is judged by the token rule only, whatever pattern found it.
@@ -159,11 +171,11 @@ export function scanFile(file: string, text: string, ctx: ScanContext): ScanHit[
   return hits.sort((a, b) => a.line - b.line);
 }
 
-/** Every two-part token-shaped value in a text (the Worker verifies each one's signature). */
-export function hypeproofTokensIn(text: string): string[] {
-  const out: string[] = [];
+/** Every two-part token-shaped value in a text, with its line (the Worker verifies each one's signature). */
+export function hypeproofTokensIn(text: string): Array<{ value: string; line: number }> {
+  const out: Array<{ value: string; line: number }> = [];
   TOKEN_SHAPE.lastIndex = 0;
-  for (let m = TOKEN_SHAPE.exec(text); m; m = TOKEN_SHAPE.exec(text)) if (m[0].split(".").length === 2) out.push(m[0]);
+  for (let m = TOKEN_SHAPE.exec(text); m; m = TOKEN_SHAPE.exec(text)) if (m[0].split(".").length === 2) out.push({ value: m[0], line: lineOf(text, m.index) });
   return out;
 }
 
@@ -182,7 +194,7 @@ export function scanRefusalText(h: ScanHit): string {
     bearer_token: "인증 토큰",
     secret_assignment: "비밀값처럼 보이는 설정",
     jwt: h.detail === "service_role" ? "Supabase service_role 키" : "로그인 토큰(JWT)",
-    hypeproof_token: h.detail === "issuer" ? "강사용 HypeProof 코드" : "HypeProof 학생 코드",
+    hypeproof_token: h.detail === "issuer" ? "강사용 코드" : "참여 코드",
   };
   return `${h.file} ${h.line}번째 줄에 ${what[h.rule]}가 있어 공개하지 않았어요. 그 값을 지우거나 이름을 바꾼 뒤 다시 공개하세요. (${h.rule})`;
 }

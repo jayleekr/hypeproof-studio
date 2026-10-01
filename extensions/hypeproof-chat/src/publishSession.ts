@@ -52,6 +52,8 @@ export function publishTiming(startedAt: number, endedAt: number, phases: Record
   return { ms, ok: false, cause: slowest ? `${slowest[0]} ${slowest[1]}ms` : "unknown" };
 }
 
+type Client = { base: string; token: string; fetchImpl?: typeof fetch };
+
 type ProjectState = {
   project: { id: string; title: string };
   test_origin: string | null;
@@ -62,6 +64,10 @@ type ProjectState = {
 };
 
 const DAY = 24 * 3600_000;
+/** One refused file as the student reads it; a hit without a known line names the file only. */
+const hitLine = (h: { file: string; line: number; rule: string }) => (h.line > 0 ? `${h.file} ${h.line}번째 줄 (${h.rule})` : `${h.file} (${h.rule})`);
+/** The sign-in code, in the App's own words for it (startPage.ts "수업 참여 코드"). */
+const SIGN_IN = "참여 코드를 먼저 입력해 주세요.";
 
 export class PublishSession {
   private origin: string | null = null;
@@ -83,7 +89,7 @@ export class PublishSession {
     return this.ports.switchOn() && this.ports.projectId() && origin ? [origin] : [];
   }
 
-  private async client(): Promise<{ base: string; token: string; fetchImpl?: typeof fetch } | null> {
+  private async client(): Promise<Client | null> {
     const token = await this.ports.token();
     return token ? { base: this.ports.base(), token, ...(this.ports.fetchImpl ? { fetchImpl: this.ports.fetchImpl } : {}) } : null;
   }
@@ -101,25 +107,51 @@ export class PublishSession {
     return {
       ok: false,
       message: publishSetRefusalText(built.refusal),
-      lines: (built.refusal.hits ?? []).map((h) => `${h.file} ${h.line}번째 줄 (${h.rule})`),
+      lines: (built.refusal.hits ?? []).map(hitLine),
     };
   }
 
-  private async state(client: { base: string; token: string; fetchImpl?: typeof fetch }, projectId: string): Promise<ProjectState | null> {
+  private async state(client: Client, projectId: string): Promise<CurriculumResult<ProjectState>> {
     const r = await curriculumRequest<ProjectState>(client, "GET", `/projects/${encodeURIComponent(projectId)}`);
-    if (!r.ok) {
-      // A project this seat can no longer see (another token, another team): forget it.
-      if (r.status === 404) {
+    if (!r.ok) return r;
+    this.origin = r.body.test_origin;
+    this.cached = r.body;
+    await this.ports.rememberOrigin?.(this.origin);
+    return r;
+  }
+
+  /**
+   * The student's Project on the Service. The remembered one when it answers; otherwise one
+   * the student is a member of (`GET /projects`: a team Project the director set up, or their
+   * own after a lost id), the newest first; otherwise none (`state: null`), and only then may
+   * a publish create one. Any answer that is not definite (a network failure, a 5xx, or a
+   * 404 from the list, which is also what every route answers while the switch is off) is an
+   * error the student reads, and the remembered id is kept: nothing is forked or orphaned.
+   */
+  private async resolveProject(client: Client): Promise<{ ok: true; state: ProjectState | null } | { ok: false; message: string }> {
+    const remembered = this.ports.projectId();
+    if (remembered) {
+      const r = await this.state(client, remembered);
+      if (r.ok) return { ok: true, state: r.body };
+      if (r.status !== 404) return { ok: false, message: r.message };
+    }
+    const list = await curriculumRequest<{ projects: Array<{ id: string; created_at?: number }> }>(client, "GET", "/projects");
+    if (!list.ok) return { ok: false, message: list.message };
+    const projects = Array.isArray(list.body.projects) ? list.body.projects : [];
+    const pick = projects.find((p) => p.id === remembered) ?? projects[projects.length - 1];
+    if (!pick) {
+      // The Service answered the list and the remembered Project is not in it: it is no longer this student's.
+      if (remembered) {
         await this.ports.setProjectId(undefined);
         this.origin = null;
         await this.ports.rememberOrigin?.(null);
       }
-      return null;
+      return { ok: true, state: null };
     }
-    this.origin = r.body.test_origin;
-    this.cached = r.body;
-    await this.ports.rememberOrigin?.(this.origin);
-    return r.body;
+    const r = await this.state(client, pick.id);
+    if (!r.ok) return { ok: false, message: r.message };
+    if (pick.id !== remembered) await this.ports.setProjectId(pick.id);
+    return { ok: true, state: r.body };
   }
 
   /**
@@ -160,9 +192,10 @@ export class PublishSession {
     };
     if (!this.ports.switchOn()) return { ...empty, reason: "이 수업에서는 사용자 테스트 공개를 쓸 수 없어요." };
     const client = await this.client();
-    if (!client) return { ...empty, reason: "HypeProof 코드를 먼저 입력해 주세요." };
-    const projectId = this.ports.projectId();
-    const state = projectId ? await this.state(client, projectId) : null;
+    if (!client) return { ...empty, reason: SIGN_IN };
+    const resolved = await this.resolveProject(client);
+    const state = resolved.ok ? resolved.state : null;
+    if (!resolved.ok) notice ??= resolved.message;
     const built = await this.currentSet(state?.project.id, this.manifest);
     const version: PublishView["version"] = !built
       ? { id: null, files: [], manifest_added: [], refusal: "미리보기를 먼저 켜 주세요. 미리보기에 보이는 페이지를 공개해요.", refusal_lines: [] }
@@ -195,6 +228,7 @@ export class PublishSession {
       verification,
       hypotheses: state?.hypotheses.map((h) => ({ id: h.id, statement: h.statement })) ?? [],
       experiments: experiments.reverse(),
+      notice,
     };
   }
 
@@ -217,7 +251,7 @@ export class PublishSession {
     const days = form.expires_in_days;
     if (typeof days !== "number" || !Number.isFinite(days) || days <= 0 || days > 90) return { ok: false, message: "링크를 언제까지 열어 둘지 골라 주세요." };
     const client = await this.client();
-    if (!client) return { ok: false, message: "HypeProof 코드를 먼저 입력해 주세요." };
+    if (!client) return { ok: false, message: SIGN_IN };
     const started = this.now();
     const phases: Record<string, number> = {};
     const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
@@ -229,13 +263,14 @@ export class PublishSession {
       }
     };
     if (form.manifest) this.setManifest(form.manifest);
-    let projectId = this.ports.projectId();
-    if (projectId && !(await this.state(client, projectId))) projectId = undefined;
-    // The set is built and scanned before the project exists on the Service, so a refused set
-    // leaves nothing behind there either.
-    const pre = await phase("scan", () => this.currentSet(projectId, this.manifest));
+    // The set is built and scanned before any request, so a refused set sends nothing and
+    // leaves nothing behind on the Service.
+    const pre = await phase("scan", () => this.currentSet(this.ports.projectId(), this.manifest));
     if (!pre) return { ok: false, message: "미리보기를 먼저 켜 주세요. 미리보기에 보이는 페이지를 공개해요." };
     if (!pre.ok) return { ok: false, message: pre.message, lines: pre.lines };
+    const resolved = await phase("resolve", () => this.resolveProject(client));
+    if (!resolved.ok) return { ok: false, message: resolved.message };
+    let projectId = resolved.state?.project.id;
     if (!projectId) {
       const made = await phase("project", () => curriculumRequest<{ project: { id: string } }>(client, "POST", "/projects", { title: form.title?.trim() || this.ports.defaultTitle() }));
       if (!made.ok) return { ok: false, message: made.message };
@@ -270,7 +305,7 @@ export class PublishSession {
     return { ok: true, share_url: link.body.share_url };
   }
 
-  private issue(client: { base: string; token: string; fetchImpl?: typeof fetch }, experimentId: string, channel: string | undefined, days: number) {
+  private issue(client: Client, experimentId: string, channel: string | undefined, days: number) {
     return curriculumRequest<{ share_url: string; test_origin: string }>(client, "POST", `/experiments/${encodeURIComponent(experimentId)}/links`, {
       expires_at: this.now() + days * DAY,
       ...(channel?.trim() ? { channel: channel.trim() } : {}),
@@ -279,7 +314,7 @@ export class PublishSession {
 
   private refusal(r: Extract<CurriculumResult<unknown>, { ok: false }>): { ok: false; message: string; lines?: string[] } {
     const hits = Array.isArray(r.detail?.hits) ? (r.detail!.hits as Array<{ file: string; line: number; rule: string }>) : [];
-    return { ok: false, message: r.message, ...(hits.length ? { lines: hits.map((h) => `${h.file} ${h.line}번째 줄 (${h.rule})`) } : {}) };
+    return { ok: false, message: r.message, ...(hits.length ? { lines: hits.map(hitLine) } : {}) };
   }
 
   /** Another channel's link for a running experiment (CR-73). */
@@ -288,7 +323,7 @@ export class PublishSession {
     const days = form.expires_in_days;
     if (typeof days !== "number" || !Number.isFinite(days) || days <= 0 || days > 90) return { ok: false, message: "링크를 언제까지 열어 둘지 골라 주세요." };
     const client = await this.client();
-    if (!client) return { ok: false, message: "HypeProof 코드를 먼저 입력해 주세요." };
+    if (!client) return { ok: false, message: SIGN_IN };
     const r = await this.issue(client, experimentId, form.channel, days);
     return r.ok ? { ok: true, share_url: r.body.share_url } : this.refusal(r);
   }
@@ -297,7 +332,7 @@ export class PublishSession {
   async revoke(linkId: string): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!this.ports.switchOn()) return { ok: false, message: "이 수업에서는 사용자 테스트 공개를 쓸 수 없어요." };
     const client = await this.client();
-    if (!client) return { ok: false, message: "HypeProof 코드를 먼저 입력해 주세요." };
+    if (!client) return { ok: false, message: SIGN_IN };
     const r = await curriculumRequest(client, "POST", `/links/${encodeURIComponent(linkId)}/revoke`, {});
     return r.ok ? { ok: true } : this.refusal(r);
   }

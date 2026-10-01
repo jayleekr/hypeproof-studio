@@ -90,4 +90,13 @@ ok("CR-T17 UI negative: no report, another version's report, a fail or an incomp
   assert.doesNotMatch(html, /publish-submit/);
   ok("unavailable: the reason, no action");
 }
+{
+  const { html, text } = await render(view());
+  for (const id of ["publish-device-camera", "publish-device-microphone", "publish-repeated-use"]) {
+    assert.match(html, new RegExp(`type="checkbox"[^>]*data-testid="${id}"`), `${id} is offered`);
+    assert.doesNotMatch(html, new RegExp(`checked=""[^>]*data-testid="${id}"`), `${id} starts unchecked (nothing is declared by default)`);
+  }
+  assert.match(text, /참가자가 자기 휴대폰에서 직접 허락해야 켜져요/);
+  ok("CR-66/CR-72: the student can declare camera, microphone and repeated use; nothing is declared by default");
+}
 console.log(`\n${passed} publish panel checks passed`);
