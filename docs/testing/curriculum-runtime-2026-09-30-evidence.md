@@ -196,7 +196,7 @@ The first full `worker npm test` of round 3 exited 0. On the round-2 tree a revi
 
 Two decisions by Jay on 2026-10-01 unblocked the rest: decision 8 allows additive optional keys on `hps-observation/1`, decision 9 moves CR-59 and CR-60 to `cr-e2e`.
 
-- Commits: `b95f28ab` (CR-10 persistence), `d605e440` (09-preview measures the path the cohort takes, recon F1), `62045bb2` (three in-app defects), `d3de6f5a` (in-app spec), `fc9602b6` (ledger), then this record.
+- Commits (branch SHAs, pre-squash: after the squash merge they are not reachable from `main`; the record-only PR names the squash commit as the evidence SHA): `b95f28ab` (CR-10 persistence), `d605e440` (09-preview measures the path the cohort takes, recon F1), `62045bb2` (three in-app defects), `d3de6f5a` (in-app spec), `fc9602b6` (ledger), then this record.
 - Machine: Apple M3 Pro, macOS 15.7.4, screen unlocked, Node 22.22.1. App: a scratch copy of HypeProof Studio 0.1.51 (`d4db9049`) with the extension and webview built from `fc9602b6` injected (`e2e/classroom/mac-devhost.mjs reinject`, 4 bundle hashes match), marked `LSUIElement` so it never activates. Every app run went through the e2e fixture's quiet mode (off-screen, shown inactive, not focusable, in-memory secret storage) and started only after 5 minutes without keyboard or mouse input.
 - Evidence classes (MC-38): **live-host** for the App (the integrated browser, the App's proxy loop, the local record, the command palette); **synthetic** for the account, the session and the model (`e2e/curriculum-runtime/app-service.mjs`: the real Service router over HTTP, a scripted agent as the provider). The rows below prove transport, enforcement and browser behaviour in the App, never a real model's judgement.
 
@@ -233,7 +233,7 @@ The three product defects the earlier, visible in-app runs found are fixed in `6
 
 | Requirement | Status |
 |---|---|
-| CR-02, CR-07, CR-08, CR-09, CR-68 | in-app rows above pass with their controls (CR-68 through CR-T63) |
+| CR-02, CR-07, CR-08, CR-09, CR-68 | in-app rows above pass with their controls (CR-68 through CR-T63). CR-08's cross-request rule ("an earlier request's error is never reported at a step of the current request") was covered only by the `experiment-browser` smoke until finish review round 2, which added it to the in-app run |
 | CR-03, CR-04, CR-05, CR-06, CR-11 | synthetic rows (real Chromium) as before; exercised in the App by the CR-T07 flow |
 | CR-10 | persisted as artifact references with version and stored bytes, read back and labelled by version in the product; unit and in-app rows pass |
 | CR-59, CR-60 | moved to `cr-e2e` (decision 9); not claimed here |
@@ -244,7 +244,7 @@ The three product defects the earlier, visible in-app runs found are fixed in `6
 
 Fixes for the review of `b306e646`, in one commit after merging `origin/main` (`dda50ad7`, the idle gate).
 
-- **CR-10 bytes have an owner and a lifecycle.** They no longer count against the local review's MC-35 limit; they have their own bound (`DEFAULT_BLOB_MAX_BYTES`, 64 MB, oldest removed first, age kept in `blob-order/` keys so no screenshot is read to find it). `deleteTask` removes the bytes the task's observations name (`removed.browser_result_bytes`), and `DELETE_NOT_COVERED` names the rest (`browser_result_bytes_not_named_by_the_task`). `deleteBlobs` deletes all or named bytes; the results command lists "저장된 화면·동작 기록 지우기" with a count and a confirmation. `records()` reports `browser_results` (count, bytes, bound).
+- **CR-10 bytes have an owner and a lifecycle.** They no longer count against the local review's MC-35 limit; they have their own bound (`DEFAULT_BLOB_MAX_BYTES`, 64 MB, oldest removed first, age kept in `blob-order/` keys so no screenshot is read to find it). `deleteTask` removes the bytes the task's observations name (`removed.browser_result_bytes`; corrected in round 2: true only for local-record observations that carry digests, and no App path writes such observations today, so this is not a delete path the student has), and `DELETE_NOT_COVERED` names the rest (`browser_result_bytes_not_named_by_the_task`). `deleteBlobs` deletes all or named bytes; the results command lists "저장된 화면·동작 기록 지우기" with a count and a confirmation. `records()` reports `browser_results` (count, bytes, bound).
 - **No bytes without the event that names them.** The proxy and pick paths get a sink only when the turn has a recorder; the SDK path stores nothing at inspect time and only stores when the matching `tool_result` is recorded.
 - **Write cost.** One lock per result (screenshot and trace together). `FileRecordStorage` keeps what it has read per file and re-reads only files whose size or mtime changed, so a lock no longer re-reads every screenshot. Two writers in one extension host wait for each other instead of the second failing `storage_busy`; a call made from inside a held lock still fails closed. Measured with 150 KB images through `exclusive(putBlob)`, one process: 48 ms at 0 stored, 35–51 ms from 50 to 450 stored (was 35 ms → 421 ms at 400), bound reached at 335 blobs (67 MB) with review usage 0.
 - **CR-08 across requests.** `CrExecutor.newTurn()` also starts a new request in the event logs: records captured before it lose their step and read "이전 요청", and `failuresOf` skips them. Smoke: turn 1 error at step 3, turn 2 clicks without navigating; turn 2 reports no failure and the line reads "이전 요청 turn1-step3-error". Planted revert (`turn++` removed): RED with "단계 3 turn1-step3-error".
@@ -271,6 +271,48 @@ Planted defects, one at a time (scratch runner):
 | malformed version accepted by `browserResultParts` | cr-host | GREEN: `browserResultEventText` refuses the same id before any byte reaches the sink, so the refusal and "no sink call" hold either way; the check is defence in depth |
 
 In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with the fix build injected (4 bundle hashes match), `scripts/prep-test-app.sh`, `GATE=idle HPS_APP_PATH=… bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts`: **5 of 5 runs `2 passed`** (12:32–12:35), no message lost (no `send-lost` entry). Each run: CR-T08 planted error at step 4 once, disabled flow stops at 4, chatty and clean flows none; CR-T10 results read "현재 버전" then "이전 버전", 32 `blobs/` entries. The reviewer's lost message did not recur and its cause was not determined; if it happens again the run now stops at that send with the composer's draft, placeholder, parked text and notices.
+
+## Finish review round 2 (2026-10-01)
+
+Fixes for the review of `cb53321c`, commit `f8b3a15a` (branch SHA, pre-squash).
+
+- **Stored screens have a delete path the product reaches, switch on or off.** The browser-result events live in the workspace's native observation batch (`workspaceState`); the bytes live in the local record under global storage. No local-record observation names the digests in Studio (the local review imports only user and coach turns), so `deleteTask`'s byte removal never runs in the App; the round-1 bullet above overstated it. The student's delete paths are now: the results command's "저장된 화면·동작 기록 지우기" row (switch on), and a new command "HypeProof: 저장된 실험 브라우저 화면 지우기" (`hypeproof-chat.clearBrowserResultBytes`) enabled and shown by the context key `hypeproof-chat.crBrowserBytesStored`, not by the CR switch. The key follows the record: set at start-up, after bytes are stored and after a delete. The command shows only the count, asks, and deletes; it is not a CR surface, so CR-T02 still holds (with nothing stored it is hidden).
+- **No orphans when the recorder is full.** Bytes are written before the event that names them, and a recorder at 500 events refuses that event. The turn's sink is now `roomGuardedSink`: it stores nothing unless `NativeObservationRecorder.hasRoom(8)` (the result's event plus what the turn may record while the bytes are written). Residual: more than 8 events recorded during one byte write would still leave bytes no event names; the bound and the delete command still reach them.
+- **Delete order.** `deleteBlobs` removes each blob before its age marker, as eviction does, and then any markers whose bytes were already gone.
+- **Comments state the actual guarantee.** A digest resolved when its event was written; the bytes can later be evicted (silently, oldest first) or deleted. Eviction does lose captures of earlier versions that cannot be retaken; no notice is shown (left as is, listed under limitations).
+- **Results list label.** "현재 버전 · 버전 1" (versions numbered per page in the order first seen) instead of a `sha256:` prefix.
+- **CR-T08 across requests in the App.** After the planted flow, `[cr:again]` sends a request that does not navigate: `browser_observe` on the same document, then a click on "도움말 보기". Every record line of the earlier error must read "이전 요청", and no failure may be attributed to a step of this request. CR-T08 also asserts on the raw tool-result lines the App sent, not on the scripted agent's de-duplicated list: the planted error appears only as "단계 4".
+- **09-preview** reads the expected path from the served profile's `preview.type` and fails when the other path opens.
+- **Ledger.** The cr-browser negative control states the CR-T08 step definition and the cross-request rule (also in `docs/plan/requirements-activation.md`); `verification_inputs` gain `local-record-file.smoke.mjs`, `measurement-core-local-record.test.mjs` and `e2e/fixtures/app.ts`; `implementation_paths` gain `nativeObservationRecorder.ts` and `e2e/fixtures/app.ts`.
+
+Planted defects at `f8b3a15a`, one at a time (scratch runner, restored after each):
+
+| Planted defect | Test | Result |
+|---|---|---|
+| `deleteBlobs` removes markers before blobs | cr-browser-refs | RED |
+| `FileRecordStorage` scan cache trusted regardless of size/mtime | local-record-file | RED |
+| key/text version mismatch accepted by `readBrowserResultEvent` | cr-host | RED |
+| delete runs without "지우기" | cr-host | RED |
+| sink guard ignores the recorder's room | cr-host | RED |
+| provider passes the unguarded sink | cr-host | RED |
+| recorder `hasRoom` off by one | cr-host | RED |
+| delete command enabled only with the CR switch | cr-host | RED |
+| delete command hidden from the palette | cr-host | RED |
+| delete handler checks the CR switch | cr-host | RED |
+| context key not refreshed after bytes are stored | cr-host | RED |
+| no context refresh at start-up | cr-host | RED |
+| results menu drops the delete row when no result is listed | cr-host | RED |
+| results label back to the digest prefix | cr-host | RED |
+
+In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with `f8b3a15a`'s extension and webview injected (`dist/extension.js` and `package.json` hashes equal to the build), `scripts/prep-test-app.sh`, `GATE=idle … e2e-quiet.sh`, all runs started behind the idle gate:
+
+- Positive: **7 of 8 runs `2 passed`** (12:59–13:07). Each passing run: CR-T08 planted error only as "단계 4" in the raw lines; `[cr:again]` lines read "이전 요청 planted-step3-error…", failures `[]`, actions `["도움말 보기"]`; CR-T10 "현재 버전 · 버전 1" then "이전 버전 · 버전 1", 36 `blobs/` entries. The failing run stopped in `send()` at `[cr:ask] 이 버튼이 왜 안 돼?` (after the CR-T08 checks had passed): the composer read `""` right after `fill`, the message-lost class a reviewer saw before round 1. Cause not determined; not a CR-T08 result.
+- Negative, CR-08 across requests: `CrExecutor.newTurn()` without `turn++` (steps still restart, earlier records keep their step): **RED** at "CR-T08: an earlier request's error reads 이전 요청", with the raw line "단계 4 planted-step3-error" in the `[cr:again]` request.
+- Negative, both `crNewTurn()` call sites removed: **RED** earlier, at "reported at the step index of the action that raised it". Removing only the proxy call site stays green, as the reviewer found: the shared-setup call `this.mcpBrowser?.crNewTurn()` runs for proxy turns too and resets the same long-lived control (`proxyTurnBrowser` hands proxy turns `this.mcpBrowser` with the switch on), so the two sites are redundant on that path, not untested.
+
+`09-preview.spec.ts`, same app copy, gated and quiet, against `scripts/dev-stack.sh` (sk-biopharm, `preview.type: live_server`): 3 passed. Planted: expected path forced to `iframe` (a webview cohort) → REQ-D1/D3/D6 and REQ-D4 RED at "the preview path the served profile's preview.type picks". REQ-D3/D6 themselves still run only on a webview cohort, which the dev stack does not serve.
+
+Gates at `f8b3a15a` (exit codes, run after committing): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 · `webview-ui` tsc 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
 
 ## NOT RUN
 
@@ -307,7 +349,8 @@ In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with the fix build injected
 - An id-less `Log` entry that arrives within 1 s of a main-frame commit is dropped rather than attributed (it may be the previous document's).
 - The artifact version's file set holds static references only (HTML, CSS, JS imports). Files a page loads dynamically (`fetch('menu.json')`, an image `src` built in script) are not in it, so editing only such a file does not produce a new version, and results before and after the edit carry the same version (recon R4's definition; partial coverage of CR-10's "marked as belonging to the earlier version").
 - Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later. (Fixed in the finish: the bytes are `blobs/` entries of the same local record, `LocalRecord.putBlob`.)
-- Browser-result bytes live in the App's global storage, their events in the workspace's observation batch: clearing or moving a workspace leaves the bytes until the bound removes them or the student deletes them from the results command. Deleting bytes leaves the events, which then resolve to no stored screen.
+- Browser-result bytes live in the App's global storage, their events in the workspace's observation batch: clearing or moving a workspace leaves the bytes until the bound removes them or the student deletes them (results command, or the delete command, which works with the switch off). Deleting bytes leaves the events, which then resolve to no stored screen. Local-review task deletion does not reach them (no local-record observation names them).
+- Eviction at the 64 MB bound is silent and oldest-first, so a capture of an earlier artifact version, which cannot be taken again, can disappear without notice.
 - The browser-result history's error count reads a stored result's records as they were; a record marked "이전 요청" in the model text is stored without that mark.
 - CR-10 persistence needs an observation recorder, which the App builds only when the profile names `observation.format`. The validator now fails a profile with the switch on and no format (`cr_without_observation_format`); a profile that bypassed the validator would still drop browser results silently.
 - The page-level indicator is the overlay outline; the chat-panel half is the tool-log line (`browserToolLogLine`, now labelled for the five CR tools). `CrHooks.onIndicator` is not wired in the product.
