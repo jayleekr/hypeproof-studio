@@ -6,7 +6,7 @@
 // question is the curriculum data the Service serves, never a string in this file (CR-45).
 import { useState } from "react";
 import type { SkillForm, SkillsView } from "../../src/skillView";
-import { skillFormProblems } from "../../src/skillView";
+import { problemLine, skillFormProblems } from "../../src/skillView";
 
 export function SkillsPanel(props: {
   view: SkillsView;
@@ -111,7 +111,7 @@ export function SkillsPanel(props: {
             <>
               <p role="alert">{r.message}</p>
               {(r.problems ?? []).length > 0 && (
-                <ul data-testid="skill-problems">{(r.problems ?? []).map((p) => <li key={p}>{p}</li>)}</ul>
+                <ul data-testid="skill-problems">{(r.problems ?? []).map((p) => <li key={p} data-code={p}>{problemLine(p)}</li>)}</ul>
               )}
             </>
           )}

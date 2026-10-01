@@ -122,7 +122,10 @@ test("CR-T02 on + CR-T42 in-app: the Experiment skill runs through the coach rou
   await chat.locator('textarea[aria-label="스킬에 줄 내용"]').fill("[cr:skill-bad]");
   await chat.locator('[data-testid="skill-run"]').click();
   await expect(result).toHaveAttribute("data-ok", "false", { timeout: 60_000 });
-  await expect(chat.locator('[data-testid="skill-problems"]')).toContainText("not_countable");
+  // The student reads a Korean sentence; the raw rule code stays on the line for tests and teachers.
+  await expect(chat.locator('[data-testid="skill-problems"] li[data-code*="not_countable"]')).toHaveCount(1);
+  await expect(chat.locator('[data-testid="skill-problems"]')).toContainText("성공 기준을 셀 수 있게");
+  await expect(chat.locator('[data-testid="skill-problems"]')).not.toContainText("not_countable");
   await expect(result).toContainText("아무것도 저장하지 않았어요");
   record["CR-T42-app"] = { headers: st.skillHeaders, skills: st.skills };
 });

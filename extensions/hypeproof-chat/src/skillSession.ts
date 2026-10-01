@@ -39,8 +39,12 @@ const SIGN_IN = "참여 코드를 먼저 입력해 주세요.";
 const NO_PROJECT = "아직 프로젝트가 없어요. 먼저 사용자 테스트용으로 공개해 주세요.";
 const msg = (r: { code: string; message: string; status?: number }) => SKILL_MESSAGES[r.code] ?? (r.message.startsWith("공개하지 못했어요") ? `스킬을 실행하지 못했어요 (${r.status ?? "?"})` : r.message);
 
-/** Usable evidence for a team's work: reviewed, real, not an assumption (memory.ts `supportsTeamEvidence`). */
-const usable = (i: MemoryAnswer["evidence_items"][number]) => i.confidence !== "assumed" && !i.pending_review && i.sources_real !== false;
+/** The run state of a Project as the Service serves it (`GET /skills?project_id=`): nothing re-derived here. */
+interface SkillRunState {
+  project_id: string;
+  week: SkillWeek;
+  team_evidence: Array<{ id: string; statement: string }>;
+}
 
 export class SkillSession {
   private readonly ports: SkillPorts;
@@ -67,31 +71,30 @@ export class SkillSession {
     return this.running;
   }
 
-  /** The panel's view, read now: the Service's skills and curriculum week, and the form choices from Venture Memory. */
+  /** The panel's view, read now: the Service's skills, the run's week and team evidence, and the other form choices from Venture Memory. */
   async view(): Promise<SkillsView> {
     const none = (notice: string): SkillsView => ({ available: false, notice, week: null, skills: [], pickers: { experiments: [], decisions: [], evidence: [] }, result: this.result });
     if (!this.ports.switchOn()) return none(OFF);
     const client = await this.client();
     if (!client) return none(SIGN_IN);
-    const reg = await curriculumRequest<{ curriculum: { weeks: SkillWeek[] }; skills: SkillListing[] }>(client, "GET", "/skills");
-    if (!reg.ok) return none(msg(reg));
     const projectId = await this.project(client);
+    const reg = await curriculumRequest<{ curriculum: { weeks: SkillWeek[] }; skills: SkillListing[]; run?: SkillRunState }>(client, "GET", projectId ? `/skills?project_id=${encodeURIComponent(projectId)}` : "/skills");
+    if (!reg.ok) return none(msg(reg));
     if (!projectId) return { ...none(NO_PROJECT), skills: reg.body.skills };
     const mem = await curriculumRequest<{ memory: MemoryAnswer }>(client, "GET", `/projects/${encodeURIComponent(projectId)}/memory`);
     if (!mem.ok) return { ...none(msg(mem)), skills: reg.body.skills };
     const m = mem.body.memory;
-    const running = [...m.experiments].filter((e) => e.status === "running").sort((a, b) => b.week - a.week)[0];
-    const weekNo = running?.week ?? 1;
-    const week = reg.body.curriculum.weeks.find((w) => w.week === weekNo) ?? reg.body.curriculum.weeks[0] ?? null;
+    const run = reg.body.run;
     return {
       available: true,
       notice: null,
-      week: week ? { week: week.week, question: week.question } : null,
+      // The week the Service runs skills for (the same rule its prompt uses), never re-derived here.
+      week: run ? { week: run.week.week, question: run.week.question } : null,
       skills: reg.body.skills,
       pickers: {
         experiments: m.experiments.map((e) => ({ id: e.id, label: `${e.week}주차 · ${e.question}` })),
         decisions: m.decisions.filter((d) => d.shown_as === "team_decision" && d.affected_deck_slides.length).map((d) => ({ id: d.id, label: d.statement, slides: d.affected_deck_slides })),
-        evidence: m.evidence_items.filter(usable).map((i) => ({ id: i.id, label: i.statement })),
+        evidence: (run?.team_evidence ?? []).map((i) => ({ id: i.id, label: i.statement })),
       },
       result: this.result,
     };

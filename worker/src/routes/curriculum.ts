@@ -93,12 +93,12 @@ import {
   slidesOf,
   stakeholdersOf,
 } from "../lib/curriculum/store";
-import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
+import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, supportsTeamEvidence, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
 import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
-import { CURRICULUM, CURRICULUM_SKILLS, checkSkillOutput, skillPrompt, type CurriculumSkill } from "../skills/index";
+import { CURRICULUM, CURRICULUM_SKILLS, checkSkillOutput, curriculumWeek, skillPrompt, type CurriculumSkill } from "../skills/index";
 import { evidenceDraftOf } from "../skills/curriculum/rules";
 import { validateAgainstSchema } from "../skills/curriculum/contract";
 import { SOURCE_LIMITS, isSourcePath, modelContextOf, runWeek, skillContextOf, type VersionForSkill } from "../lib/curriculum/skill-run";
@@ -1255,32 +1255,63 @@ const skillListing = (s: CurriculumSkill) => ({
   write_back_targets: s.contract.write_back_targets,
 });
 
+/**
+ * With `?project_id=`, also the run state of that Project as the Service reads it, so the App
+ * re-derives nothing: the week a run is for (the same `runWeek` the prompt uses) and the evidence
+ * items a team may act on (memory.ts `supportsTeamEvidence`, the Product Builder's choices).
+ */
 curriculum.get("/skills", async (c) => {
   const s = await student(c);
   if (s instanceof Response) return s;
-  return c.json({ curriculum: CURRICULUM, skills: [...CURRICULUM_SKILLS.values()].map(skillListing) });
+  const listing = { curriculum: CURRICULUM, skills: [...CURRICULUM_SKILLS.values()].map(skillListing) };
+  const projectId = c.req.query("project_id");
+  if (projectId === undefined) return c.json(listing);
+  const project = await memberProject(c, s, projectId);
+  if (project instanceof Response) return project;
+  const memory = await loadMemory(c.env, project);
+  const w = curriculumWeek(runWeek(memory, {}));
+  return c.json({
+    ...listing,
+    run: {
+      project_id: project.id,
+      week: { week: w.week, question: w.question },
+      team_evidence: memory.evidence_items.filter((i) => supportsTeamEvidence(i)).map((i) => ({ id: i.id, statement: i.statement })),
+    },
+  });
 });
 
-/** The product version a run reads: the input's (of this Project only) or the newest; texts only when the contract needs them. */
+/**
+ * The product version a run reads: the input's (of this Project only) or the newest; texts only
+ * when the contract needs them. Every source file is read for the rules (an AI call in file 21 or
+ * in a file over the model's bound still counts); only those within `SOURCE_LIMITS` go to the
+ * model. A source file that cannot be read is named in `unread`.
+ */
 async function versionForSkill(env: Env, project: Project, memory: MemoryState, versionId: unknown, withSources: boolean): Promise<VersionForSkill | null | "unresolved"> {
   const v = typeof versionId === "string" ? await getVersion(env.HPS_DB, project.id, versionId) : (memory.versions.at(-1) ?? null);
   if (typeof versionId === "string" && !v) return "unresolved";
   if (!v) return null;
   const files: VersionForSkill["files"] = v.files.map((f) => ({ path: f.path }));
+  const unread: string[] = [];
   if (withSources) {
     let bytes = 0;
     let read = 0;
     for (const f of files) {
       const meta = v.files.find((x) => x.path === f.path)!;
-      if (!isSourcePath(f.path) || read >= SOURCE_LIMITS.files || bytes + meta.bytes > SOURCE_LIMITS.bytes) continue;
+      if (!isSourcePath(f.path)) continue;
       const obj = await env.HPS_TRACES.get(testFileKey(v.id, f.path));
-      if (!obj) continue;
+      if (!obj) {
+        unread.push(f.path);
+        continue;
+      }
       f.text = await obj.text();
-      bytes += meta.bytes;
-      read++;
+      if (read < SOURCE_LIMITS.files && bytes + meta.bytes <= SOURCE_LIMITS.bytes) {
+        f.context = true;
+        bytes += meta.bytes;
+        read++;
+      }
     }
   }
-  return { id: v.id, entry_html: v.entry_html, files };
+  return { id: v.id, entry_html: v.entry_html, files, ...(unread.length ? { unread } : {}) };
 }
 
 /** Everything one run needs, read now from stored state; or the answer to send. */

@@ -24,7 +24,9 @@ const registry = await import("../src/skills/curriculum/registry.ts");
 const skillsIndex = await import("../src/skills/index.ts");
 const { skillRequestOf } = await import("../src/skills/curriculum/request.ts");
 const venture = await import("../src/lib/curriculum/venture.ts");
-const { CURRICULUM_ROUTES } = await import("../src/routes/curriculum.ts");
+const { CURRICULUM_ROUTES, testFileKey } = await import("../src/routes/curriculum.ts");
+const { EVIDENCE_LIMITS } = await import("../src/lib/curriculum/participant-record.ts");
+const interpretation = await import("../src/lib/measurement-core/interpretation.ts");
 const { CR_SURFACES } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
 const { SkillSession } = await import("../../extensions/hypeproof-chat/src/skillSession.ts");
 
@@ -195,6 +197,7 @@ await test("CR-T40 negative: a skill missing any one of the eight fields (output
   assert.ok(refusedWith({ validation_rules: ["trust_me"] }).includes("validation_rules_not_allowed:trust_me"));
   assert.ok(refusedWith({ write_back_targets: ["deck_slides"] }).includes("write_back_targets_not_allowed:deck_slides"));
   assert.ok(registry.loadCurriculumSkills([{ ...exp, md: "" }]).refused[0].problems.includes("missing:instructions"));
+  assert.ok(refusedWith({ extra_power: true }).includes("unknown_field:extra_power"), "an unknown contract field is refused, not ignored");
   // Instrument control: a loader that only warns (today's `resolveSkills` behaviour) is caught by the same check.
   const warningLoader = (sources) => ({ skills: new Map(sources.map((s) => [s.name, s])), refused: [] });
   const { output_schema: _o, ...noOutput } = exp.contract;
@@ -239,8 +242,13 @@ function sourceFiles() {
   for (const d of ["worker/src", "extensions/hypeproof-chat/src", "extensions/hypeproof-chat/webview-ui/src"]) walk(join(REPO, d));
   return out.map((p) => ({ path: relative(REPO, p), text: readFileSync(p, "utf8") }));
 }
-/** Every hard-coded week question in `files`. */
-const weekStringHits = (files, curriculum = registry.CURRICULUM) => files.flatMap((f) => curriculum.weeks.filter((w) => f.text.includes(w.question)).map((w) => `${f.path}: W${w.week} "${w.question}"`));
+/**
+ * The strings of each week a source file must not carry: the whole question, each of its
+ * "?"-separated sub-questions ("AI가 틀리면?" is half of Week 2's), and the required behaviour.
+ */
+const weekStrings = (w) => [...new Set([w.question, ...w.question.split("?").map((x) => x.trim()).filter(Boolean).map((x) => `${x}?`), w.required_behaviour])];
+/** Every hard-coded week string in `files`. */
+const weekStringHits = (files, curriculum = registry.CURRICULUM) => files.flatMap((f) => curriculum.weeks.flatMap((w) => weekStrings(w).filter((q) => f.text.includes(q)).map((q) => `${f.path}: W${w.week} "${q}"`)));
 
 await test("CR-T42 positive: the v5 data file validates, its weeks are the PRD §4 table verbatim, and no week string sits in Service or App source", () => {
   assert.deepEqual(registry.curriculumProblems(registry.CURRICULUM, new Set(SEVEN)), []);
@@ -253,6 +261,11 @@ await test("CR-T42 positive: the v5 data file validates, its weeks are the PRD �
 await test("CR-T42 negative: a week string planted in extension source is caught by the scan; so is the heading the pre-change tree hard-coded; invalid curriculum data is refused", () => {
   const planted = { path: "extensions/hypeproof-chat/src/planted.ts", text: 'export const HEADING = "어디까지 확인했나?";' };
   assert.deepEqual(weekStringHits([...sourceFiles(), planted]), ['extensions/hypeproof-chat/src/planted.ts: W5 "어디까지 확인했나?"']);
+  // A part of a week question, or its required behaviour, is caught as well (the comment rules.ts carried before review).
+  const half = { path: "worker/src/skills/curriculum/rules.ts@45c30732", text: '// ── The product\'s own AI (Critic, CR-47 Week 2 "AI가 틀리면?") ──' };
+  assert.deepEqual(weekStringHits([half]), ['worker/src/skills/curriculum/rules.ts@45c30732: W2 "AI가 틀리면?"']);
+  const behaviour = { path: "planted-behaviour.ts", text: `const W = "${registry.CURRICULUM.weeks[0].required_behaviour}";` };
+  assert.equal(weekStringHits([behaviour]).length, 1);
   // cr-memory's panel heading before this change (origin/main 8d2138e4) carried the Week 5 question.
   assert.equal(weekStringHits([{ path: "MemoryPanel.tsx@8d2138e4", text: "<h4>어디까지 확인했나?</h4>" }]).length, 1);
   const bad = structuredClone(registry.CURRICULUM);
@@ -312,9 +325,29 @@ await test("CR-T42 on the coach route: a skill request is answered with its tag 
       assert.equal(calls.length, 1, "neither refused request reached the upstream");
       profile.curriculum_runtime = { enabled: false };
       const off = await call({ "x-hps-skill": "critic@1.0.0", "x-hps-capability": "reasoning.high" });
+      profile.curriculum_runtime = { enabled: true };
       assert.equal(off.status, 200);
       assert.equal(off.headers.get("x-hps-skill"), null, "switch off: nothing recorded as a skill request");
     });
+    // MU-02 / decision 2: a skill request is ONE upstream call, no retry and no model substitution, on
+    // every provider path that otherwise retries (anthropic, gemini). Control: an ordinary request retries.
+    for (const [provider, key] of [["anthropic", "ANTHROPIC_API_KEY"], ["gemini", "GEMINI_API_KEY"]]) {
+      const saved = { provider: env.LLM_PROVIDER, key: env[key] };
+      env.LLM_PROVIDER = provider;
+      env[key] = "test-key";
+      try {
+        await withMockUpstream(() => new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 503, headers: { "content-type": "application/json" } }), async (calls) => {
+          await call({ "x-hps-skill": "critic@1.0.0", "x-hps-capability": "reasoning.high" });
+          assert.equal(calls.length, 1, `${provider}: a skill request is one upstream call`);
+          await call({});
+          assert.ok(calls.length > 2, `${provider} control: an ordinary request retries (${calls.length - 1} calls)`);
+        });
+      } finally {
+        env.LLM_PROVIDER = saved.provider;
+        if (saved.key === undefined) delete env[key];
+        else env[key] = saved.key;
+      }
+    }
   } finally {
     console.log = log;
     if (before === undefined) delete profile.curriculum_runtime;
@@ -332,6 +365,7 @@ const ITEMS = [
   { id: EV("a1"), statement: "한 단계면 혼자 주문한다", confidence: "assumed", pending_review: false, sources_real: true, assumption_status: "open", experiment_id: "exp-1" },
   { id: EV("a2"), statement: "어르신도 멈춘다", confidence: "assumed", pending_review: false, sources_real: true, assumption_status: "observed_later", experiment_id: "exp-1" },
   { id: EV("x1"), statement: "AI가 쓴 해석", confidence: "interpreted", pending_review: true, sources_real: true, experiment_id: "exp-1" },
+  { id: EV("n1"), statement: "연습으로 적은 관찰", confidence: "observed", pending_review: false, sources_real: false, experiment_id: "exp-1" },
 ];
 const AI_FILES = [
   { path: "index.html", text: PAGE("v1") },
@@ -406,18 +440,19 @@ const INTERVIEW_OK = {
     { text: "Tell me about the last time you ordered.", purpose: "English control" },
   ],
   note_fields: ["막힌 단계", "한 말 그대로"],
-  structured_notes: [{ topic: "막힌 곳", quote: "옵션이 너무 많아서 뭘 눌러야 할지 몰랐어요" }],
+  structured_notes: [{ topic: "막힌 단계", quote: "옵션이 너무 많아서 뭘 눌러야 할지 몰랐어요" }],
 };
 const NOTES = "학생 메모: 손님이 '옵션이 너무 많아서 뭘 눌러야 할지 몰랐어요'라고 말함. 결제는 바로 함.";
 
 await test("CR-T44 positive: Interview output has only open questions and quotes the notes word for word; the Critic lists exactly what the fixture plants; Demo Coach returns a flow and Q&A on reviewed evidence", () => {
   assert.deepEqual(problemsOf(gate("interview", { goal: "주문이 어려운 이유", notes: NOTES }, INTERVIEW_OK)), []);
   // Instrument controls (too strict?): ordinary open questions pass, in several forms.
-  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?"]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
+  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?", "옵션을 고를 때 무엇이 가장 어려웠나요?", "What would you like to change?", "주문하면서 어떤 기분이 들었는지 이야기해 주세요."]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
+  for (const l of ["막힌 단계", "한 말 그대로", "다시 쓸 이유"]) assert.equal(rulesMod.isNoteLabel(l), true, l);
   const critic = {
     weak_claims: [{ claim_id: "slide:3", reason: "가정만 근거로 쓴다" }, { claim_id: "slide:4", reason: "근거가 없다" }, { claim_id: "c1", reason: "근거가 없다" }],
     missing_evidence: [{ claim_id: "slide:4", what: "누가 돈을 내는지 인터뷰" }],
-    missing_tests: [{ claim_id: "slide:4", test: "매점 주인 인터뷰" }, { claim_id: "c1", test: "열 명에게 재방문 묻기" }],
+    missing_tests: [{ claim_id: "slide:3", test: "한 단계 화면으로 다섯 명 시험" }, { claim_id: "slide:4", test: "매점 주인 인터뷰" }, { claim_id: "c1", test: "열 명에게 재방문 묻기" }],
     safety: [{ issue: "추천 문구가 알레르기 정보를 빠뜨릴 수 있다" }],
     ai_failure_review: [
       { case: "wrong", handling: "missing", note: "틀린 추천을 바로잡는 방법이 없다" },
@@ -433,14 +468,15 @@ await test("CR-T44 positive: Interview output has only open questions and quotes
   const noAi = { ...CTX, version: { ...CTX.version, files: [{ path: "index.html", text: PAGE("v1") }] } };
   assert.deepEqual(problemsOf(gate("critic", {}, { ...critic, weak_claims: critic.weak_claims.filter((w) => w.claim_id !== "c1"), missing_tests: critic.missing_tests.filter((m) => m.claim_id !== "c1"), ai_failure_review: [] }, noAi)), []);
   const demo = {
-    flow: [{ step: "주문 화면 열기", show: "옵션이 한 단계인 화면", claims: [{ text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] }] }],
+    // A quantity in the free text is fine when a supported claim of the same entry carries it.
+    flow: [{ step: "주문 화면 열기", show: "세 명 중 두 명이 멈췄던 옵션 화면을 한 단계로 바꾼 것", claims: [{ text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] }] }],
     qa: [{ question: "왜 옵션을 줄였나요?", answer: "테스트에서 옵션 단계에서 멈췄기 때문이에요", claims: [{ text: "옵션 단계가 많았어요", evidence_refs: [EV("i1")] }] }, { question: "어르신도 쓸 수 있나요?", answer: "아직 확인하지 못했어요", claims: [] }],
   };
   assert.deepEqual(problemsOf(gate("demo-coach", {}, demo)), []);
 });
 
 await test("CR-T44 negative: planted leading questions, fabricated answers, weak claims, an unchecked claim, an unhandled AI failure and an unsupported demo or Q&A claim are each caught", () => {
-  const LEADING = ["옵션이 너무 많지 않나요?", "이 키오스크 편리하죠?", "한 단계면 더 좋지 않아요?", "얼마나 만족하셨나요?", "Don't you think this is easier?", "이 기능이 필요하다는 데 동의하시나요?"];
+  const LEADING = ["옵션이 너무 많지 않나요?", "이 키오스크 편리하죠?", "한 단계면 더 좋지 않아요?", "얼마나 만족하셨나요?", "Don't you think this is easier?", "이 기능이 필요하다는 데 동의하시나요?", "어떤 점이 좋았나요?", "무엇이든 괜찮으세요?", "어떤 것이든 좋으신가요?", "어느 화면이 마음에 드셨나요?", "How much do you love this feature?", "Do you like the new screen?"];
   for (const q of LEADING) {
     const out = { ...INTERVIEW_OK, questions: [...INTERVIEW_OK.questions.slice(0, 3), { text: q, purpose: "planted" }] };
     caught(gate("interview", { goal: "g", notes: NOTES }, out), "leading_question");
@@ -448,11 +484,15 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, questions: [...INTERVIEW_OK.questions.slice(0, 3), { text: "키오스크를 써 봤다.", purpose: "closed" }] }), "not_open");
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, structured_notes: [{ topic: "만족", quote: "정말 편해서 매일 쓰고 싶어요" }] }), "answer_not_in_notes");
   caught(gate("interview", { goal: "g" }, INTERVIEW_OK), "answer_without_notes");
+  // A made-up answer in a topic or a note field is caught, not only in a quote.
+  caught(gate("interview", { goal: "g", notes: "손님: 옵션이 많다" }, { ...INTERVIEW_OK, structured_notes: [{ topic: "손님은 매일 쓰고 싶다고 함", quote: "옵션" }] }), "topic: not_a_note_field");
+  caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "손님은 '너무 비싸요'라고 답함"] }), "note_fields[1]: not_a_label");
+  caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "매일 쓰고 싶어함"] }), "note_fields[1]: not_a_label");
 
   const base = {
     weak_claims: [{ claim_id: "slide:3", reason: "r" }, { claim_id: "slide:4", reason: "r" }, { claim_id: "c1", reason: "r" }],
     missing_evidence: [],
-    missing_tests: [{ claim_id: "slide:4", test: "t" }, { claim_id: "c1", test: "t" }],
+    missing_tests: [{ claim_id: "slide:3", test: "t" }, { claim_id: "slide:4", test: "t" }, { claim_id: "c1", test: "t" }],
     safety: [],
     ai_failure_review: [{ case: "wrong", handling: "missing", note: "n" }, { case: "unsafe", handling: "missing", note: "n" }, { case: "unavailable", handling: "missing", note: "n" }],
   };
@@ -460,6 +500,14 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   assert.deepEqual(problemsOf(gate("critic", input, base)), [], "control: the base output passes");
   caught(gate("critic", input, { ...base, missing_tests: base.missing_tests.filter((m) => m.claim_id !== "c1") }), "missing_tests: not_listed:c1");
   caught(gate("critic", input, { ...base, missing_tests: base.missing_tests.filter((m) => m.claim_id !== "slide:4") }), "missing_tests: not_listed:slide:4");
+  // A claim resting only on an open assumption, an unreviewed AI item or a record that is not real
+  // was never checked by an experiment: leaving it out of missing_tests is caught.
+  caught(gate("critic", input, { ...base, missing_tests: base.missing_tests.filter((m) => m.claim_id !== "slide:3") }), "missing_tests: not_listed:slide:3");
+  const resting = { claims: [{ id: "c1", text: "학생들이 매일 쓴다" }, { id: "c2", text: "AI 해석대로다", evidence_refs: [EV("x1")] }, { id: "c3", text: "연습 관찰대로다", evidence_refs: [EV("n1")] }, { id: "c4", text: "어르신도 멈춘다", evidence_refs: [EV("a2")] }, { id: "c5", text: "두 명이 멈췄다", evidence_refs: [EV("o1")] }] };
+  const all = { ...base, weak_claims: [...base.weak_claims, ...["c2", "c3", "c4"].map((claim_id) => ({ claim_id, reason: "r" }))], missing_tests: [...base.missing_tests, ...["c2", "c3"].map((claim_id) => ({ claim_id, test: "t" }))] };
+  assert.deepEqual(problemsOf(gate("critic", resting, all)), [], "control: c4 (an assumption observed later) and c5 (reviewed, real) were checked; c2 and c3 listed");
+  caught(gate("critic", resting, { ...all, missing_tests: all.missing_tests.filter((m) => m.claim_id !== "c2") }), "missing_tests: not_listed:c2");
+  caught(gate("critic", resting, { ...all, missing_tests: all.missing_tests.filter((m) => m.claim_id !== "c3") }), "missing_tests: not_listed:c3");
   caught(gate("critic", input, { ...base, weak_claims: base.weak_claims.filter((w) => w.claim_id !== "slide:3") }), "weak_claims: not_listed:slide:3");
   caught(gate("critic", input, { ...base, weak_claims: [...base.weak_claims, { claim_id: "slide:9", reason: "r" }] }), "unknown_claim:slide:9");
   caught(gate("critic", input, { ...base, ai_failure_review: base.ai_failure_review.map((r) => (r.case === "unavailable" ? { ...r, handling: "present" } : r)) }), "unhandled_failure_not_named:app.js");
@@ -475,6 +523,37 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   caught(gate("demo-coach", {}, demo({ text: "모두가 좋아해요", evidence_refs: [] })), "no_evidence");
   caught(gate("demo-coach", {}, demo({ text: "AI가 쓴 해석대로예요", evidence_refs: [EV("x1")] })), "evidence_not_usable");
   caught(gate("demo-coach", {}, { flow: [{ step: "s", show: "w", claims: [{ text: "100명이 써요", evidence_refs: [EV("zz")] }] }], qa: [{ question: "q", answer: "a", claims: [] }] }), "unresolved_evidence_ref");
+  // The free text a student reads: an unsupported claim planted only in `answer` or `show`, with `claims: []`.
+  const free = (flow, qa) => gate("demo-coach", {}, { flow: [flow], qa: [qa] });
+  const quiet = { step: "열기", show: "주문 화면", claims: [] };
+  const unconfirmed = { question: "어르신도 쓸 수 있나요?", answer: "아직 확인하지 못했어요.", claims: [] };
+  assert.deepEqual(problemsOf(free(quiet, unconfirmed)), [], "control: a plain step and the fixed not-confirmed answer pass");
+  caught(free(quiet, { question: "몇 명이 써요?", answer: "벌써 100명이 매일 쓰고 모두 만족했어요", claims: [] }), "qa[0]: answer_without_claim");
+  caught(free(quiet, { question: "효과가 있었나요?", answer: "네, 만족도가 90% 올랐고 매점 매출이 두 배가 됐어요.", claims: [] }), "qa[0].answer: unsupported_quantity:90");
+  caught(free(quiet, { question: "효과가 있었나요?", answer: "네, 정말 좋아졌어요.", claims: [] }), "qa[0]: answer_without_claim");
+  caught(free({ step: "열기", show: "100명이 매일 쓰는 화면", claims: [] }, unconfirmed), "flow[0].show: unsupported_quantity:100");
+  caught(free({ step: "시작", show: "사용자 100명 중 95명이 혼자 주문했다고 보여준다", claims: [] }, unconfirmed), "flow[0].show: unsupported_quantity:95");
+  // A supported claim does not carry a different number; an unsupported claim carries none.
+  const o1 = { text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] };
+  caught(free(quiet, { question: "몇 명이 멈췄나요?", answer: "100명이 멈췄어요", claims: [o1] }), "qa[0].answer: unsupported_quantity:100");
+  caught(free(quiet, { question: "몇 명이 썼나요?", answer: "100명이 썼어요", claims: [{ text: "100명이 썼어요", evidence_refs: [EV("x1")] }] }), "qa[0].answer: unsupported_quantity:100");
+  assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "세 명 중 두 명이 멈췄어요", claims: [o1] })), [], "control: the same quantity with its supported claim passes");
+});
+
+await test("CR-T40/CR-T44 schema validator: minLength, enum and inherited key names are checked, never thrown on", () => {
+  const v = contractMod.validateAgainstSchema;
+  const schema = { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 10 }, kind: { type: "string", enum: ["a", "b"], maxLength: 5 } }, required: ["name"], additionalProperties: false };
+  assert.deepEqual(v(schema, { name: "x", kind: "a" }), [], "control: a valid value passes");
+  assert.deepEqual(v(schema, { name: "   " }), ["$.name: too_short"], "a whitespace-only string is empty");
+  assert.deepEqual(v(schema, { name: "x", kind: "c" }), ["$.kind: not_in_enum"]);
+  for (const k of ["constructor", "toString", "valueOf", "hasOwnProperty"]) assert.deepEqual(v(schema, { name: "x", [k]: 1 }), [`$.${k}: not_allowed`], k);
+  assert.deepEqual(v(schema, JSON.parse('{"name":"x","__proto__":{}}')), ["$.__proto__: not_allowed"]);
+  assert.deepEqual(v({ ...schema, required: ["toString"] }, { name: "x" }), ["$.toString: missing"], "an inherited name is not a present required key");
+  assert.deepEqual(v({ type: "mystery" }, 1), ["$: unsupported_schema"]);
+  // Through a bundled contract: the Critic's enum and minLength.
+  const out = { weak_claims: [], missing_evidence: [], missing_tests: [], safety: [], ai_failure_review: [{ case: "maybe", handling: "missing", note: " " }] };
+  const r = registry.checkSkillOutput(registry.CURRICULUM_SKILLS.get("critic"), CTX, {}, out);
+  assert.ok(!r.ok && r.problems.some((p) => p.includes("not_in_enum")) && r.problems.some((p) => p.includes("too_short")), JSON.stringify(r));
 });
 
 // ── CR-T41 (route): the gate in front of write-back ─────────────────────────────
@@ -576,6 +655,129 @@ await test("CR-T41 prepare: the prompt carries the skill, its schema, only the r
     assert.ok(cctx.version_sources.some((x) => x.path === "app.js" && x.text.includes("hypeproof.ai.generate")), "the product's source is read for the AI failure review");
     const unknown = await run(f, s, "evil", "prepare", { input: {} });
     assert.deepEqual([unknown.status, unknown.json.error.code], [404, "unknown_skill"]);
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-T41 guards: another Project's experiment, inherited key names, the draft limit and a deleted experiment each refuse the write and store nothing", async () => {
+  const f = await fixture();
+  try {
+    const s = await project(f);
+    const out = evidenceOutput(s);
+    // A second Project of the same student, with its own experiment: a member, but not of this Project.
+    const p2 = await f.api("/v1/curriculum/projects", { method: "POST", token: s.token, body: { title: "두 번째 프로젝트" } });
+    assert.equal(p2.status, 201, p2.text);
+    const up2 = await f.upload(p2.json.project.id, V0, s.token);
+    assert.ok(up2.status === 201 || up2.status === 200, up2.text);
+    const e2 = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: p2.json.project.id, product_version_id: up2.id, week: 1, question: "다른 실험", method: "task_test", success_criteria: ["3명 중 2명 완료"], hypothesis: "다른 가설" } });
+    assert.equal(e2.status, 201, e2.text);
+    const before = await storeSnapshot(f);
+    const cross = await run(f, s, "evidence", "output", { input: { experiment_id: e2.json.experiment.id }, output: out });
+    assert.deepEqual([cross.status, cross.json.error.code], [409, "experiment_unresolved"], cross.text);
+    // Control: on its own Project's route the same experiment resolves.
+    const own = await f.api(`/v1/curriculum/projects/${p2.json.project.id}/skills/evidence/prepare`, { method: "POST", token: s.token, body: { input: { experiment_id: e2.json.experiment.id } } });
+    assert.equal(own.status, 200, own.text);
+    // Inherited key names in input or output are named problems (422), never a 500.
+    for (const body of [{ input: { experiment_id: s.experiment.id }, output: { constructor: 1 } }, { input: { experiment_id: s.experiment.id, toString: "x" }, output: out }, { input: { experiment_id: s.experiment.id }, output: JSON.parse('{"__proto__":{}}') }]) {
+      const r = await run(f, s, "evidence", "output", body);
+      assert.equal(r.status, 422, r.text);
+      assert.ok(r.json.error.problems.some((p) => p.includes("not_allowed")), r.text);
+    }
+    const pv = await run(f, s, "experiment", "prepare", { input: { valueOf: 1 } });
+    assert.deepEqual([pv.status, pv.json.error.code], [422, "invalid_input"], pv.text);
+    // The draft limit: a full experiment takes no AI draft.
+    const limit = EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment;
+    try {
+      EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment = 1;
+      const full = await run(f, s, "evidence", "output", { input: { experiment_id: s.experiment.id }, output: out });
+      assert.deepEqual([full.status, full.json.error.code], [409, "draft_limit"], full.text);
+    } finally {
+      EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment = limit;
+    }
+    assert.deepEqual(storeDiff(before, await storeSnapshot(f)), { added: [], removed: [], tables: [] }, "nothing written by any refused output");
+    // A deleted experiment takes no write-back.
+    const del = await f.api(`/v1/curriculum/experiments/${s.experiment.id}`, { method: "DELETE", token: s.token });
+    assert.equal(del.status, 200, del.text);
+    const mid = await storeSnapshot(f);
+    // Count every R2 write during the refused run: the refusal comes before any write, not after a clean-up.
+    const bucket = f.env.HPS_TRACES;
+    const put = bucket.put;
+    let puts = 0;
+    bucket.put = (...a) => (puts++, put.apply(bucket, a));
+    let gone;
+    try {
+      gone = await run(f, s, "evidence", "output", { input: { experiment_id: s.experiment.id }, output: { items: [{ id: "a1", section: "assumption", text: "한 단계면 해결된다", source_refs: [] }] } });
+    } finally {
+      bucket.put = put;
+    }
+    assert.deepEqual([gone.status, gone.json.error.code], [409, "experiment_data_deleted"], gone.text);
+    assert.equal(puts, 0, "no record task or draft was written and cleaned up again");
+    assert.deepEqual(storeDiff(mid, await storeSnapshot(f)), { added: [], removed: [], tables: [] }, "nothing written after the delete");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-T44 skill tag: only an AI revision may carry it; a user-authored draft with a tag is refused", () => {
+  const draft = { format: interpretation.EVIDENCE_DRAFT_FORMAT, id: "drf-x", revision: 1, supersedes: null, experiment: "exp-1", author: "ai", created_at: 1, skill: "evidence@1.0.0", items: [{ id: "a1", section: "assumption", text: "가정", source_refs: [], review: "draft" }] };
+  assert.equal(interpretation.validateEvidenceDraftShape(draft).skill, "evidence@1.0.0", "control: an AI revision keeps its tag");
+  assert.throws(() => interpretation.validateEvidenceDraftShape({ ...draft, author: "user" }), /invalid_draft_skill/);
+  assert.throws(() => interpretation.validateEvidenceDraftShape({ ...draft, author: "runtime" }), /invalid_draft_skill/);
+  assert.throws(() => interpretation.validateEvidenceDraftShape({ ...draft, skill: "evidence" }), /invalid_draft_skill/);
+});
+
+await test("CR-45 run state: the run's week (the input's, else the running experiment's) and the team evidence are the Service's; another student's Project is an unknown route", async () => {
+  const f = await fixture();
+  try {
+    const s = await project(f);
+    const reg = await f.api(`/v1/curriculum/skills?project_id=${s.project.id}`, { token: s.token });
+    assert.equal(reg.status, 200, reg.text);
+    assert.deepEqual(reg.json.run.week, { week: 2, question: registry.CURRICULUM.weeks[1].question });
+    assert.deepEqual(reg.json.run.team_evidence.map((i) => i.id).sort(), [s.ev("o1"), s.ev("i1")].sort(), "reviewed, real, not assumed");
+    assert.equal((await f.api("/v1/curriculum/skills", { token: s.token })).json.run, undefined, "without a Project, the listing only");
+    const theirs = await f.api("/v1/curriculum/projects", { method: "POST", token: await f.student("cr-b"), body: { title: "다른 학생 프로젝트" } });
+    assert.equal(theirs.status, 201, theirs.text);
+    const foreign = await f.api(`/v1/curriculum/skills?project_id=${theirs.json.project.id}`, { token: s.token });
+    assert.equal(foreign.status, 404, foreign.text);
+    // An explicit week in the input is the week the model reads.
+    const r = await run(f, s, "experiment", "prepare", { input: { week: 3 } });
+    assert.equal(r.status, 200, r.text);
+    const ctx = JSON.parse(/## Context\n(.*)\n\n## Input/s.exec(r.json.prompt)[1]);
+    assert.deepEqual(ctx.curriculum_week, { week: 3, question: registry.CURRICULUM.weeks[2].question, required_behaviour: registry.CURRICULUM.weeks[2].required_behaviour });
+    const dflt = JSON.parse(/## Context\n(.*)\n\n## Input/s.exec((await run(f, s, "experiment", "prepare", { input: {} })).json.prompt)[1]);
+    assert.equal(dflt.curriculum_week.week, 2, "control: without one, the running experiment's week");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-T44 AI failure review on the route: an AI call past the model's file bound still counts; a source the Service cannot read refuses 'no AI'", async () => {
+  const f = await fixture();
+  try {
+    const s = await project(f);
+    // 22 source files; the AI call is in the last one, past SOURCE_LIMITS.files.
+    const files = { "index.html": PAGE("버전 2", "a01.js") };
+    for (let i = 1; i <= 20; i++) files[`a${String(i).padStart(2, "0")}.js`] = `console.log(${i});`;
+    files["zz.js"] = "hypeproof.ai.generate({ capability: 'text.fast', input: '추천' }).then((r) => (document.title = r.text));";
+    const up = await f.upload(s.project.id, files, s.token);
+    assert.ok(up.status === 201 || up.status === 200, up.text);
+    const prep = await run(f, s, "critic", "prepare", { input: {} });
+    const cctx = JSON.parse(/## Context\n(.*)\n\n## Input/s.exec(prep.json.prompt)[1]);
+    assert.ok(cctx.version_sources.length <= 20, "the model reads within its bound");
+    assert.equal(cctx.version_sources.some((x) => x.path === "zz.js"), false);
+    const claims = { weak_claims: [{ claim_id: "slide:3", reason: "근거가 없다" }], missing_evidence: [], missing_tests: [{ claim_id: "slide:3", test: "다섯 명 시험" }], safety: [] };
+    const noReview = await run(f, s, "critic", "output", { input: {}, output: { ...claims, ai_failure_review: [] } });
+    assert.equal(noReview.status, 422, noReview.text);
+    assert.ok(noReview.json.error.problems.some((p) => p.includes("case_missing:wrong")), noReview.text);
+    const review = ["wrong", "unsafe", "unavailable"].map((k) => ({ case: k, handling: "missing", note: "대비 없음" }));
+    const ok = await run(f, s, "critic", "output", { input: {}, output: { ...claims, ai_failure_review: review } });
+    assert.equal(ok.status, 200, ok.text);
+    // The source becomes unreadable: the Service does not know the product has no AI.
+    await f.r2.delete(testFileKey(up.id, "zz.js"));
+    const unread = await run(f, s, "critic", "output", { input: {}, output: { ...claims, ai_failure_review: [] } });
+    assert.equal(unread.status, 422, unread.text);
+    assert.ok(unread.json.error.problems.some((p) => p.includes("sources_not_read:zz.js")), unread.text);
   } finally {
     f.close();
   }

@@ -133,7 +133,7 @@ export function schemaDefinitionProblems(s: unknown, at = "$"): string[] {
     if (!isObj(s.properties)) out.push(`${at}: object_without_properties`);
     else for (const [k, v] of Object.entries(s.properties)) out.push(...schemaDefinitionProblems(v, `${at}.${k}`));
     if (s.additionalProperties !== false) out.push(`${at}: additional_properties_must_be_false`);
-    if (s.required !== undefined && !(Array.isArray(s.required) && s.required.every((r) => typeof r === "string" && isObj(s.properties) && r in s.properties))) out.push(`${at}: invalid_required`);
+    if (s.required !== undefined && !(Array.isArray(s.required) && s.required.every((r) => typeof r === "string" && isObj(s.properties) && Object.hasOwn(s.properties, r)))) out.push(`${at}: invalid_required`);
   }
   if (s.type === "array") {
     if (s.items === undefined) out.push(`${at}: array_without_items`);
@@ -151,9 +151,10 @@ export function validateAgainstSchema(schema: JsonSchema, value: unknown, at = "
     case "object": {
       if (!isObj(value)) return [`${at}: expected_object`];
       const props = schema.properties ?? {};
-      for (const r of schema.required ?? []) if (value[r] === undefined) out.push(`${at}.${r}: missing`);
+      // Own keys only: an inherited name ("constructor", "__proto__") is not a property of the schema.
+      for (const r of schema.required ?? []) if (!Object.hasOwn(value, r) || value[r] === undefined) out.push(`${at}.${r}: missing`);
       for (const [k, v] of Object.entries(value)) {
-        if (!(k in props)) {
+        if (!Object.hasOwn(props, k)) {
           out.push(`${at}.${k}: not_allowed`);
           continue;
         }
@@ -186,6 +187,8 @@ export function validateAgainstSchema(schema: JsonSchema, value: unknown, at = "
     }
     case "boolean":
       return typeof value === "boolean" ? [] : [`${at}: expected_boolean`];
+    default:
+      return [`${at}: unsupported_schema`];
   }
 }
 

@@ -6,9 +6,10 @@ Prepare an interview for the goal in the input.
   ("지난번에 주문할 때 어떤 일이 있었는지 이야기해 주세요"). Never suggest the answer
   ("편리하지 않나요?", "좋죠?"); a leading question is refused.
 - For each question, say in `purpose` what the team wants to learn.
-- List the fields the student fills in while listening (`note_fields`).
-- When the input has `notes`, structure them in `structured_notes`: each entry quotes the notes
-  WORD FOR WORD. Never write, guess or complete what the interviewee said; a quote that is not
+- List the fields the student fills in while listening (`note_fields`): short labels of at most
+  30 characters ("막힌 단계"), never a sentence, a quote or an answer.
+- When the input has `notes`, structure them in `structured_notes`: each entry's `topic` is one
+  of your `note_fields`, word for word, and its `quote` quotes the notes WORD FOR WORD. Never write, guess or complete what the interviewee said; a quote that is not
   in the notes is refused. Without notes, leave `structured_notes` out.
 
 ## Output

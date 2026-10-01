@@ -13,12 +13,19 @@ import type { ExperimentEvidence } from "./participant-record.ts";
 export interface VersionForSkill {
   id: string;
   entry_html: string;
-  files: Array<{ path: string; text?: string }>;
+  /**
+   * Every file of the version. `text` is a source file's text, read for the rules (which scan
+   * every source file, e.g. for an AI call); `context` marks the ones within `SOURCE_LIMITS`
+   * that the model also reads (`version_sources`).
+   */
+  files: Array<{ path: string; text?: string; context?: boolean }>;
+  /** Source files whose text could not be read: a rule that scans sources refuses rather than guess. */
+  unread?: string[];
 }
 
-/** Text files of a version a skill may read (`version_sources`), and the bound on what is read. */
+/** Text files of a version a skill may read, and the bound on what the model reads (`version_sources`). */
 export const SOURCE_LIMITS = { files: 20, bytes: 200_000 } as const;
-export const isSourcePath = (p: string) => /\.(html?|m?js|css)$/i.test(p);
+export const isSourcePath = (p: string) => /\.(html?|[cm]?[jt]sx?|css|svelte|vue)$/i.test(p);
 
 /** The week a run is for: the input's, else the newest running experiment's, else 1. */
 export function runWeek(memory: Pick<MemoryState, "experiments">, input: { week?: unknown }): number {
@@ -101,7 +108,7 @@ export function modelContextOf(
         out.version_files = extras.version ? { id: extras.version.id, entry_html: extras.version.entry_html, files: extras.version.files.map((f) => f.path) } : null;
         break;
       case "version_sources":
-        out.version_sources = extras.version ? extras.version.files.filter((f) => typeof f.text === "string").map((f) => ({ path: f.path, text: f.text })) : [];
+        out.version_sources = extras.version ? extras.version.files.filter((f) => f.context && typeof f.text === "string").map((f) => ({ path: f.path, text: f.text })) : [];
         break;
     }
   }

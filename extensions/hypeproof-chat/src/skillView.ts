@@ -97,20 +97,86 @@ export function skillInput(skill: string, form: SkillForm): Record<string, unkno
   }
 }
 
+/**
+ * The bounds of the skills' input schemas the form can break (the Service checks them again and
+ * refuses with `invalid_input`; here the student sees them before a run).
+ */
+export const SKILL_INPUT_LIMITS = { text: 500, notes: 8000, evidenceRefs: 10, claims: 20, claimText: 600 } as const;
+
 /** What the form still needs before a run, in the student's words; empty means ready. */
 export function skillFormProblems(skill: string, form: SkillForm): string[] {
+  const out: string[] = [];
+  const text = form.text?.trim() ?? "";
   switch (skill) {
     case "evidence":
-      return form.experiment_id ? [] : ["정리할 실험을 골라 주세요."];
+      if (!form.experiment_id) out.push("정리할 실험을 골라 주세요.");
+      break;
     case "product-builder":
-      return form.evidence_refs?.length ? [] : ["고칠 근거를 하나 이상 골라 주세요."];
+      if (!form.evidence_refs?.length) out.push("고칠 근거를 하나 이상 골라 주세요.");
+      else if (form.evidence_refs.length > SKILL_INPUT_LIMITS.evidenceRefs) out.push(`근거는 ${SKILL_INPUT_LIMITS.evidenceRefs}개까지 고를 수 있어요.`);
+      break;
     case "deck-builder":
-      return form.decision_id ? [] : ["슬라이드를 바꾸게 한 팀의 결정을 골라 주세요."];
+      if (!form.decision_id) out.push("슬라이드를 바꾸게 한 팀의 결정을 골라 주세요.");
+      break;
     case "interview":
-      return form.text?.trim() ? [] : ["인터뷰로 알고 싶은 것을 적어 주세요."];
-    default:
-      return [];
+      if (!text) out.push("인터뷰로 알고 싶은 것을 적어 주세요.");
+      if ((form.notes?.trim().length ?? 0) > SKILL_INPUT_LIMITS.notes) out.push(`인터뷰 메모는 ${SKILL_INPUT_LIMITS.notes}자까지 쓸 수 있어요.`);
+      break;
   }
+  if (skill === "critic") {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length > SKILL_INPUT_LIMITS.claims) out.push(`주장은 ${SKILL_INPUT_LIMITS.claims}줄까지 적을 수 있어요.`);
+    if (lines.some((l) => l.length > SKILL_INPUT_LIMITS.claimText)) out.push(`주장 한 줄은 ${SKILL_INPUT_LIMITS.claimText}자까지 쓸 수 있어요.`);
+  } else if (text.length > SKILL_INPUT_LIMITS.text) out.push(`내용은 ${SKILL_INPUT_LIMITS.text}자까지 쓸 수 있어요.`);
+  return out;
+}
+
+/** Why the Service refused an answer, by problem code, in the student's words. The raw code stays for tests and teachers. */
+const PROBLEM_LINES: Record<string, string> = {
+  not_countable: "성공 기준을 셀 수 있게 (숫자로) 적지 않았어요.",
+  open_assumption_not_chosen: "아직 확인하지 않은 가정을 고르지 않았어요.",
+  not_an_open_assumption: "이미 확인했거나 가정이 아닌 것을 확인할 가정으로 골랐어요.",
+  observation_without_source_refs: "본 것(관찰)에 어느 기록에서 봤는지가 빠졌어요.",
+  no_evidence: "근거가 없는 내용이 있어요.",
+  evidence_not_usable: "가정이거나 아직 검토하지 않은 근거를 썼어요.",
+  unresolved_evidence_ref: "프로젝트에 없는 근거를 가리켰어요.",
+  evidence_not_selected: "고르지 않은 근거로 바꾸려 했어요.",
+  path_not_in_version: "제품에 없는 파일을 바꾸려 했어요.",
+  add_of_existing_file: "이미 있는 파일을 새 파일로 만들려 했어요.",
+  no_product_version: "아직 공개한 제품 버전이 없어요.",
+  decision_unresolved: "고른 결정을 찾을 수 없어요.",
+  decision_is_ai_suggestion: "AI 제안은 팀의 결정이 아니라서 슬라이드를 바꿀 수 없어요.",
+  slide_not_affected: "결정과 관계없는 슬라이드를 바꾸려 했어요.",
+  duplicate_slide: "같은 슬라이드를 두 번 바꾸려 했어요.",
+  leading_question: "답을 정해 두고 묻는 질문이 있어요.",
+  not_open: "열린 질문이 아닌 질문이 있어요.",
+  answer_not_in_notes: "메모에 없는 말을 인터뷰 대답처럼 적었어요.",
+  answer_without_notes: "메모가 없는데 인터뷰 대답을 적었어요.",
+  not_a_note_field: "메모 정리가 적을 칸 이름을 쓰지 않았어요.",
+  not_a_label: "적을 칸 이름이 짧은 이름이 아니에요.",
+  unknown_claim: "없는 주장을 가리켰어요.",
+  not_listed: "빠뜨린 주장이 있어요.",
+  case_missing: "AI가 틀리거나 위험하거나 답하지 못할 때의 검토가 빠졌어요.",
+  unhandled_failure_not_named: "제품 파일에 AI 실패 대비가 없는데 있다고 했어요.",
+  product_has_no_ai: "AI를 쓰지 않는 제품에 AI 실패 검토를 적었어요.",
+  sources_not_read: "제품 파일을 다 읽지 못해서 검토를 받을 수 없어요.",
+  answer_without_claim: "근거 없는 대답이 있어요.",
+  unsupported_quantity: "근거 없는 숫자나 '모두' 같은 말이 있어요.",
+  missing: "꼭 있어야 할 칸이 빠졌어요.",
+  not_allowed: "정해지지 않은 칸이 들어 있어요.",
+  too_few_items: "항목 수가 너무 적어요.",
+  too_many_items: "항목 수가 너무 많아요.",
+  too_short: "비어 있는 내용이 있어요.",
+  too_long: "너무 긴 내용이 있어요.",
+  not_in_enum: "정해진 값이 아닌 값이 있어요.",
+  below_minimum: "너무 작은 숫자가 있어요.",
+  above_maximum: "너무 큰 숫자가 있어요.",
+};
+/** One refused problem (`[rule ]$.path: code[:detail]`) as a sentence a student reads. */
+export function problemLine(problem: string): string {
+  const code = problem.slice(problem.lastIndexOf(": ") + 2).split(":")[0] ?? "";
+  if (code.startsWith("expected_")) return "형식이 맞지 않는 칸이 있어요.";
+  return PROBLEM_LINES[code] ?? "AI의 답에 규칙에 맞지 않는 곳이 있어요.";
 }
 
 /**

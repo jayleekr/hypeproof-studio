@@ -12,6 +12,7 @@
 // names; the Demo Coach may claim only what reviewed, real evidence supports.
 
 import { EVIDENCE_DRAFT_FORMAT, validateEvidenceDraftShape, type DraftItem, type EvidenceDraft } from "../../lib/measurement-core/interpretation.ts";
+import { supportsTeamEvidence } from "../../lib/curriculum/memory.ts";
 
 /** One evidence item as a rule sees it (a projection of memory.ts `EvidenceItemView`). */
 export interface SkillEvidenceItem {
@@ -32,16 +33,20 @@ export interface SkillContext {
   slides: Array<{ number: number; title: string; body: string; evidence_refs: string[] }>;
   hypotheses: Array<{ id: string; statement: string; status: string }>;
   experiments: Array<{ id: string; hypothesis_id: string; question: string; success_criteria: string[]; week: number }>;
-  /** The product version the skill works on, with the text of its HTML/JS/CSS files when read. */
-  version: { id: string; entry_html: string; files: Array<{ path: string; text?: string }> } | null;
+  /**
+   * The product version the skill works on, with the text of its source files when read.
+   * `unread` names source files whose text could not be read, so a rule that scans the sources
+   * can refuse instead of reading "no AI call" into a file it never saw.
+   */
+  version: { id: string; entry_html: string; files: Array<{ path: string; text?: string }>; unread?: string[] } | null;
 }
 
 type Out = Record<string, any>;
 type In = Record<string, any>;
 export type Rule = (ctx: SkillContext, input: In, output: Out) => string[];
 
-/** memory.ts `supportsTeamEvidence`: reviewed, not assumed, on real records. */
-export const usableEvidence = (it: SkillEvidenceItem | undefined): boolean => !!it && it.confidence !== "assumed" && !it.pending_review && it.sources_real;
+/** Evidence a team's work may rest on: reviewed, not assumed, on real records (memory.ts, one rule). */
+export const usableEvidence = (it: SkillEvidenceItem | undefined): boolean => supportsTeamEvidence(it);
 const itemMap = (ctx: SkillContext) => new Map(ctx.items.map((i) => [i.id, i]));
 
 /** Problems with a list of evidence refs that must each resolve to evidence the team may rest on. */
@@ -73,20 +78,25 @@ export function claimsOf(ctx: SkillContext, input: In): Claim[] {
 
 /**
  * Is a claim checked by a verification criterion or an experiment? A verification criterion
- * the student named for it checks it; an experiment checks it when the claim cites evidence
- * an experiment produced (any `ev:` item that resolves). A claim with neither is a missing test.
+ * the student named for it checks it; an experiment checks it only when the claim cites
+ * evidence an experiment confirmed: a reviewed item on real records that is not an assumption,
+ * or an assumption a later revision observed. A claim resting only on an open assumption, an
+ * unreviewed AI item or a record that is not real was never checked: it is a missing test.
  */
 export function claimChecked(claim: Claim, ctx: SkillContext, input: In): boolean {
   const criteria = Array.isArray(input.criteria) ? input.criteria : [];
   if (criteria.some((c: { claim_id?: unknown }) => c?.claim_id === claim.id)) return true;
   const items = itemMap(ctx);
-  return claim.evidence_refs.some((r) => items.has(r));
+  return claim.evidence_refs.some((r) => {
+    const it = items.get(r);
+    return usableEvidence(it) || (!!it && it.confidence === "assumed" && it.assumption_status === "observed_later" && !it.pending_review && it.sources_real);
+  });
 }
 
 /** A weak claim: nothing reviewed and real supports it (no refs, or only assumptions, unreviewed AI items or unreal records). */
 export const claimWeak = (claim: Claim, ctx: SkillContext): boolean => !claim.evidence_refs.some((r) => usableEvidence(itemMap(ctx).get(r)));
 
-// ── The product's own AI (Critic, CR-47 Week 2 "AI가 틀리면?") ──────────────
+// ── The product's own AI (Critic, CR-47 Week 2: failure and safety review) ──────
 
 const AI_CALL = /hypeproof\.ai\.\w+\s*\(|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com/;
 const HANDLES_FAILURE = /\.catch\s*\(|\bcatch\s*[({]|\bonerror\b/;
@@ -106,14 +116,44 @@ const LEADING = [
   /(좋|편하|편리하|쉽|필요하|유용하)(지|잖)/,
   /(동의하시|그렇게 생각하시)/,
   /얼마나\s*(좋|편|만족|유용|쉽)/,
+  // A closed question whose last word is a favourable verdict ("어떤 점이 좋았나요?", "무엇이든 괜찮으세요?").
+  /(^|\s)(좋|괜찮|만족|편하|편했|편리|유용)[가-힣]*\s*[?？]?$/,
+  /(마음|맘)에\s*(드|들)[가-힣]*\s*[?？]?$/,
   /\b(don't|wouldn't|isn't|aren't|doesn't) (you|it|that)\b/i,
   /\bagree\b/i,
+  /\bhow much do you (love|like|enjoy|appreciate)\b/i,
+  /^(do|did) you (love|like|enjoy)\b/i,
 ];
 /** An open question asks what, how, why, when, where, who or for a story. */
 const OPEN = /(무엇|무슨|뭐|어떻게|어떤|어떠|왜|언제|어디|누가|누구|어느|얼마나 자주|몇|이야기해|말씀해|설명해|보여 ?주|알려 ?주|\b(what|how|why|when|where|who|tell me|describe)\b)/i;
 
 export const isLeadingQuestion = (q: string) => LEADING.some((re) => re.test(q.trim()));
 export const isOpenQuestion = (q: string) => OPEN.test(q) && !isLeadingQuestion(q);
+
+/** A note field is a short label to fill in while listening, never a sentence or a quoted answer. */
+export const NOTE_LABEL_MAX = 30;
+const QUOTE_MARKS = /['"‘’“”「」『』]/;
+const SENTENCE_END = /(다|요|함|음|임|죠)\s*[.!?。？！]*$|[.!?。？！]$/;
+export const isNoteLabel = (v: string) => v.trim().length > 0 && v.trim().length <= NOTE_LABEL_MAX && !QUOTE_MARKS.test(v) && !SENTENCE_END.test(v.trim());
+
+// ── Quantities in free text (Demo Coach, CR-47) ───────────────────────────────
+
+/**
+ * Numbers and quantity words a sentence asserts: a number (a week reference such as "2주차"
+ * or an ordinal "3번째" is not a quantity), a Korean counted number ("세 명"), and words that
+ * claim a share or a frequency ("모두", "매일", "대부분"). Normalised so the same quantity in a
+ * claim matches: digits keep only the number, words lose spaces and case.
+ */
+const QUANTITY = /(\d+(?:[.,]\d+)*)(?!\s*(?:주차|번째|\d))|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:명|번|회|개|초|분|배|시간)|절반|대부분|모두|모든|전부|다들|누구나|매일|항상|언제나|\b(?:everyone|everybody|always|all|most|half|percent)\b/gi;
+export function quantitiesIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(QUANTITY)) out.push(m[1] !== undefined ? m[1].replace(/,/g, "") : m[0].replace(/\s+/g, "").toLowerCase());
+  return out;
+}
+
+/** The fixed answer to a question the team has no evidence for (Demo Coach): the only answer without a claim. */
+export const DEMO_NOT_CONFIRMED = "아직 확인하지 못했어요";
+const isNotConfirmedAnswer = (v: unknown) => typeof v === "string" && v.trim().replace(/[.!。]+$/, "") === DEMO_NOT_CONFIRMED;
 
 // ── Evidence (CR-46): the output as an hps-evidence-draft/1 revision 1 by the AI ──
 
@@ -206,15 +246,23 @@ export const RULES: Record<string, Rule> = {
       if (isLeadingQuestion(text)) return [`$.questions[${i}]: leading_question`];
       return isOpenQuestion(text) ? [] : [`$.questions[${i}]: not_open`];
     }),
-  // Interview (CR-47): structured notes quote only what the student's notes say; no answer is written for the interviewee.
+  // Interview (CR-47): structured notes quote only what the student's notes say, under one of the
+  // note fields; no answer is written for the interviewee, in a quote or in a topic.
   interview_notes_verbatim: (_ctx, input, out) => {
     const notes = typeof input.notes === "string" ? input.notes : "";
+    const fields = new Set((Array.isArray(out.note_fields) ? out.note_fields : []).map(String));
     return (Array.isArray(out.structured_notes) ? out.structured_notes : []).flatMap((n: Out, i: number) => {
       const quote = String(n.quote ?? "").trim();
-      if (!notes) return [`$.structured_notes[${i}]: answer_without_notes`];
-      return quote && notes.includes(quote) ? [] : [`$.structured_notes[${i}]: answer_not_in_notes`];
+      const p: string[] = [];
+      if (!fields.has(String(n.topic))) p.push(`$.structured_notes[${i}].topic: not_a_note_field`);
+      if (!notes) p.push(`$.structured_notes[${i}]: answer_without_notes`);
+      else if (!(quote && notes.includes(quote))) p.push(`$.structured_notes[${i}]: answer_not_in_notes`);
+      return p;
     });
   },
+  // Interview (CR-47): a note field is a short label, never a sentence or a quoted answer.
+  interview_note_fields_are_labels: (_ctx, _input, out) =>
+    (Array.isArray(out.note_fields) ? out.note_fields : []).flatMap((f: unknown, i: number) => (isNoteLabel(String(f)) ? [] : [`$.note_fields[${i}]: not_a_label`])),
   // Critic (CR-47): every claim the output names exists.
   critic_claims_known: (ctx, input, out) => {
     const ids = new Set(claimsOf(ctx, input).map((c) => c.id));
@@ -236,6 +284,8 @@ export const RULES: Record<string, Rule> = {
   critic_reviews_ai_failure: (ctx, _input, out) => {
     const { uses_ai, unhandled } = aiFailureHandling(ctx.version?.files ?? []);
     const review = Array.isArray(out.ai_failure_review) ? out.ai_failure_review : [];
+    // A source file the Service could not read may call an AI: "no AI" is not known, so nothing is accepted.
+    if (!uses_ai && ctx.version?.unread?.length) return [`$.ai_failure_review: sources_not_read:${ctx.version.unread.join(",")}`];
     if (!uses_ai) return review.length ? ["$.ai_failure_review: product_has_no_ai"] : [];
     const problems: string[] = [];
     for (const kase of ["wrong", "unsafe", "unavailable"]) if (!review.some((r: Out) => r.case === kase)) problems.push(`$.ai_failure_review: case_missing:${kase}`);
@@ -244,12 +294,23 @@ export const RULES: Record<string, Rule> = {
     return problems;
   },
   // Demo Coach (CR-47, SX-48): every claim in the demo flow and the Q&A rests on reviewed, real evidence.
+  // The free text a student reads is checked too: an answer either carries a claim or is the fixed
+  // "not confirmed" answer, and every number or quantity word in `show` or `answer` appears in a
+  // supported claim of the same entry.
   demo_claims_supported: (ctx, _input, out) => {
     const items = itemMap(ctx);
     const problems: string[] = [];
-    for (const [key, list] of [["flow", out.flow], ["qa", out.qa]] as const) {
+    for (const [key, list, textKey] of [["flow", out.flow, "show"], ["qa", out.qa, "answer"]] as const) {
       for (const [i, entry] of (Array.isArray(list) ? list : []).entries()) {
-        for (const [j, claim] of (Array.isArray(entry.claims) ? entry.claims : []).entries()) problems.push(...supportProblems(`$.${key}[${i}].claims[${j}]`, claim.evidence_refs, items));
+        const claims: Out[] = Array.isArray(entry.claims) ? entry.claims : [];
+        const supported = new Set<string>();
+        for (const [j, claim] of claims.entries()) {
+          const p = supportProblems(`$.${key}[${i}].claims[${j}]`, claim.evidence_refs, items);
+          problems.push(...p);
+          if (!p.length) for (const q of quantitiesIn(String(claim.text ?? ""))) supported.add(q);
+        }
+        if (key === "qa" && !claims.length && !isNotConfirmedAnswer(entry.answer)) problems.push(`$.qa[${i}]: answer_without_claim`);
+        for (const q of new Set(quantitiesIn(String(entry[textKey] ?? "")))) if (!supported.has(q)) problems.push(`$.${key}[${i}].${textKey}: unsupported_quantity:${q}`);
       }
     }
     return problems;

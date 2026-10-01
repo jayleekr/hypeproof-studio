@@ -859,8 +859,9 @@ chat.post("/chat/completions", async (c) => {
       gBody.stream = stream;
       if (stream) gBody.stream_options = { include_usage: true };
       await admit(gBody,'openai-chat');
-      // Retry transient 503s, then fall back to gemini-2.5-flash.
-      const g = multi ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
+      // Retry transient 503s, then fall back to gemini-2.5-flash. A curriculum skill request (cr-skills)
+      // is one upstream call with no substitution (MU-02, decision 2), like a multi-agent request.
+      const g = multi || skillCall?.ok ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
         : await callGeminiResilient(gBody, apiKey);
       upstream = g.response;
       modelLabel = g.model;        // analytics + response reflect the real model
@@ -891,7 +892,7 @@ chat.post("/chat/completions", async (c) => {
       gBody.stream = stream;
       modelLabel = gBody.model;
       await admit(gBody,'anthropic-messages');
-      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
+      upstream = await (multi||executionAccess||skillCall?.ok ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
@@ -914,7 +915,7 @@ chat.post("/chat/completions", async (c) => {
       const effective = applyRequestEffort(aBody as unknown as Record<string,unknown>, profile, modelLabel, c.req.header('x-hps-effort'));
       effortReceipt = effective.receipt;
       await admit(effective.body,'anthropic-messages');
-      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
+      upstream = await (multi||executionAccess||skillCall?.ok ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
         signal: requestSignal,
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,

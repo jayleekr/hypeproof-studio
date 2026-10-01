@@ -67,7 +67,7 @@
         "type": "array",
         "items": {
           "type": "string",
-          "maxLength": 100,
+          "maxLength": 30,
           "minLength": 1
         },
         "maxItems": 8,
@@ -80,7 +80,7 @@
           "properties": {
             "topic": {
               "type": "string",
-              "maxLength": 100,
+              "maxLength": 30,
               "minLength": 1
             },
             "quote": {
@@ -106,6 +106,7 @@
   },
   "validation_rules": [
     "interview_questions_open",
+    "interview_note_fields_are_labels",
     "interview_notes_verbatim"
   ],
   "write_back_targets": []

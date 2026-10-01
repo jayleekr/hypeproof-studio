@@ -22,7 +22,7 @@ import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY, buildProxyHeaders, type ProfileFailure } from "./proxyClientHelpers";
+import { TOKEN_MISSING_FRIENDLY, buildProxyHeaders, lessonBindingHeader, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { acceptFocus, acceptWork, rehearsalReport, turnLesson, workContext, type LessonFocus, type StepWork } from "./lessonFocus";
 import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
@@ -850,16 +850,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
   }
 
-  /** One non-streaming request on the coach route, carrying only the run's metadata headers and no model. */
+  /**
+   * One non-streaming request on the coach route, carrying only the run's metadata headers and no
+   * model. On a lesson seat it names the lesson binding the profile serves, as a coach turn does
+   * (#751 U3), so a switched lesson version admits the request instead of refusing it.
+   */
   private async completeSkill(prompt: string, headers: Record<string, string>): Promise<SkillCompletion> {
     const token = await this.crProjectMemory.refresh();
     if (!token) return { ok: false };
     const meta: Record<string, string> = {};
     for (const k of ["x-hps-skill", "x-hps-capability"]) if (typeof headers[k] === "string") meta[k] = headers[k]!;
+    const profile = await this.ensureProfile().catch(() => null);
+    const binding = lessonBindingHeader(profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined);
     try {
       const res = await fetch(this.proxyUrl().replace(/\/+$/, "") + "/chat/completions", {
         method: "POST",
-        headers: { ...buildProxyHeaders({ token }), accept: "application/json", ...meta },
+        headers: { ...buildProxyHeaders({ token }), accept: "application/json", ...binding, ...meta },
         body: JSON.stringify({ stream: false, messages: [{ role: "user", content: prompt }] }),
       });
       if (!res.ok) return { ok: false, status: res.status };
