@@ -8,6 +8,9 @@ import {
 } from "./nativeObservationContract.ts";
 import { scrubSecrets } from "./shellPolicy.ts";
 
+/** Events one batch holds; `record` refuses the next one with observation_capacity. */
+export const OBSERVATION_EVENT_CAP = 500;
+
 /** Uses the existing workspaceState persistence, scoped by Service identity/session.
  * No network upload occurs here. Captures host callbacks, never webview-supplied roles.
  */
@@ -29,6 +32,10 @@ export class NativeObservationRecorder {
       if (e.kind === "tool_request")
         this.toolRequests.add(e.task + ":" + e.tool_id);
   }
+  /** Can `n` more events still be recorded? */
+  hasRoom(n: number): boolean {
+    return this.batch.events.length + n <= OBSERVATION_EVENT_CAP;
+  }
   record(
     task: string,
     kind: ObservationEvent["kind"],
@@ -43,7 +50,7 @@ export class NativeObservationRecorder {
     // Today no caller does that — but "no caller does" is a convention, and the
     // requirement asks for a rule. So it is a rule.
     if (isLearningEventKind(kind)) throw Error("learning_kind_needs_form");
-    if (this.batch.events.length >= 500) {
+    if (this.batch.events.length >= OBSERVATION_EVENT_CAP) {
       this.batch.incomplete = true;
       throw Error("observation_capacity");
     }
@@ -75,7 +82,7 @@ export class NativeObservationRecorder {
    */
   recordLearningEvent(draft: { kind: string } & Record<string, unknown>) {
     if (this.batch.format !== "hps-observation/2") throw Error("observation_format");
-    if (this.batch.events.length >= 500) {
+    if (this.batch.events.length >= OBSERVATION_EVENT_CAP) {
       this.batch.incomplete = true;
       throw Error("observation_capacity");
     }

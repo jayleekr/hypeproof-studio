@@ -47,6 +47,9 @@ interface Props {
    */
   messages: ChatMessage[];
   pageNotice: string | null;           // #308 — inline notice for "페이지를 코치에게"
+  /** CR-09 — the picked element queued for the next turn (Curriculum Runtime only). */
+  elementPreview?: import("../../src/protocol").ElementPreview | null;
+  onRemoveElement?: () => void;
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
   /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
@@ -892,6 +895,32 @@ export function ChatPanel(props: Props) {
         {props.pageNotice && (
           <div className="hps-page-notice" role="status" aria-live="polite">
             {props.pageNotice}
+          </div>
+        )}
+
+        {/* CR-09 — exactly what goes to the coach with the next message, removable before sending. */}
+        {props.elementPreview && (
+          <div className="hps-element-context" role="group" aria-label="코치에게 함께 보낼 화면 요소" data-testid="element-context">
+            {props.elementPreview.imageDataUrl && (
+              <img className="hps-element-crop" src={props.elementPreview.imageDataUrl} alt="고른 요소의 모습" />
+            )}
+            <div className="hps-element-meta">
+              <div>
+                <strong>함께 보낼 요소</strong> &lt;{props.elementPreview.tag}&gt;{" "}
+                {props.elementPreview.text && `“${props.elementPreview.text.slice(0, 40)}”`} · {props.elementPreview.ref}
+              </div>
+              <div className="hps-element-source">
+                {props.elementPreview.source === "unmapped" ? "소스 위치: 찾지 못함" : `소스 위치: ${props.elementPreview.source}`}
+                {!props.elementPreview.imageDataUrl && " · 이미지는 보내지 않아요"}
+              </div>
+              <details>
+                <summary>코치에게 보낼 내용 보기</summary>
+                <pre data-testid="element-context-sent">{props.elementPreview.sentText}</pre>
+              </details>
+            </div>
+            <button type="button" className="hps-element-remove" aria-label="이 요소 빼기" onClick={props.onRemoveElement}>
+              ✕
+            </button>
           </div>
         )}
 

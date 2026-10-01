@@ -66,6 +66,24 @@ export const MCP_BROWSER_TOOLS = [
   MCP_BROWSER_TYPE,
 ] as const;
 
+/**
+ * Curriculum Runtime Experiment Browser tools (CR-04, CR-06). Granted only when the
+ * served profile has the CR switch on (CR-02; `permittedMcpToolsFor`), and registered
+ * only when granted. Short names match the proxy's CR_BROWSER_TOOLS one for one.
+ */
+export const MCP_BROWSER_OBSERVE = "mcp__hypeproof__browser_observe";
+export const MCP_BROWSER_SELECT = "mcp__hypeproof__browser_select";
+export const MCP_BROWSER_SCROLL = "mcp__hypeproof__browser_scroll";
+export const MCP_BROWSER_HOVER = "mcp__hypeproof__browser_hover";
+export const MCP_BROWSER_RELOAD = "mcp__hypeproof__browser_reload";
+export const MCP_CR_BROWSER_TOOLS = [
+  MCP_BROWSER_OBSERVE,
+  MCP_BROWSER_SELECT,
+  MCP_BROWSER_SCROLL,
+  MCP_BROWSER_HOVER,
+  MCP_BROWSER_RELOAD,
+] as const;
+
 /** MCP CallToolResult content we produce (structural subset of the MCP SDK type). */
 export type McpContentBlock =
   | { type: "text"; text: string }
@@ -170,6 +188,27 @@ export interface BrowserMcpHost {
    * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
    */
   inspect?(name: string, input: Record<string, unknown>): Promise<McpToolResult | null>;
+  /**
+   * CR-02/CR-11 — is the Curriculum Runtime switch on for the served profile? With it on,
+   * agent browser actions stay on the student's own preview origin (`crScope`), and the
+   * CR executor's refusals are final: no tool falls back to a path that ignores scope.
+   */
+  crEnabled?(): boolean;
+  /** CR-11 — may an agent open `url`? Asked only while `crEnabled()` is true. */
+  crScope?(url: string): { ok: true } | { ok: false; reason: string };
+}
+
+/**
+ * CR-11 — the reason `browser_open` must refuse `url` with the switch on, or null. A
+ * loopback address while no live server runs is left to #507, which starts the student's
+ * own live server instead of opening the guessed port. Shared by canUseTool (so no
+ * approval modal is raised for a request that will be refused) and the handler.
+ */
+export async function crBrowserOpenRefusal(host: BrowserMcpHost, url: string): Promise<string | null> {
+  if (!host.crEnabled?.() || !host.crScope) return null;
+  if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) return null;
+  const v = host.crScope(url);
+  return v.ok ? null : v.reason;
 }
 
 /**
@@ -330,6 +369,36 @@ export interface ZodLike {
   string(): unknown;
   /** #457 — browser_type 의 submit 플래그용. */
   boolean?(): unknown;
+  /** CR-06 — for browser_scroll's dy. */
+  number?(): unknown;
+}
+
+/** `schema.optional()` when the injected zod schema has it (the real one); else as is. */
+function optionalSchema(schema: unknown): unknown {
+  const opt = (schema as { optional?: () => unknown } | null)?.optional;
+  return typeof opt === "function" ? opt.call(schema) : schema;
+}
+
+/**
+ * BrowserToolResult (text | image_url) → McpToolResult (text | image). One conversion for
+ * every delegated tool, so both coach runtimes see the same result (CR-03).
+ */
+export function toMcpToolResult(r: {
+  content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  isError: boolean;
+}): McpToolResult {
+  return {
+    content: r.content.map((b) =>
+      b.type === "text"
+        ? { type: "text" as const, text: b.text }
+        : {
+            type: "image" as const,
+            data: b.image_url.url.replace(/^data:[^,]*,/, ""),
+            mimeType: /^data:([^;,]+)/.exec(b.image_url.url)?.[1] ?? "image/jpeg",
+          },
+    ),
+    ...(r.isError ? { isError: true } : {}),
+  };
 }
 
 /**
@@ -342,6 +411,7 @@ export function buildHypeproofMcpServer(
   factory: SdkMcpFactory,
   z: ZodLike,
   host: BrowserMcpHost,
+  opts: { curriculumRuntime?: boolean } = {},
 ): unknown {
   const browserOpen = factory.tool(
     "browser_open",
@@ -360,6 +430,9 @@ export function buildHypeproofMcpServer(
           isError: true,
         };
       }
+      // CR-11 — with the switch on, only the student's own preview is opened, before any tab action.
+      const crRefused = await crBrowserOpenRefusal(host, url);
+      if (crRefused) return { content: [{ type: "text", text: crRefused }], isError: true };
       // #415 — 이미 그 페이지가 떠 있으면 열지 않는다. 다시 열면 탭이 중복으로
       // 생기고, 보고 있던 페이지가 리로드돼 스크롤·상태가 날아가고, 턴 예산이
       // 깎인다. (승인 모달은 canUseTool 이 같은 판정으로 이미 건너뛴다.)
@@ -405,7 +478,20 @@ export function buildHypeproofMcpServer(
         // 시작 실패(작업 폴더 없음 등)는 아래 일반 경로로 떨어진다 — 여기서
         // 멈추면 정상적인 루프백 요청까지 막힌다.
       }
-      const outcome = await host.openBrowser(url);
+      // CR-11 — re-checked here: the #507 branch above can fall through with the live
+      // server still down, and nothing past this line may open an out-of-scope page.
+      if (host.crEnabled?.() && host.crScope) {
+        const v = host.crScope(url);
+        if (!v.ok) return { content: [{ type: "text", text: v.reason }], isError: true };
+      }
+      let outcome: BrowserOpenOutcome | void;
+      try {
+        outcome = await host.openBrowser(url);
+      } catch (err) {
+        // With the switch on the host refuses instead of falling back to a scope-blind path.
+        if (!host.crEnabled?.()) throw err;
+        return { content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }], isError: true };
+      }
       // #526 — "열었어요"가 사실이 아닐 때가 있다. 슬롯당 탭 하나(#519)라서, 같은
       // 슬롯에 탭이 있으면 그 탭이 **이 주소로 이동**한다 — 즉 보고 있던 페이지가
       // 화면에서 사라진다. 결과가 그걸 말하지 않으면 코치는 참고 사이트 두 개가
@@ -451,6 +537,9 @@ export function buildHypeproofMcpServer(
       if (host.inspect) {
         const viaCdp = await host.inspect("browser_screenshot", {});
         if (viaCdp && !viaCdp.isError) return withPageState(viaCdp, await readCurrentPage(host));
+        // CR-11 — with the switch on the CR executor's refusal (out of scope, no version,
+        // a dialog open) is the answer; the fallback below would capture the tab anyway.
+        if (viaCdp && host.crEnabled?.()) return withPageState(viaCdp, await readCurrentPage(host));
       }
       const shot = await host.screenshot();
       if (!shot || !shot.imageBase64) {
@@ -576,9 +665,57 @@ export function buildHypeproofMcpServer(
       ),
   );
 
+  // ── CR-04/CR-06 Experiment Browser tools, only behind the CR switch (CR-02) ──
+  const crTools: unknown[] = [];
+  if (opts.curriculumRuntime === true) {
+    const absent = "실험 브라우저 도구를 쓸 수 없어요. browser_observe로 다시 읽어보세요.";
+    crTools.push(
+      factory.tool(
+        "browser_observe",
+        "지금 페이지를 관찰한다: URL·경로, [ref=eN] 스냅샷, 화면 캡쳐, 뷰포트, 문서 세대, 이 문서의 콘솔·오류·실패한 요청, 산출물 버전.",
+        {},
+        async () => inspectOrFail("browser_observe", {}, absent),
+      ),
+      factory.tool(
+        "browser_select",
+        "ref 선택 상자(select)의 값을 고른다. value는 option의 value 또는 보이는 글자. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string(), value: z.string() },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail("browser_select", { ref: String(args["ref"] ?? ""), value: String(args["value"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_scroll",
+        "ref 요소가 보이게 스크롤한다. ref 없이 dy(픽셀)만 주면 페이지를 스크롤한다. 결과에 조작 뒤의 관찰이 온다.",
+        {
+          // Either field alone is valid, so both are optional where zod offers it.
+          ...(typeof z.number === "function" ? { dy: optionalSchema(z.number()) } : {}),
+          ref: optionalSchema(z.string()),
+        },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail(
+            "browser_scroll",
+            { ...(args["ref"] ? { ref: String(args["ref"]) } : {}), ...(args["dy"] !== undefined ? { dy: Number(args["dy"]) } : {}) },
+            absent,
+          ),
+      ),
+      factory.tool(
+        "browser_hover",
+        "ref 요소 위에 마우스를 올린다. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string() },
+        async (args: Record<string, unknown>) => inspectOrFail("browser_hover", { ref: String(args["ref"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_reload",
+        "페이지를 새로 고친다. 새 문서가 되므로 이전 ref는 무효가 된다. 결과에 새로 고친 뒤의 관찰이 온다.",
+        {},
+        async () => inspectOrFail("browser_reload", {}, absent),
+      ),
+    );
+  }
+
   return factory.createSdkMcpServer({
     name: HYPEPROOF_MCP_SERVER_NAME,
     version: "1.0.0",
-    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType],
+    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType, ...crTools],
   });
 }

@@ -239,6 +239,25 @@ export function pickRevealTabIndex(
   return hit.index;
 }
 
+/**
+ * Is the browser tab titled `browserTitle` the visible tab of its editor group (CR-09,
+ * recon R2)? Judged from the editor tab state, never from `document.visibilityState`,
+ * which reads `visible` on a covered tab. Every group is searched, so it answers in
+ * both the beside and the full-width layout. `unknown` = no tab or more than one tab
+ * matches (labels can tie), and the caller must refuse rather than guess.
+ */
+export function browserTabCoverage(
+  groups: ReadonlyArray<{ tabs: readonly RevealCandidate[] }>,
+  browserTitle: string | undefined,
+): "visible" | "covered" | "unknown" {
+  if (!browserTitle) return "unknown";
+  const matches = groups.flatMap((g) =>
+    g.tabs.filter((t) => t.inputIsUndefined && labelIsPrefixOfTitle(t.label, browserTitle)),
+  );
+  if (matches.length !== 1) return "unknown";
+  return (matches[0] as RevealCandidate).isActive ? "visible" : "covered";
+}
+
 /** 라벨(truncate 된 이름)이 `BrowserTab.title` 의 접두사인가. */
 function labelIsPrefixOfTitle(label: string, title: string): boolean {
   const trimmed = label.replace(/[…]+$/, "").trim();
@@ -324,4 +343,22 @@ export function buildAxSnapshot(
     if (lines.length >= maxLines) break;
   }
   return { text: lines.join("\n") || "(상호작용 요소를 찾지 못했어요)", refs };
+}
+
+/**
+ * The proxy coach's tool_result block for one browser call (#278 loop). Paired with
+ * `toMcpToolResult` (browserMcp.ts) for the SDK coach: CR-T03 runs the same calls through
+ * both and requires identical results, so neither runtime sees a different browser.
+ */
+export function toProxyToolResult(
+  toolUseId: string,
+  result: { content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>; isError: boolean },
+  note?: string,
+): { type: "tool_result"; tool_use_id: string; content: typeof result.content; is_error?: true } {
+  return {
+    type: "tool_result",
+    tool_use_id: toolUseId,
+    content: note ? [...result.content, { type: "text" as const, text: note }] : result.content,
+    ...(result.isError ? { is_error: true as const } : {}),
+  };
 }

@@ -280,6 +280,27 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         if n < lo or n > hi:
             add(findings, rules, pid, "system_prompt_length", f"system_prompt {n} chars outside [{lo}, {hi}]")
 
+    # --- Curriculum Runtime switch (CR-02, CR-10) ---
+    # With the switch on, every Experiment Browser result is persisted on the
+    # measurement-core record, and the App builds that recorder only when the profile
+    # names an observation format. Without one the results would be dropped silently.
+    cr_on = (p.get("curriculum_runtime") or {}).get("enabled") is True
+    if cr_on and (p.get("observation") or {}).get("format") not in ("hps-observation/1", "hps-observation/2"):
+        add(findings, rules, pid, "cr_without_observation_format",
+            "HARD FAIL: curriculum_runtime.enabled=true requires observation.format "
+            "(hps-observation/1 or /2) — without the recorder, browser results are not stored (CR-10)")
+    # The Experiment Browser is adult-only by the same test the Worker uses
+    # (curriculumRuntimeAllowed: not minor_cohort, and age_range min >= 18), not just the
+    # child threshold below: a 13-17 cohort and a mixed-age one such as [15, 40] must not
+    # switch it on either. An unknown lower bound fails closed.
+    cr_ar = (p.get("audience") or {}).get("age_range")
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    cr_adult = isinstance(cr_ar, list) and len(cr_ar) == 2 and num(cr_ar[0]) and cr_ar[0] >= 18
+    if cr_on and (p.get("minor_cohort") is True or not cr_adult):
+        add(findings, rules, pid, "minor_curriculum_runtime",
+            "HARD FAIL: curriculum_runtime.enabled=true on a cohort that may include minors "
+            "(minor_cohort=true, or age_range min < 18 or unknown) — the Experiment Browser is adult-only")
+
     # --- child cohort guardrails ---
     # A cohort is "child" when audience.parent_coaching is true OR its age_range
     # max is ≤ child_age_max. parent_coaching is a REQUIRED field in types.ts, so
@@ -373,6 +394,17 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
             add(findings, rules, pid, "child_sdk_browser",
                 "HARD FAIL: child cohort must not set sdk_tools.browser=true "
                 "(minors get no browser MCP tools until safe-session ships)")
+        # cr-browser (#1391): the Experiment Browser drives a browser and sends page
+        # screenshots and element crops to the model. Both runtimes' tool grants check
+        # for minors, and this is the profile-side lock: neither switch opens for a child.
+        if (p.get("curriculum_runtime") or {}).get("enabled") is True:
+            add(findings, rules, pid, "child_curriculum_runtime",
+                "HARD FAIL: child cohort must not set curriculum_runtime.enabled=true "
+                "(Experiment Browser automation and screenshot upload are adult-only)")
+        if (p.get("browser_control") or {}).get("enabled") is True:
+            add(findings, rules, pid, "child_browser_control",
+                "HARD FAIL: child cohort must not set browser_control.enabled=true "
+                "(the proxy coach's browser tools are adult-only, like sdk_tools.browser)")
         # #282 P2 slice 3: a child cohort must not grant the Agent SDK
         # subagents either — delegation stays adult-only until a pedagogy
         # decision lands. When in doubt, deny for minors.

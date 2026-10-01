@@ -11,8 +11,9 @@
 // So: attach once, cache the sessionId, route all commands through it.
 //
 // The channel is fire-and-forget (sendMessage + onDidReceiveMessage), so we
-// correlate responses by a monotonic `id`. Events (no `id`) are ignored — the
-// executor drives synchronously (evaluate/wait), it doesn't consume CDP events.
+// correlate responses by a monotonic `id`. Events (no `id`) reach only listeners
+// registered with `onEvent` (CR-05, recon R1): the flat session tags each event with
+// its `sessionId`, and only events of the attached page session are delivered.
 //
 // Typed structurally (no `vscode` import) so the handshake logic is unit-
 // testable under `node --strip-types` with a mock session. vscode.BrowserTab /
@@ -31,11 +32,19 @@ export interface CdpTab {
   startCDPSession(): Thenable<RawCdpSession>;
 }
 
+/** A CDP event of the attached page session. */
+export interface CdpEvent {
+  method: string;
+  params: Record<string, any>;
+}
+
 export class CdpSession {
   private readonly raw: RawCdpSession;
   private msgId = 0;
   private sessionId: string | undefined;
   private attaching: Promise<void> | undefined;
+  private readonly eventListeners = new Set<(event: CdpEvent) => void>();
+  private eventSub: RawCdpDisposable | undefined;
 
   private constructor(raw: RawCdpSession) {
     this.raw = raw;
@@ -58,7 +67,44 @@ export class CdpSession {
     return this.raw.onDidClose(listener);
   }
 
+  /**
+   * Subscribe to events of the attached page session (messages without an `id` whose
+   * `sessionId` is ours). Events of other sessions, root-session events and responses
+   * are never delivered. A throwing listener does not stop the others.
+   */
+  onEvent(listener: (event: CdpEvent) => void): RawCdpDisposable {
+    this.eventListeners.add(listener);
+    this.eventSub ??= this.raw.onDidReceiveMessage((raw) => {
+      const m = raw as { id?: unknown; method?: unknown; params?: unknown; sessionId?: unknown };
+      if (!m || m.id !== undefined || typeof m.method !== "string") return;
+      if (!this.sessionId || m.sessionId !== this.sessionId) return;
+      const event: CdpEvent = {
+        method: m.method,
+        params: m.params && typeof m.params === "object" ? (m.params as Record<string, any>) : {},
+      };
+      for (const fn of [...this.eventListeners]) {
+        try {
+          fn(event);
+        } catch {
+          /* one listener's bug must not starve the others */
+        }
+      }
+    });
+    return {
+      dispose: () => {
+        this.eventListeners.delete(listener);
+        if (this.eventListeners.size === 0 && this.eventSub) {
+          this.eventSub.dispose();
+          this.eventSub = undefined;
+        }
+      },
+    };
+  }
+
   close(): Promise<void> {
+    this.eventSub?.dispose();
+    this.eventSub = undefined;
+    this.eventListeners.clear();
     return Promise.resolve(this.raw.close());
   }
 

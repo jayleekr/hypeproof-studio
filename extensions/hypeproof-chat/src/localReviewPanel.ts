@@ -4,11 +4,12 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { LocalReviewService } from './localReviewService.ts';
+import { LOCAL_RECORD_DIR } from './localRecordFile.ts';
 import { parseLocalTranscriptFile } from './localTranscript.ts';
 import type { LocalReviewRequest, LocalReviewState } from './localReviewProtocol.ts';
 
 export function registerLocalReview(context: vscode.ExtensionContext, render: (webview: vscode.Webview, dist: vscode.Uri) => string) {
-  const service = new LocalReviewService(join(context.globalStorageUri.fsPath, 'local-review-v1'));
+  const service = new LocalReviewService(join(context.globalStorageUri.fsPath, LOCAL_RECORD_DIR));
   let panel: vscode.WebviewPanel | undefined;
   let selected: string | undefined;
   let busy = false;
