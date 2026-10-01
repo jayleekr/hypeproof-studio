@@ -8,6 +8,10 @@ CR-59 and CR-60 moved to `cr-e2e` (Jay's decision 9) and are not claimed here.
 
 The cr-browser PR edited docs/requirements/curriculum-runtime.md (CR-02/CR-T02 wording, approved by Jay as decision 12), which reopened cr-recon's completion.
 
+## Completion boundary
+
+This report preserves the recorder's test evidence; it does not mark `cr-browser` complete in the ledger. `align.py record` was not written: `cr-recon` was reopened by the requirement edit, and CR-T01 at `1557e038` still has the stale CR-59/CR-60 ownership map from before decision 9. Reconciliation and the corresponding checks must pass before the ledger completion is recorded. The supporting suite exits below are not a substitute for that outstanding CR-T01/recon decision check.
+
 ## Verdict
 
 PASS for CR-T02–CR-T11 and CR-T63 at `1557e038`, at the layers listed below. Evidence classes (MC-38): **synthetic** for the unit/smoke suites and real Chromium; **live-host** for the App in the in-app spec (integrated browser, proxy loop, local record, command palette) with a synthetic account, session and scripted agent. No real model, no real device or phone.
@@ -18,7 +22,7 @@ PASS for CR-T02–CR-T11 and CR-T63 at `1557e038`, at the layers listed below. E
 |---|---|
 | `cr-browser:review:acceptance:r3` | independent review, acceptance lens, round 3 of the finish (PR #1433) |
 | `cr-browser:review:adversarial:r3` | independent review, adversarial lens, round 3 of the finish (PR #1433) |
-| `cr-browser:review:regression-conventions:r3` | independent review, regression and conventions lens, round 3 of the finish (PR #1433); named as `reviewed_by` in the ledger completion |
+| `cr-browser:review:regression-conventions:r3` | independent review, regression and conventions lens, round 3 of the finish (PR #1433); proposed as `reviewed_by` for the pending ledger completion |
 
 The recorder is a record-only agent that did not write the implementation.
 
