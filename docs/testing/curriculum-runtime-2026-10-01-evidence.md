@@ -98,4 +98,5 @@ Recorded because each was the instrument, not the product (verification rule 6):
 - CR-T57 with a real provider (CR-61), and any real-model run of the coach writing plans. CR-61 stays open; the PR says `Refs #1392`, not `Closes`.
 - A vision judgment step (CR-15 vision half). CR-15 is partial and not claimed; it stays open with CR-61 under `Refs #1392`.
 - Real phone: not part of this item.
+- In-app re-run of `verify-app.spec.ts` / `app-layer.spec.ts` and `09-preview.spec.ts` on the review round 3 head (`d710c299`). The extension and webview build was injected into the prepared app copy and the run was queued through `GATE=idle scripts/e2e-quiet.sh` from 21:56 to 22:45 on 2026-10-01; the Mac never had 5 idle minutes, so no app was launched (reason: waiting for idle window). The in-app rows above stand on `ed2acfb5`; round 3 is covered by the smoke and unit layers only.
 - CR-T02's switch-off regressions (`09-preview.spec.ts`, HTML generation specs): BLOCKED by pre-existing F1, so CR-02 is not claimed by this item; cr-e2e re-runs the full switch-off inventory.
