@@ -36,8 +36,8 @@ import {
 } from "../lib/curriculum/venture";
 import {
   channelCounts,
-  countExperiments,
-  countLinks,
+  channelCountsOfProject,
+  countVersions,
   createExperiment,
   createHypothesis,
   createLink,
@@ -52,6 +52,8 @@ import {
   hypothesesOf,
   isMember,
   linksOf,
+  openHypothesis,
+  openStart,
   projectsOf,
   putVersion,
   revokeLink,
@@ -77,6 +79,10 @@ export const PUBLISH_LIMITS = {
   maxExperimentsPerProject: 200,
   /** Links one experiment may issue; with `maxSessionsPerLink` this bounds an experiment's session keys. */
   maxLinksPerExperiment: 20,
+  /** Test versions one Project may hold (each up to `maxSetBytes` on R2, never deleted by this slice). */
+  maxVersionsPerProject: 100,
+  /** Projects one student may create in a cohort (a team Project the director sets up does not count). */
+  maxProjectsPerStudent: 10,
 } as const;
 
 /** Exactly what an unknown route answers (src/index.ts `app.notFound`). */
@@ -164,7 +170,8 @@ curriculum.post("/projects", async (c) => {
   }
   const title = typeof body.title === "string" ? body.title.replace(/\s+/g, " ").trim().slice(0, 80) : "";
   if (!title) return refuse(c, 400, "title_required");
-  const project = await createProject(c.env.HPS_DB, { cohort_id: s.payload.c, profile_id: s.payload.p, creator: s.payload.u, title, now: Date.now() });
+  const project = await createProject(c.env.HPS_DB, { cohort_id: s.payload.c, profile_id: s.payload.p, creator: s.payload.u, title, now: Date.now(), max: PUBLISH_LIMITS.maxProjectsPerStudent });
+  if (!project) return refuse(c, 409, "project_limit", { max: PUBLISH_LIMITS.maxProjectsPerStudent });
   return c.json({ project }, 201);
 });
 
@@ -188,6 +195,9 @@ curriculum.get("/projects/:id", async (c) => {
     hypotheses: await hypothesesOf(db, project.id),
     experiments: await experimentsOf(db, project.id),
     links,
+    // Sessions opened per channel for every experiment, in one query (CR-73; a usage
+    // observation, never a demand claim, SX-58). An experiment with no session is absent.
+    sessions_opened: await channelCountsOfProject(db, project.id),
   });
 });
 
@@ -204,6 +214,19 @@ curriculum.put("/projects/:id/members", async (c) => {
   if (payload.role !== "issuer") return unknownRoute(c);
   const id = c.req.param("id");
   if (!isVentureId(id)) return unknownRoute(c);
+  // No D1 read before the switch is known to be on for a profile this issuer serves: with the
+  // switch off everywhere the cr_* tables may not exist (migration 0032 is applied only when Jay
+  // approves it), and the answer must stay the unknown route's (CR-02).
+  const scoped = [...new Set((payload.scopes ?? []).flatMap((sc) => sc.profiles ?? []))];
+  let anyOn = false;
+  for (const p of scoped) {
+    const r = await resolveProfile(c.env, p);
+    if (r && curriculumRuntimeAllowed(r.profile)) {
+      anyOn = true;
+      break;
+    }
+  }
+  if (!anyOn) return unknownRoute(c);
   const project = await getProject(c.env.HPS_DB, id);
   // The issuer's scope must cover the Project's cohort AND its profile; the switch is the
   // served profile's, read exactly as the student routes and the test origin read it.
@@ -240,7 +263,8 @@ curriculum.put("/projects/:id/versions/:digest", async (c) => {
   if (s instanceof Response) return s;
   const project = await memberProject(c, s, c.req.param("id"));
   if (project instanceof Response) return project;
-  const digest = decodeURIComponent(c.req.param("digest"));
+  // Hono hands the param over decoded already; a second decode could only throw (a lone `%`).
+  const digest = c.req.param("digest");
   if (!/^sha256:[0-9a-f]{64}$/.test(digest)) return refuse(c, 400, "invalid_version_id");
   const length = Number(c.req.header("content-length") ?? "0");
   if (length > PUBLISH_LIMITS.maxSetBytes * 1.5) return refuse(c, 413, "set_too_large");
@@ -296,10 +320,13 @@ curriculum.put("/projects/:id/versions/:digest", async (c) => {
   }
   if (hits.length) return refuse(c, 422, "secret_found", { hits });
   const existing = await getVersion(c.env.HPS_DB, project.id, digest);
+  const full = () => refuse(c, 409, "version_limit", { max: PUBLISH_LIMITS.maxVersionsPerProject });
   if (!existing) {
+    // Checked before the bytes go to R2; the insert below decides atomically.
+    if ((await countVersions(c.env.HPS_DB, project.id)) >= PUBLISH_LIMITS.maxVersionsPerProject) return full();
     for (const d of decoded) await c.env.HPS_TRACES.put(testFileKey(digest, d.meta.path), d.data);
   }
-  const { version, created } = await putVersion(c.env.HPS_DB, {
+  const put = await putVersion(c.env.HPS_DB, {
     project_id: project.id,
     id: digest,
     files: list,
@@ -307,24 +334,29 @@ curriculum.put("/projects/:id/versions/:digest", async (c) => {
     ...(Array.isArray(manifest) && manifest.length ? { manifest_added: manifest as string[] } : {}),
     ...(typeof report === "string" ? { verification_report: report } : {}),
     now: Date.now(),
+    max: PUBLISH_LIMITS.maxVersionsPerProject,
   });
+  if (!put) return full();
+  const { version, created } = put;
   return c.json({ version, created }, created ? 201 : 200);
 });
 
 // ── Experiments (CR-39, CR-22) ───────────────────────────────────────────────
 
-/** The experiment fields a retried start must repeat exactly to be the same start. */
-const startKey = (e: Pick<Experiment, "hypothesis_id" | "product_version_id" | "week" | "question" | "method" | "success_criteria" | "declarations">) =>
-  JSON.stringify([e.hypothesis_id, e.product_version_id, e.week, e.question, e.method, e.success_criteria, e.declarations ?? null]);
+/** The experiment fields a retried start must repeat exactly to be the same start (stored as their digest). */
+const startKey = async (e: Pick<Experiment, "hypothesis_id" | "product_version_id" | "week" | "question" | "method" | "success_criteria" | "declarations">) =>
+  hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([e.hypothesis_id, e.product_version_id, e.week, e.question, e.method, e.success_criteria, e.declarations ?? null]))));
 
 /**
  * Start a test. Every precondition is checked before anything is written (the test origin, the
  * contract, the version, the hypothesis and variant references, the per-project bound). Then
  * the experiment's record task is created first, under the experiment id chosen here, and only
  * then the D1 rows: a failure before the rows leaves at most an unreferenced task, never a
- * `running` experiment whose sessions cannot open. A retried start is idempotent: an open
- * hypothesis with the same statement is reused, and a running experiment with the same fields
- * and no link yet is answered again (200) instead of a second one being made.
+ * `running` experiment whose sessions cannot open. A retried start is idempotent, also when
+ * the retries arrive at the same time: an open hypothesis with the same statement is reused,
+ * and a running experiment with the same fields and no link yet is answered again (200)
+ * instead of a second one being made. Both are decided by single statements on unique keys
+ * (store.ts `createHypothesis`, `createExperiment`), as is the per-project bound.
  */
 curriculum.post("/experiments", async (c) => {
   const s = await student(c);
@@ -371,35 +403,40 @@ curriculum.post("/experiments", async (c) => {
     if (v.product_version_id && !(await getVersion(db, project.id, v.product_version_id))) return refuse(c, 409, "variant_version_unresolved");
   }
   const { id: _pending, ...rest } = contract.value;
+  const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+  const reusedAnswer = async (same: Experiment, hypothesis: unknown) => {
+    await ensureExperimentTask(record, same, Date.now());
+    return c.json({ experiment: same, hypothesis, verification_report: version.verification_report ?? null, reused: true }, 200);
+  };
   // A retry of the same start (the App retries after a failed or unanswered call).
-  const reused = hypothesisId ? null : ((await hypothesesOf(db, project.id)).find((h) => h.status === "open" && h.statement === statement) ?? null);
-  const hypId = hypothesisId ?? reused?.id;
-  if (hypId) {
-    const key = startKey({ ...rest, hypothesis_id: hypId });
-    const linked = new Set((await linksOf(db, project.id)).map((l) => l.experiment_id));
-    const same = (await experimentsOf(db, project.id)).find((e) => e.status === "running" && !linked.has(e.id) && startKey(e) === key);
-    if (same) {
-      await ensureExperimentTask(participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), same, Date.now());
-      return c.json({ experiment: same, hypothesis: reused, verification_report: version.verification_report ?? null, reused: true }, 200);
-    }
+  const found = hypothesisId ? null : await openHypothesis(db, project.id, statement!);
+  if (hypothesisId || found) {
+    const same = await openStart(db, project.id, await startKey({ ...rest, hypothesis_id: hypothesisId ?? found!.id }));
+    if (same) return reusedAnswer(same, found);
   }
-  if ((await countExperiments(db, project.id)) >= PUBLISH_LIMITS.maxExperimentsPerProject) return refuse(c, 409, "experiment_limit", { max: PUBLISH_LIMITS.maxExperimentsPerProject });
   // The record task first: nothing in D1 names this experiment until its sessions can open.
   const experimentId = newVentureId("exp");
-  await ensureExperimentTask(participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), { id: experimentId, project_id: project.id, question: rest.question }, Date.now());
-  const hypothesis = hypId ? null : await createHypothesis(db, { project_id: project.id, statement: statement!, now: Date.now() });
+  await ensureExperimentTask(record, { id: experimentId, project_id: project.id, question: rest.question }, Date.now());
+  const stored = hypothesisId ? null : await createHypothesis(db, { project_id: project.id, statement: statement!, now: Date.now() });
+  const hypId = hypothesisId ?? stored!.hypothesis.id;
+  // Taken back only when this call stored it and its start then failed.
+  const undo = async () => {
+    if (stored?.created) await deleteHypothesis(db, hypId);
+  };
   let created: Awaited<ReturnType<typeof createExperiment>>;
   try {
-    created = await createExperiment(db, { ...rest, id: experimentId, hypothesis_id: hypothesis?.id ?? hypId!, now: Date.now() });
+    created = await createExperiment(db, { ...rest, id: experimentId, hypothesis_id: hypId, now: Date.now(), start_key: await startKey({ ...rest, hypothesis_id: hypId }), max: PUBLISH_LIMITS.maxExperimentsPerProject });
   } catch (e) {
-    if (hypothesis) await deleteHypothesis(db, hypothesis.id);
+    await undo();
     throw e;
   }
   if (!created.ok) {
-    if (hypothesis) await deleteHypothesis(db, hypothesis.id);
-    return refuse(c, 409, created.code);
+    await undo();
+    return refuse(c, 409, created.code, created.code === "experiment_limit" ? { max: PUBLISH_LIMITS.maxExperimentsPerProject } : {});
   }
-  return c.json({ experiment: created.experiment, hypothesis: hypothesis ?? reused, verification_report: version.verification_report ?? null }, 201);
+  // Another start with the same fields stored its row first (sent at the same time).
+  if (!created.created) return reusedAnswer(created.experiment, stored?.hypothesis ?? null);
+  return c.json({ experiment: created.experiment, hypothesis: stored?.hypothesis ?? null, verification_report: version.verification_report ?? null }, 201);
 });
 
 curriculum.get("/experiments/:id/channels", async (c) => {
@@ -444,8 +481,16 @@ curriculum.post("/experiments/:id/links", async (c) => {
   if (experiment.status !== "running") return refuse(c, 409, "experiment_not_running");
   const origin = testOrigin(c.env);
   if (!origin.ok) return refuse(c, 503, "test_origin_unavailable", { problem: origin.problem });
-  if ((await countLinks(c.env.HPS_DB, experiment.id)) >= PUBLISH_LIMITS.maxLinksPerExperiment) return refuse(c, 409, "link_limit", { max: PUBLISH_LIMITS.maxLinksPerExperiment });
-  const link = await createLink(c.env.HPS_DB, { project_id: project.id, experiment_id: experiment.id, ...(channel ? { channel } : {}), ...(typeof variant === "string" ? { variant_id: variant } : {}), expires_at: expires, now });
+  const link = await createLink(c.env.HPS_DB, {
+    project_id: project.id,
+    experiment_id: experiment.id,
+    ...(channel ? { channel } : {}),
+    ...(typeof variant === "string" ? { variant_id: variant } : {}),
+    expires_at: expires,
+    now,
+    max: PUBLISH_LIMITS.maxLinksPerExperiment,
+  });
+  if (!link) return refuse(c, 409, "link_limit", { max: PUBLISH_LIMITS.maxLinksPerExperiment });
   return c.json({ link: { ...link, state: linkState(link, now) }, share_url: shareUrl(origin.config, project.id, link.id), test_origin: originFor(origin.config, project.id) }, 201);
 });
 

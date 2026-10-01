@@ -61,7 +61,12 @@ type ProjectState = {
   hypotheses: Array<{ id: string; statement: string }>;
   experiments: Array<{ id: string; week: number; question: string; method: string; success_criteria: string[]; hypothesis_id: string; product_version_id: string; status: string }>;
   links: Array<{ id: string; experiment_id: string; channel?: string; expires_at: number; state: "live" | "revoked" | "expired"; share_url: string | null }>;
+  /** Sessions opened per channel for each experiment with any (one grouped read on the Service). */
+  sessions_opened?: Record<string, PublishExperimentView["sessions"]>;
 };
+
+/** Said while a solo Project with live links holds the student back from the team's (CR-19). */
+export const TEAM_WAITS_FOR_LINKS = "팀 프로젝트가 준비됐어요. 이 프로젝트에 아직 열려 있는 링크가 있어서, 링크를 모두 끄거나 기간이 끝나면 팀 프로젝트로 옮겨 가요.";
 
 const DAY = 24 * 3600_000;
 /** One refused file as the student reads it; a hit without a known line names the file only. */
@@ -127,8 +132,11 @@ export class PublishSession {
    * a publish create one. Any answer that is not definite (a network failure, a 5xx, or a
    * 404 from the list, which is also what every route answers while the switch is off) is an
    * error the student reads, and the remembered id is kept: nothing is forked or orphaned.
+   * A solo Project that still has a live link is not left for the team's: its links would drop
+   * out of the panel while they keep serving, and the student could no longer turn them off
+   * (CR-19). The panel says so, and the move happens once those links are off or expired.
    */
-  private async resolveProject(client: Client): Promise<{ ok: true; state: ProjectState | null } | { ok: false; message: string }> {
+  private async resolveProject(client: Client): Promise<{ ok: true; state: ProjectState | null; notice?: string } | { ok: false; message: string }> {
     const remembered = this.ports.projectId();
     if (remembered) {
       const r = await this.state(client, remembered);
@@ -140,6 +148,7 @@ export class PublishSession {
         const list = await curriculumRequest<{ projects: Array<{ id: string; members?: string[] }> }>(client, "GET", "/projects");
         const team = list.ok && Array.isArray(list.body.projects) ? [...list.body.projects].reverse().find((p) => p.id !== remembered && (p.members?.length ?? 0) > 1) : undefined;
         if (!team) return { ok: true, state: r.body };
+        if (r.body.links.some((l) => l.state === "live")) return { ok: true, state: r.body, notice: TEAM_WAITS_FOR_LINKS };
         const t = await this.state(client, team.id);
         if (!t.ok) return { ok: true, state: r.body };
         await this.ports.setProjectId(team.id);
@@ -208,6 +217,7 @@ export class PublishSession {
     const resolved = await this.resolveProject(client);
     const state = resolved.ok ? resolved.state : null;
     if (!resolved.ok) notice ??= resolved.message;
+    else if (resolved.notice) notice ??= resolved.notice;
     const built = await this.currentSet(state?.project.id, this.manifest);
     const version: PublishView["version"] = !built
       ? { id: null, files: [], manifest_added: [], refusal: "미리보기를 먼저 켜 주세요. 미리보기에 보이는 페이지를 공개해요.", refusal_lines: [] }
@@ -216,8 +226,9 @@ export class PublishSession {
         : { id: null, files: [], manifest_added: [...this.manifest], refusal: built.message, refusal_lines: built.lines };
     const verification = productVerification(await this.ports.events(), version.id);
     const experiments: PublishExperimentView[] = [];
+    // The per-channel counts come with the Project read (one grouped query), not one call per experiment.
+    const counts = state?.sessions_opened;
     for (const e of state?.experiments ?? []) {
-      const channels = await curriculumRequest<{ sessions_opened: PublishExperimentView["sessions"] }>(client, "GET", `/experiments/${encodeURIComponent(e.id)}/channels`);
       experiments.push({
         id: e.id,
         week: e.week,
@@ -229,7 +240,7 @@ export class PublishSession {
         current_version: e.product_version_id === version.id,
         status: e.status,
         links: (state?.links ?? []).filter((l) => l.experiment_id === e.id).map((l) => this.linkView(l)),
-        sessions: channels.ok ? channels.body.sessions_opened : null,
+        sessions: counts ? (counts[e.id] ?? { channels: {}, unlabelled: 0, unknown: 0 }) : null,
       });
     }
     return {

@@ -83,6 +83,14 @@ async function openEntry(f, url) {
 }
 const hpTest = (html) => JSON.parse(/window\.__hpTest=(\{.*?\});<\/script>/.exec(html)?.[1] ?? "null");
 
+/** A session token with one signature character changed in the middle: never the same signature (unlike changing the last character, whose low bits base64url drops). */
+const forge = (t) => {
+  const parts = t.split(".");
+  const sig = parts[parts.length - 1];
+  parts[parts.length - 1] = sig.slice(0, 5) + (sig[5] === "A" ? "B" : "A") + sig.slice(6);
+  return parts.join(".");
+};
+
 /** What the participant snippet does once per visit: open the session the entry page offered. */
 const openSessionOf = (f, url, token) => f.raw(new URL(`/l/${new URL(url).pathname.split("/")[2]}/__hp/session`, url).href, { method: "POST", body: { token } });
 
@@ -377,12 +385,20 @@ await test("CR-T21: opening the v0 link creates one participant session record c
     assert.equal((await openSessionOf(f, s.url, cfg.session_token)).status, 204);
     assert.deepEqual([sessionKeys().length, await counted()], [1, 1], "one visit, one session, counted once");
     // A forged or another link's token opens nothing.
-    assert.equal((await openSessionOf(f, s.url, cfg.session_token.slice(0, -2) + "xx")).status, 403);
+    assert.equal((await openSessionOf(f, s.url, forge(cfg.session_token))).status, 403);
     const other = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, channel: "단톡방" } });
     assert.equal((await openSessionOf(f, other.json.share_url, cfg.session_token)).status, 403, "a token is bound to its link");
     assert.deepEqual([sessionKeys().length, await counted()], [1, 1]);
     assert.deepEqual(await record.sessionAttribution(PUBLISHED_HOST, cfg.session_id), { project: s.project.id, experiment: s.experiment.id, product_version: s.version, link: s.link.id, channel: "학교 게시판" });
     assert.equal(await record.taskForSession(PUBLISHED_HOST, cfg.session_id), s.experiment.id, "the session is linked to the experiment's task (same id, R6)");
+    // A comparison experiment's variant link: its session carries the variant's version, not the experiment's base one.
+    const v1 = await f.upload(s.project.id, V1, s.token);
+    const cmp = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 2, question: "어느 쪽이 더 빨리 주문하나?", method: "ab_test", success_criteria: ["c"], hypothesis_id: s.hypothesis.id, declarations: { variants: [{ id: "a" }, { id: "b", product_version_id: v1.id }] } } });
+    assert.equal(cmp.status, 201, cmp.text);
+    const lb = await f.api(`/v1/curriculum/experiments/${cmp.json.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, variant_id: "b" } });
+    const vb = await openVisit(f, lb.json.share_url);
+    assert.equal(vb.opened.status, 204);
+    assert.deepEqual(await record.sessionAttribution(PUBLISHED_HOST, vb.cfg.session_id), { project: s.project.id, experiment: cmp.json.experiment.id, product_version: v1.id, link: lb.json.link.id, variant: "b" });
     const task = await record.getTask(s.experiment.id);
     assert.equal(task.project, s.project.id);
     // The session record is on the measurement-core record (R2), not a traffic table (SX-48).
@@ -401,7 +417,7 @@ await test("CR-T21: opening the v0 link creates one participant session record c
     assert.ok(await verifySessionToken(tok.token, s.link.id, Date.now(), TEST_SECRET));
     assert.equal(await verifySessionToken(tok.token, "AAAAAAAAAAAAAAAAAAAAAA", Date.now(), TEST_SECRET), null);
     assert.equal(await verifySessionToken(tok.token, s.link.id, Date.now() + 20_000, TEST_SECRET), null);
-    assert.equal(await verifySessionToken(tok.token.slice(0, -2) + "xx", s.link.id, Date.now(), TEST_SECRET), null);
+    assert.equal(await verifySessionToken(forge(tok.token), s.link.id, Date.now(), TEST_SECRET), null);
     assert.ok(tok.exp <= Date.now() + 10_000, "never later than the link's own expiry");
   } finally {
     f.close();
@@ -434,6 +450,22 @@ await test("CR-T22: publishing v1 while the v0 experiment runs leaves its link, 
     assert.equal(await servesMarker(f, l1.json.share_url, "버전 1"), true, "positive control: the instrument sees v1 where v1 is pinned");
     assert.equal(await servesMarker(f, s.url, "버전 1"), false, "and the v0 link never serves v1");
     assert.equal(pinnedVersion({ product_version_id: "a", declarations: { variants: [{ id: "b", product_version_id: "b" }] } }, "b"), "b");
+    // A comparison experiment through the routes: each variant's link serves its own version and
+    // its sessions name that version; publishing v2 afterwards changes neither.
+    const cmp = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 2, question: "어느 쪽이 더 빨리 주문하나?", method: "ab_test", success_criteria: ["c"], hypothesis_id: s.hypothesis.id, declarations: { variants: [{ id: "a", product_version_id: s.version }, { id: "b", product_version_id: v1.id }] } } });
+    assert.equal(cmp.status, 201, cmp.text);
+    const variantLink = async (variant_id) => (await f.api(`/v1/curriculum/experiments/${cmp.json.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, variant_id } })).json.share_url;
+    const variants = [["a", await variantLink("a"), "버전 0", s.version], ["b", await variantLink("b"), "버전 1", v1.id]];
+    assert.equal((await f.upload(s.project.id, { ...V0, "index.html": PAGE("버전 2") }, s.token)).status, 201);
+    const record = participantRecord(f.r2, f.cohort, s.project.id);
+    for (const [id, url, marker, version] of variants) {
+      assert.equal(await servesMarker(f, url, marker), true, `variant ${id} serves ${marker}`);
+      assert.equal(await servesMarker(f, url, "버전 2"), false, `variant ${id} never serves the newer v2`);
+      const visit = await openVisit(f, url);
+      assert.equal(visit.opened.status, 204);
+      assert.deepEqual([(await record.sessionAttribution(PUBLISHED_HOST, visit.cfg.session_id)).product_version, id], [version, id], `variant ${id}'s session names its version`);
+    }
+    assert.equal((await f.api(`/v1/curriculum/experiments/${cmp.json.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, variant_id: "c" } })).json.error.code, "unknown_variant");
     // Negative control: a planted defect that re-points the running experiment at v1 is caught by the same check.
     const planted = { ...s.experiment, product_version_id: v1.id };
     if (f.db) f.db.prepare("UPDATE cr_experiments SET doc = ? WHERE id = ?").run(JSON.stringify(planted), s.experiment.id);
@@ -465,6 +497,17 @@ await test("CR-T68: two channel-labelled links attribute their sessions to their
     assert.equal(read.json.note, "usage_observation");
     // The index agrees with the record it indexes; the record's own reading keeps the unlinked session "unknown".
     assert.deepEqual(await sessionsByChannel(record, s.experiment.id), { channels: { "학교 게시판": 2, "1:1 메시지": 1 }, unlabelled: 1, unknown: 1 });
+    // The Week 2 experiment of the same Project (CR-22): its sessions are its own, never the first one's.
+    const week2 = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 2, question: "메뉴를 바로 찾나?", method: "task_test", success_criteria: ["c"], hypothesis_id: s.hypothesis.id } });
+    assert.equal(week2.status, 201, week2.text);
+    const w2 = await f.api(`/v1/curriculum/experiments/${week2.json.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000, channel: "2주차 게시판" } });
+    assert.equal((await openVisit(f, w2.json.share_url)).opened.status, 204);
+    const channelsOf = async (id) => (await f.api(`/v1/curriculum/experiments/${id}/channels`, { token: s.token })).json.sessions_opened;
+    assert.deepEqual(await channelsOf(s.experiment.id), read.json.sessions_opened, "another experiment's link in the same Project is not counted here");
+    assert.deepEqual(await channelsOf(week2.json.experiment.id), { channels: { "2주차 게시판": 1 }, unlabelled: 0, unknown: 0 });
+    // The Project read carries the same counts for every experiment (one grouped read for the panel).
+    const grouped = (await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token })).json.sessions_opened;
+    assert.deepEqual([grouped[s.experiment.id], grouped[week2.json.experiment.id]], [await channelsOf(s.experiment.id), await channelsOf(week2.json.experiment.id)]);
     // A session claiming an experiment other than its link's is refused and writes nothing.
     const other = await started(f, { token: s.token });
     const before = f.r2.map.size;
@@ -522,7 +565,7 @@ await test("CR-T80: the PRD §10.1 sample validates; any one field removed is re
     assert.equal(e.project_id, s.project.id);
     assert.ok(state.versions.some((v) => v.id === e.product_version_id), "product_version_id resolves");
     // Negative: an experiment whose hypothesis_id does not resolve (or is another project's) is refused; nothing written.
-    const other = await started(f, { token: s.token });
+    const other = await started(f, { token: s.token, files: V1 });
     for (const hid of ["hyp-0000000000000000", other.hypothesis.id]) {
       const r = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis_id: hid } });
       assert.deepEqual([r.status, r.json.error.code], [409, "hypothesis_unresolved"], r.text);
@@ -530,6 +573,12 @@ await test("CR-T80: the PRD §10.1 sample validates; any one field removed is re
     const missing = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 1, method: "m", success_criteria: ["c"], hypothesis_id: s.hypothesis.id } });
     assert.deepEqual([missing.status, missing.json.error.problems], [400, ["missing:question"]]);
     assert.equal((await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: "sha256:" + "1".repeat(64), week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis: "h" } })).json.error.code, "version_unresolved");
+    // Another Project's version (its bytes are under global content-addressed keys) does not resolve here.
+    assert.notEqual(other.version, s.version);
+    const foreignVersion = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: other.version, week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis_id: s.hypothesis.id } });
+    assert.deepEqual([foreignVersion.status, foreignVersion.json.error.code], [409, "version_unresolved"], foreignVersion.text);
+    const foreignVariant = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis_id: s.hypothesis.id, declarations: { variants: [{ id: "b", product_version_id: other.version }] } } });
+    assert.deepEqual([foreignVariant.status, foreignVariant.json.error.code], [409, "variant_version_unresolved"], foreignVariant.text);
     assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token })).json.experiments.length, 1, "no refused experiment was stored");
     assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token })).json.hypotheses.length, 1, "no orphan hypothesis from a refused start");
   } finally {
@@ -719,7 +768,7 @@ await test("test origin: unset means no link; production refuses a shared or htt
 // ── CR-T17 App half + CR-81 + CR-11 (published origin), the App's session against the real Service ──
 
 const core = await import("../src/lib/measurement-core/index.ts");
-const { PublishSession, publishTiming } = await import("../../extensions/hypeproof-chat/src/publishSession.ts");
+const { PublishSession, publishTiming, TEAM_WAITS_FOR_LINKS } = await import("../../extensions/hypeproof-chat/src/publishSession.ts");
 const { artifactVersionFor } = await import("../../extensions/hypeproof-chat/src/artifactVersion.ts");
 const { crAllowedOrigins } = await import("../../extensions/hypeproof-chat/src/crHostWiring.ts");
 const { checkAgentOrigin } = await import("../../extensions/hypeproof-chat/src/experimentBrowser.ts");
@@ -913,7 +962,7 @@ async function r2Calls(f, fn) {
   return n;
 }
 
-await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and the 500th session, and the task document never grows; the old append-and-scan path would not", async () => {
+await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and the 500th session (60th on D1), and the task document never grows; the old append-and-scan path would not", async () => {
   const f = await fixture();
   try {
     const s = await started(f, { channel: "학교 게시판" });
@@ -925,26 +974,29 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     const startCost = (question) => r2Calls(f, async () => assert.equal((await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: startBody(question) })).status, 201));
     const startEarly = await startCost("1주차 다시");
     const first = await r2Calls(f, () => openVisit(f, s.url));
-    for (let i = 0; i < 498; i++) await openVisit(f, s.url);
+    // 500 visits on SQLite; 60 on local workerd D1, where every query is a new loopback
+    // connection and macOS runs out of ports for a second run (docs/testing/curriculum-runtime-dev.md).
+    const VISITS = D1_MODE ? 60 : 500;
+    for (let i = 0; i < VISITS - 2; i++) await openVisit(f, s.url);
     const last = await r2Calls(f, () => openVisit(f, s.url));
-    assert.deepEqual(last, first, `R2 calls per visit: first ${JSON.stringify(first)}, 500th ${JSON.stringify(last)}`);
+    assert.deepEqual(last, first, `R2 calls per visit: first ${JSON.stringify(first)}, ${VISITS}th ${JSON.stringify(last)}`);
     assert.ok(first.get + first.put + first.list <= 8, `a small constant: ${JSON.stringify(first)}`);
     assert.equal(first.list, 0, "no listing on the open path");
     assert.equal(taskBytes(), before, "the task document is not rewritten per open");
     // Starting the next test (the Week-2 experiment) costs the same after 500 sessions.
     const startLate = await startCost("2주차");
-    assert.deepEqual(startLate, startEarly, `R2 calls per start: before ${JSON.stringify(startEarly)}, after 500 sessions ${JSON.stringify(startLate)}`);
+    assert.deepEqual(startLate, startEarly, `R2 calls per start: before ${JSON.stringify(startEarly)}, after ${VISITS} sessions ${JSON.stringify(startLate)}`);
     assert.equal(startLate.list, 0, "no listing on the start path");
     // Negative control: the pre-fix task creation (the review-quota scan) grows with N.
     const scanned = await r2Calls(f, () => participantRecord(f.r2, f.cohort, s.project.id).createTask({ id: "exp-00000000000000aa", project: s.project.id, at: Date.now(), purpose: { text: "q", source: "user" } }));
-    assert.ok(scanned.get > 500 && scanned.list > 0, `the planted quota-scanned start must be caught: ${JSON.stringify(scanned)}`);
+    assert.ok(scanned.get > VISITS && scanned.list > 0, `the planted quota-scanned start must be caught: ${JSON.stringify(scanned)}`);
     const channels = await r2Calls(f, () => f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token }));
     assert.deepEqual(channels, { get: 0, put: 0, list: 0, delete: 0 }, "the per-channel counts read no session");
-    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels["학교 게시판"], 500);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels["학교 게시판"], VISITS);
     // Negative control: the pre-fix path (linkSession: quota scan plus task append) grows with N.
     const record = participantRecord(f.r2, f.cohort, s.project.id);
     const old = await r2Calls(f, () => record.linkSession(s.experiment.id, { host: PUBLISHED_HOST, session_id: "ps-old-path", by: "adapter_explicit", at: Date.now(), attribution: { project: s.project.id, experiment: s.experiment.id, product_version: s.version } }));
-    assert.ok(old.get > 500 && old.list > 0, `the planted old path must be caught: ${JSON.stringify(old)}`);
+    assert.ok(old.get > VISITS && old.list > 0, `the planted old path must be caught: ${JSON.stringify(old)}`);
     // The per-link bound: a full link opens no more sessions and answers 429; its pages still serve.
     if (f.db) f.db.prepare("UPDATE cr_test_links SET sessions_opened = ? WHERE id = ?").run(PUBLISH_LIMITS.maxSessionsPerLink, s.link.id);
     else await f.env.HPS_DB.prepare("UPDATE cr_test_links SET sessions_opened = ? WHERE id = ?").bind(PUBLISH_LIMITS.maxSessionsPerLink, s.link.id).run();
@@ -988,13 +1040,18 @@ await test("start: a storage failure while starting leaves no experiment and no 
     assert.deepEqual([b.status, b.json.experiment.id, b.json.reused], [200, a.json.experiment.id, true]);
     st = await state();
     assert.deepEqual([st.experiments.length, st.hypotheses.length], [1, 1], "no duplicate experiment or hypothesis");
+    // Control: a retry that adds a declaration (camera after a failed link step) is a new start, so the declaration is never lost (CR-66).
+    const withCam = await start({ ...body, declarations: { devices: ["camera"] } });
+    assert.equal(withCam.status, 201, withCam.text);
+    assert.notEqual(withCam.json.experiment.id, a.json.experiment.id);
+    assert.deepEqual(withCam.json.experiment.declarations, { devices: ["camera"] });
     // D1 fails on the experiment row: the hypothesis this start stored is taken back.
     const realDb = f.env.HPS_DB;
     let failInsert = true;
     f.env.HPS_DB = new Proxy(realDb, {
       get(t, k) {
         if (k === "prepare") return (sql) => {
-          if (failInsert && sql.startsWith("INSERT INTO cr_experiments")) {
+          if (failInsert && /^INSERT (OR IGNORE )?INTO cr_experiments/.test(sql)) {
             failInsert = false;
             throw new Error("d1 unavailable");
           }
@@ -1008,7 +1065,7 @@ await test("start: a storage failure while starting leaves no experiment and no 
     f.env.HPS_DB = realDb;
     assert.equal(d1Broken.status, 500);
     st = await state();
-    assert.deepEqual([st.experiments.length, st.hypotheses.length], [1, 1], "the hypothesis of the failed start is removed");
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [2, 1], "the hypothesis of the failed start is removed");
     // Its sessions open (the record task exists).
     const l = await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } });
     const v = await openVisit(f, l.json.share_url);
@@ -1022,16 +1079,42 @@ await test("start: a storage failure while starting leaves no experiment and no 
     const d = await start({ ...body, question: "메뉴를 찾을 수 있나?" });
     assert.deepEqual([d.status, d.json.reused], [201, undefined]);
     st = await state();
-    assert.deepEqual([st.experiments.length, st.hypotheses.length], [3, 1]);
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [4, 1]);
+    // Sent at the same time: three identical starts store one hypothesis and one experiment.
+    const together = { ...body, question: "동시에 보낸 시작", hypothesis: "한 번에 세 번 눌러도 하나만 생긴다" };
+    const three = await Promise.all([start(together), start(together), start(together)]);
+    assert.deepEqual(three.map((r) => r.status).sort(), [200, 200, 201], three.map((r) => r.text).join(" | "));
+    assert.equal(new Set(three.map((r) => r.json.experiment.id)).size, 1, "all three answer the same experiment");
+    st = await state();
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [5, 2], "one experiment and one hypothesis from three concurrent starts");
+    // Links requested at the same time cannot pass the bound together.
+    const conc = three.find((r) => r.status === 201).json.experiment.id;
+    const many = await Promise.all(Array.from({ length: 30 }, () => f.api(`/v1/curriculum/experiments/${conc}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } })));
+    assert.deepEqual([many.filter((r) => r.status === 201).length, many.filter((r) => r.status === 409 && r.json.error.code === "link_limit").length], [PUBLISH_LIMITS.maxLinksPerExperiment, 30 - PUBLISH_LIMITS.maxLinksPerExperiment]);
+    assert.equal((await state()).links.filter((l) => l.experiment_id === conc).length, PUBLISH_LIMITS.maxLinksPerExperiment, "stored links never exceed the bound");
     // Bounds: links per experiment and experiments per project.
     for (let i = 1; i < PUBLISH_LIMITS.maxLinksPerExperiment; i++) assert.equal((await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } })).status, 201);
     const over = await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } });
     assert.deepEqual([over.status, over.json.error.code], [409, "link_limit"]);
     const fill = f.db ? (n) => f.db.prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', 1, 0, 0)").run(`exp-${n.toString(16).padStart(16, "0")}`, p.id, a.json.experiment.hypothesis_id, up.id)
       : (n) => f.env.HPS_DB.prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', 1, 0, 0)").bind(`exp-${n.toString(16).padStart(16, "0")}`, p.id, a.json.experiment.hypothesis_id, up.id).run();
-    for (let i = 3; i < PUBLISH_LIMITS.maxExperimentsPerProject; i++) await fill(i);
+    for (let i = 5; i < PUBLISH_LIMITS.maxExperimentsPerProject; i++) await fill(i);
     const full = await start({ ...body, question: "하나 더" });
     assert.deepEqual([full.status, full.json.error.code], [409, "experiment_limit"]);
+    // Versions per Project: a full Project stores no new version and puts no bytes on R2; a version it already holds still answers.
+    const fillVersion = f.db ? (n) => f.db.prepare("INSERT INTO cr_product_versions (project_id, id, doc, created_at) VALUES (?, ?, '{}', 0)").run(p.id, `sha256:${n.toString(16).padStart(64, "0")}`)
+      : (n) => f.env.HPS_DB.prepare("INSERT INTO cr_product_versions (project_id, id, doc, created_at) VALUES (?, ?, '{}', 0)").bind(p.id, `sha256:${n.toString(16).padStart(64, "0")}`).run();
+    for (let i = 1; i < PUBLISH_LIMITS.maxVersionsPerProject; i++) await fillVersion(i);
+    const r2Before = f.r2.map.size;
+    const tooMany = await f.upload(p.id, V1, t);
+    assert.deepEqual([tooMany.status, tooMany.json.error.code, f.r2.map.size], [409, "version_limit", r2Before]);
+    assert.equal((await f.upload(p.id, V0, t)).status, 200, "control: the version it holds is answered again");
+    // Projects per student: the bound counts the Projects a student created.
+    const mine = (await f.api("/v1/curriculum/projects", { token: await f.student("cr-c") })).json.projects.length;
+    for (let i = mine; i < PUBLISH_LIMITS.maxProjectsPerStudent; i++) assert.equal((await f.api("/v1/curriculum/projects", { method: "POST", token: await f.student("cr-c"), body: { title: `p${i}` } })).status, 201);
+    const extra = await f.api("/v1/curriculum/projects", { method: "POST", token: await f.student("cr-c"), body: { title: "하나 더" } });
+    assert.deepEqual([extra.status, extra.json.error.code], [409, "project_limit"]);
+    assert.equal((await f.api("/v1/curriculum/projects", { method: "POST", token: await f.student("cr-b"), body: { title: "다른 학생" } })).status, 201, "control: another student still can");
   } finally {
     f.close();
   }
@@ -1102,6 +1185,36 @@ await test("guards: a revoked student token or one whose student is off the rost
   }
 });
 
+await test("CR-T02 switch OFF before migration 0032: the director's team route answers as an unknown route without reading D1; a malformed version id is a 400", async () => {
+  const f = await fixture({ switchOn: false });
+  try {
+    const drop = async () => {
+      for (const t of ["cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) {
+        if (f.db) f.db.exec(`DROP TABLE IF EXISTS ${t}`);
+        else await f.env.HPS_DB.prepare(`DROP TABLE IF EXISTS ${t}`).run();
+      }
+    };
+    await drop();
+    const unknown = await f.api("/v1/curriculum/nope", { token: await f.issuer() });
+    const team = await f.api("/v1/curriculum/projects/prj-0000000000000000/members", { method: "PUT", token: await f.issuer(), body: { members: ["cr-a"] } });
+    assert.deepEqual([team.status, team.json?.error?.code, team.json?.error?.message], [unknown.status, unknown.json.error.code, unknown.json.error.message], team.text);
+    assert.equal((await f.api("/v1/curriculum/projects", { token: await f.student() })).status, 404);
+    // Control: with the switch on and no tables, the same call does reach D1 (and fails), so the answer above came before any read.
+    f.setSwitch(true);
+    assert.equal((await f.api("/v1/curriculum/projects/prj-0000000000000000/members", { method: "PUT", token: await f.issuer(), body: { members: ["cr-a"] } })).status, 500);
+  } finally {
+    f.close();
+  }
+  const g = await fixture();
+  try {
+    const s = await started(g);
+    const bad = await g.api(`/v1/curriculum/projects/${s.project.id}/versions/sha256%25zz`, { method: "PUT", token: s.token, body: { entry_html: "index.html", files: [] } });
+    assert.deepEqual([bad.status, bad.json.error.code], [400, "invalid_version_id"], bad.text);
+  } finally {
+    g.close();
+  }
+});
+
 // ── The publish scan on ordinary student code ────────────────────────────────
 
 await test("CR-T17 scan precision: a login-form mockup, a random-id helper and an env read publish; a literal value under the same names is still refused; a forged token's refusal names its real line", async () => {
@@ -1132,7 +1245,7 @@ await test("CR-T17 scan precision: a login-form mockup, a random-id helper and a
 
 // ── The App never forks or orphans the student's Project ─────────────────────
 
-await test("App project: a transient failure aborts instead of creating a second Project; a switch-off answer keeps the remembered id; a teammate adopts the team's Project; a declared device reaches the served policy", async () => {
+await test("App project: a transient failure aborts instead of creating a second Project; a switch-off answer keeps the remembered id; a teammate adopts the team's Project; a solo Project with a live link is kept until its links are off; a declared device reaches the served policy", async () => {
   const f = await fixture();
   const root = workspace(V0);
   try {
@@ -1185,6 +1298,16 @@ await test("App project: a transient failure aborts instead of creating a second
     solo.session.ports.fetchImpl = async (url, init) => (new URL(url).pathname.endsWith("/curriculum/projects") ? new Response("{}", { status: 503 }) : soloInner(url, init));
     assert.equal((await solo.session.view()).project.id, own, "a failed list keeps the remembered solo Project");
     solo.session.ports.fetchImpl = soloInner;
+    // The solo Project still has a live link: the panel stays on it, so the student can still see and turn off that link (CR-19).
+    const waiting = await solo.session.view();
+    assert.equal(waiting.project.id, own, "a solo Project with a live link is not left");
+    assert.equal(waiting.notice, TEAM_WAITS_FOR_LINKS);
+    const soloLink = waiting.experiments[0].links[0];
+    assert.equal(soloLink.state, "live");
+    assert.equal((await openEntry(f, soloLink.share_url)).status, 200);
+    assert.equal((await solo.session.revoke(soloLink.id)).ok, true, "revoked from the App");
+    assert.equal((await openEntry(f, soloLink.share_url)).status, 410);
+    // With no live link left, the team Project the director assigned is preferred over the remembered solo one.
     assert.equal((await solo.session.view()).project.id, first, "the team Project the director assigned is preferred over a remembered solo one");
     assert.equal(solo.project(), first);
     // A remembered Project the student was removed from, with no other: forgotten, a new one is made on publish.
@@ -1206,7 +1329,7 @@ await test("App project: a transient failure aborts instead of creating a second
 
 await test("CR-T17 scan cost: a few hundred KB of dotted or kebab-case runs scans in linear time; a URL with credentials is still refused", () => {
   const ctx = { projectId: "prj-0000000000000000", testOrigin: null };
-  for (const [name, text] of [["a.b-", "a.b-".repeat(80_000)], ["a.a.", "a.a.".repeat(80_000)], ["kebab", "ab-cd-".repeat(40_000)], ["ids", " q1.q2".repeat(40_000)]]) {
+  for (const [name, text] of [["a.b-", "a.b-".repeat(80_000)], ["a.a.", "a.a.".repeat(80_000)], ["kebab", "ab-cd-".repeat(40_000)], ["ids", " q1.q2".repeat(40_000)], ["eyJ-", "eyJ-".repeat(80_000)], ["eyJa-", "eyJa-".repeat(64_000)]]) {
     const t0 = performance.now();
     assert.deepEqual(scanFile("app.js", text, ctx), [], name);
     const ms = performance.now() - t0;
@@ -1216,6 +1339,15 @@ await test("CR-T17 scan cost: a few hundred KB of dotted or kebab-case runs scan
     assert.ok(scanFile("app.js", hit, ctx).some((h) => h.rule === "url_credentials"), hit);
   }
   assert.deepEqual(scanFile("app.js", "const u = 'https://example.com/a:b';", ctx), [], "control: a URL without credentials publishes");
+  // Many hits: line numbers come from one pass, not a rescan per hit.
+  const many = ("sk-" + "a".repeat(20) + " \n").repeat(20_000);
+  const t0 = performance.now();
+  const hits = scanFile("app.js", many, ctx);
+  assert.ok(performance.now() - t0 < 1_000, `20000 hits took ${Math.round(performance.now() - t0)} ms`);
+  assert.deepEqual([hits.length, hits[0].line, hits.at(-1).line], [20_000, 1, 20_000]);
+  // Control: a token-shaped value is still found after ordinary separators.
+  const tok = `eyJ${"a".repeat(12)}.${"b".repeat(12)}`;
+  for (const pre of ["x = ", "'", "\n", "Bearer "]) assert.ok(scanFile("app.js", `${pre}${tok}`, ctx).length > 0, JSON.stringify(pre));
 });
 
 await test("CR-64 timing instrument: a publish under 10 s is a pass; a planted slow upload is a recorded miss with its cause", () => {

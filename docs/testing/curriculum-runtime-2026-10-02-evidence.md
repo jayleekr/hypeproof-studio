@@ -2,7 +2,7 @@
 
 Status: run record, 2026-10-02. Item `cr-publish`, epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388). Row definitions: [curriculum-runtime.md](curriculum-runtime.md). No row here is a completion; completion needs the ledger record and a reviewer other than the implementer.
 
-## Claims (after review round 2)
+## Claims (after review round 3)
 
 The slice can claim only part of its rows, so its PR says `Refs #1393`, not `Closes`.
 
@@ -16,7 +16,7 @@ The slice can claim only part of its rows, so its PR says `Refs #1393`, not `Clo
 | | CR-66 | Published runtime by runs (CR-T61). Experiment Browser half by static inspection of the shipped base app only, not a run |
 | Not claimed | CR-20, CR-64 | Both rest on CR-T20, whose real Mac → real phone half with sample size and p50/p95 is NOT RUN. The synthetic timings below are PARTIAL and claim nothing |
 
-Review round 1 (2026-10-02) changed the session path, the test origin, the App's Project resolution and the scan; every row below was re-run on the round-1 head, and the new controls are listed under "Review round 1". Review round 2 changed the 410's `Clear-Site-Data`, the start of a test, the test-origin match, the scan's URL rule and the App's team Project; its controls are under "Review round 2", and the worker, smoke and real-Chromium rows were re-run on the round-2 head.
+Review round 1 (2026-10-02) changed the session path, the test origin, the App's Project resolution and the scan; every row below was re-run on the round-1 head, and the new controls are listed under "Review round 1". Review round 2 changed the 410's `Clear-Site-Data`, the start of a test, the test-origin match, the scan's URL rule and the App's team Project; its controls are under "Review round 2", and the worker, smoke and real-Chromium rows were re-run on the round-2 head. Review round 3 made the bounds and the start's retry rule single statements, tested variant links and two experiments in one Project through the routes, kept a solo Project with live links in the panel, and fixed the scan's token rule and line numbers; its controls are under "Review round 3", and every gate and the in-app publish spec were re-run on the round-3 tree.
 
 ## What was run
 
@@ -133,13 +133,70 @@ Each defect below was planted alone and the named suite was run. The file was th
 
 The scale test also shows the pre-fix start cost directly. At N = 500 sessions, a review-quota `createTask` makes over 500 R2 reads and a list. The fixed start makes the same R2 calls before and after the 500 sessions, with no list.
 
+## Review round 3 (2026-10-02)
+
+Fixes:
+
+- The bounds are single statements, the same pattern `reserveSession` uses: a link is inserted only while its experiment holds fewer than 20 (`INSERT … SELECT … WHERE (SELECT COUNT(*) …) < ?`), an experiment only while its Project holds fewer than 200. On local workerd D1, 30 link creates sent at once store exactly 20 (the round-2 check-then-insert stored 30).
+- A retried start is decided by unique keys, so retries sent at the same time collapse. `cr_hypotheses.open_statement` is unique per Project while the hypothesis is open; `cr_experiments.open_start_key` (the SHA-256 of the start's fields, declarations included) is unique per Project while the experiment has no link, and the first link clears it. Three identical starts sent at once give one 201 and two 200 answers naming the same experiment, and store one hypothesis (round 2 stored three of each). A hypothesis taken back after a failed start is kept when an experiment already names it. Migration 0032 gains the two columns, their unique indexes, and `cr_projects.creator`. It has not been applied anywhere outside tests.
+- New bounds: 100 test versions per Project (checked before any byte goes to R2, then decided by the insert) and 10 Projects per student in a cohort. `GET /projects/:id` returns every experiment's per-channel counts from one grouped query, and the panel reads them there instead of making one call per experiment.
+- The App no longer leaves a solo Project that still has a live link for the team's. The panel stays on the solo Project with "팀 프로젝트가 준비됐어요. 이 프로젝트에 아직 열려 있는 링크가 있어서, 링크를 모두 끄거나 기간이 끝나면 팀 프로젝트로 옮겨 가요." The student can still see and revoke those links (CR-19), and the move happens once none is live.
+- The director's team route answers as an unknown route before any D1 read unless a profile in the issuer's scopes has the switch on, so a Worker deployed without migration 0032 still answers 404, not 500 (CR-02). A malformed version id (`sha256%25zz`) is a 400, not a 500.
+- On a failed session open, the reservation is released only when a read confirms the session key is absent. A failed read keeps it.
+- The scan's token rule runs in linear time: a value may start only where no base64url character precedes it, and every segment is bounded (16384). Line numbers come from one pass. A 320 KB `eyJ-` run and 20,000 hits each scan in well under 1 s. Before, a 40 KB run took 573 ms and grew 4× per doubling, and 20,000 hits took 7 s.
+- The forged session tokens in the tests change a middle signature character, never the last one, whose low bits base64url drops (about 1 in 1000 "forgeries" were still valid).
+- The `--d1` classroom-scale check opens 60 visits instead of 500, so two back-to-back `--d1` runs fit in macOS's ephemeral ports. One run now leaves about 3,500 sockets in TIME_WAIT, down from 8,450. The dev doc says so.
+- The test-origin comment and the dev doc now say what isolation does not cover. `*.try.hypeproof-ai.xyz` is same-site with the Lab. In the shared dev origin (ngrok), CR-11's "another project's published version is refused" does not hold.
+
+New and changed test cases: CR-T21 and CR-T22 open variant links through the routes (each serves its own variant's version, its session names that version, and v2 changes neither); CR-T68 starts the Week-2 experiment in the same Project with its own channel link, and the first experiment's counts do not include it; CR-T80 refuses another Project's version and variant version (409, nothing stored); "start" adds a retry with a declaration (a new experiment), three concurrent starts, 30 concurrent link creates, and the version and Project bounds; a new switch-off test runs without the cr_* tables; "App project" issues a solo link, has the director set the team, and checks that the link stays visible, that the App's revoke makes the share URL answer 410, and that only then does the panel move.
+
+Each defect below was planted alone in a scratch copy of the tree, and the named suite was run (`r3-mut.py`, scratch). The unmutated tree passed on SQLite and on D1. All 17 plants were caught.
+
+| Plant | Caught by |
+|---|---|
+| A1 a variant link serves the experiment's base version | CR-T22 |
+| A5 the channel counts read every link of the Project | CR-T68 |
+| A10 a session's version is the experiment's base, not its variant's | CR-T21, CR-T22 |
+| A22 declarations left out of the start key | start |
+| A23 a link does not clear the open start key | start |
+| A28 `getVersion` ignores the Project | CR-T80 |
+| A31 a session token not bound to its link | CR-T21 |
+| R3-1 the team route reads D1 before the switch | switch OFF before migration 0032 |
+| R3-2 the digest decoded twice | switch OFF before migration 0032 |
+| R3-3 a solo Project with live links left for the team's | App project |
+| R3-4 the token rule may start inside a run | CR-T17 scan cost |
+| R3-5 line numbers rescanned per hit | CR-T17 scan cost |
+| R3-6 no version bound | start |
+| R3-7 no Project bound | start |
+| C1 the link bound as check-then-insert (round 2), `--d1` | start (30 concurrent creates) |
+| C2 the open start key not unique, `--d1` | start (three concurrent starts) |
+| C3 the open statement not unique, `--d1` | start (three concurrent starts) |
+
+A29 (links issued on a closed experiment) still survives: no route can close an experiment before `cr-memory`, so `status` is always `running` here. It is left to `cr-memory`, which adds the status change.
+
 ## In-app runs
+
+Review round 3: this round's build (the extension with the new panel notice in `dist/extension.js`, and the webview) injected into the same prepared copy, `GATE=idle … npx playwright test -c curriculum-runtime/playwright.config.ts publish-app`: 2 passed in 15.9 s.
 
 Review round 1: this round's build (extension and webview, `phase("resolve"` present in the injected `dist/extension.js`) injected into the same prepared copy, `GATE=idle … npx playwright test -c curriculum-runtime/playwright.config.ts publish-app`: 2 passed in 16.4 s (switch off: the command is not reachable; switch on: verified only after an all-pass test of this version, one action publishes, the link serves). The other CR specs were not re-run this round.
 
 First submission:
 
 `GATE=idle HPS_APP_PATH=<prepared copy> bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts` on this branch's build: 6 passed, 2 failed in 1.9 min. Passed: the three `app-layer.spec.ts` tests (cr-browser), both `publish-app.spec.ts` tests, and `verify-app.spec.ts`'s switch-off test. Failed: `verify-app.spec.ts`'s two switch-on tests, the first criterion of a run `not_verified` ("콘솔 기록이 너무 많거나 늦게 읽기 시작해…"). The same config on an app copy with the `origin/main` `9e0854af` build injected fails the same two tests the same way (4 passed, 2 failed, 1.7 min), so this is pre-existing and not changed here (plan: finding under `cr-publish`). `publish-app.spec.ts` re-runs "같은 조건으로 다시 테스트" when the first run is not verified, and reads "검증됨" only from an all-pass report on the same version.
+
+## Gates after review round 3 (Node 22.23.1)
+
+| Command | Exit |
+|---|---|
+| `worker`: `npm test`, `typecheck`, `validate-profiles` | 0 each |
+| `worker`: `test:authoring:d1`, `test:classroom:d1`, `test:native-trial:d1`, `test:classroom-ops:d1`, `test:cr-publish:d1` | 0 each (`test:cr-publish:d1` also 0 twice back to back) |
+| `packages/measurement`: `npm test` | 0 |
+| `extensions/hypeproof-chat`: `typecheck` | 0 |
+| `extensions/hypeproof-chat`: `npm test` | 1 at `test:instructor-render` only (14 render checks, the same environment cause as rounds 1 and 2); every smoke, `test:classroom-ops:review` and `test:chalk-tools` passed |
+| `webview-ui`: `vite build` | 0 |
+| `e2e`: `npm run test:cr-publish` (real Chromium) | 0 |
+| `scripts/next-work.py --check`, `scripts/check-registry.py` | 0 each |
+| hype-align `check --doc curriculum-runtime` | 1: the same pre-existing `cr-recon` stale completion; nothing for `cr-publish` |
 
 ## Gates after review round 2 (Node 22.23.1)
 
@@ -190,7 +247,8 @@ First submission:
 - CR-T20 real Mac → real phone (no phone); CR-20 and CR-64 not claimed. The real-phone half of CR-18's positive control, so CR-18 is partial.
 - CR-T19's event-after-revocation case, CR-T23 (participant event kinds; an identity field is refused) and CR-T60's event-schema half: no events route until cr-evidence, which owns them. CR-19 and CR-65 are partial.
 - The Experiment Browser half of CR-T61: inspected, not run. CR-66 is partial.
-- In-app Playwright (`publish-app.spec.ts`) was not re-run in round 2. Round 2 changed no webview code, and the App change (team Project) is covered by the worker "App project" test against the real Service.
+- In-app Playwright (`publish-app.spec.ts`) was not re-run in round 2. Round 2 changed no webview code, and the App change (team Project) is covered by the worker "App project" test against the real Service. It was re-run in round 3 (above).
+- Release of a session reservation on a failed read (round 3): changed and reviewed, not exercised by a test, because the test R2 cannot fail the read after a successful write.
 - The `09-preview.spec.ts` switch-off baseline of CR-T02 (BLOCKED by pre-existing F1, unchanged).
 - The by-hand phone path through ngrok and `scripts/dev-stack.sh` in [curriculum-runtime-dev.md](curriculum-runtime-dev.md#cr-publish--publish-for-user-test-1393): written from the scripts, not executed.
 - Production: migration 0032, the test domain's DNS and route, and any deploy (Jay's decisions 5 and 11).

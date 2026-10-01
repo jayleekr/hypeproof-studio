@@ -1303,22 +1303,29 @@ CREATE TABLE IF NOT EXISTS cr_projects (
   id         TEXT PRIMARY KEY,
   cohort_id  TEXT NOT NULL,
   profile_id TEXT NOT NULL,
+  -- The student who created it: the per-student bound on Projects (one conditional insert).
+  creator    TEXT,
   doc        TEXT NOT NULL,
   revision   INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cr_projects_cohort ON cr_projects(cohort_id);
+CREATE INDEX IF NOT EXISTS idx_cr_projects_creator ON cr_projects(cohort_id, creator);
 
 CREATE TABLE IF NOT EXISTS cr_hypotheses (
   id         TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES cr_projects(id),
   doc        TEXT NOT NULL,
   revision   INTEGER NOT NULL DEFAULT 1,
+  -- The statement while the hypothesis is open (NULL once it is not): two starts sent at the
+  -- same time with the same statement store one hypothesis (unique per Project).
+  open_statement TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cr_hypotheses_project ON cr_hypotheses(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_hypotheses_open_statement ON cr_hypotheses(project_id, open_statement);
 
 CREATE TABLE IF NOT EXISTS cr_product_versions (
   project_id TEXT NOT NULL REFERENCES cr_projects(id),
@@ -1335,10 +1342,14 @@ CREATE TABLE IF NOT EXISTS cr_experiments (
   product_version_id TEXT NOT NULL,
   doc                TEXT NOT NULL,
   revision           INTEGER NOT NULL DEFAULT 1,
+  -- The digest of the start's fields while the experiment is running with no link yet (NULL
+  -- after its first link): starts sent at the same time with the same fields store one row.
+  open_start_key     TEXT,
   created_at         INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cr_experiments_project ON cr_experiments(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_experiments_open_start ON cr_experiments(project_id, open_start_key);
 
 CREATE TABLE IF NOT EXISTS cr_test_links (
   id            TEXT PRIMARY KEY,

@@ -192,10 +192,15 @@ async function openSession(c: Ctx, linkId: string): Promise<Response> {
   try {
     opened = await openParticipantSession(record, { link, experiment, sessionId: claims.session, at: now });
   } catch (e) {
-    // Hand the reservation back only when the session key is really absent: a failure after a
-    // successful write (the read-back, say) must not leave a recorded session uncounted.
-    const written = await record.taskForSession(PUBLISHED_HOST, claims.session).catch(() => null);
-    if (written === null) await releaseSession(c.env.HPS_DB, link.id);
+    // Hand the reservation back only when a read confirms the session key is absent: a failure
+    // after a successful write must not leave a recorded session uncounted, and when the read
+    // itself fails the reservation is kept (counting one too many toward the per-link bound is
+    // the safe side).
+    const written = await record.taskForSession(PUBLISHED_HOST, claims.session).then(
+      (task) => ({ read: true as const, task }),
+      () => ({ read: false as const, task: null }),
+    );
+    if (written.read && written.task === null) await releaseSession(c.env.HPS_DB, link.id);
     throw e;
   }
   if (!opened.ok || !opened.created) await releaseSession(c.env.HPS_DB, link.id);

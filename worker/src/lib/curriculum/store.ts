@@ -34,7 +34,12 @@ export function isMember(project: Project, token: { c: string; u: string }): boo
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
-export async function createProject(db: DB, input: { cohort_id: string; profile_id: string; creator: string; title: string; now: number }): Promise<Project> {
+/**
+ * Create a Project unless its creator already made `max` in this cohort: the bound and the
+ * insert are one statement, so creates sent at the same time cannot pass it together. null
+ * when the bound refused it.
+ */
+export async function createProject(db: DB, input: { cohort_id: string; profile_id: string; creator: string; title: string; now: number; max: number }): Promise<Project | null> {
   const project: Project = {
     schema: VENTURE_SCHEMA,
     kind: "project",
@@ -46,11 +51,13 @@ export async function createProject(db: DB, input: { cohort_id: string; profile_
     title: input.title,
     created_at: input.now,
   };
-  await db
-    .prepare("INSERT INTO cr_projects (id, cohort_id, profile_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)")
-    .bind(project.id, project.cohort_id, project.profile_id, JSON.stringify(project), input.now, input.now)
+  const r = await db
+    .prepare(
+      "INSERT INTO cr_projects (id, cohort_id, profile_id, creator, doc, revision, created_at, updated_at) SELECT ?, ?, ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM cr_projects WHERE cohort_id = ? AND creator = ?) < ?",
+    )
+    .bind(project.id, project.cohort_id, project.profile_id, input.creator, JSON.stringify(project), input.now, input.now, project.cohort_id, input.creator, input.max)
     .run();
-  return project;
+  return Number(r.meta?.changes ?? 0) > 0 ? project : null;
 }
 
 export async function getProject(db: DB, id: string): Promise<Project | null> {
@@ -75,15 +82,21 @@ export async function getVersion(db: DB, projectId: string, id: string): Promise
   return parse<ProductVersion>(await db.prepare("SELECT doc FROM cr_product_versions WHERE project_id = ? AND id = ?").bind(projectId, id).first());
 }
 
+export async function countVersions(db: DB, projectId: string): Promise<number> {
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM cr_product_versions WHERE project_id = ?").bind(projectId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
 /**
  * Record a version of this Project. Idempotent for the same file list; a different list
  * under an existing id cannot happen (the id is the list's digest, re-computed by the route),
- * and an existing row is never updated: INSERT OR IGNORE, then read back.
+ * and an existing row is never updated: INSERT OR IGNORE, then read back. A new version is
+ * stored only while the Project holds fewer than `max` (one statement); null when refused.
  */
 export async function putVersion(
   db: DB,
-  input: { project_id: string; id: string; files: ProductVersionFile[]; entry_html: string; manifest_added?: string[]; verification_report?: string; now: number },
-): Promise<{ version: ProductVersion; created: boolean }> {
+  input: { project_id: string; id: string; files: ProductVersionFile[]; entry_html: string; manifest_added?: string[]; verification_report?: string; now: number; max: number },
+): Promise<{ version: ProductVersion; created: boolean } | null> {
   const version: ProductVersion = {
     schema: VENTURE_SCHEMA,
     kind: "product_version",
@@ -96,12 +109,12 @@ export async function putVersion(
     created_at: input.now,
   };
   const r = await db
-    .prepare("INSERT OR IGNORE INTO cr_product_versions (project_id, id, doc, created_at) VALUES (?, ?, ?, ?)")
-    .bind(version.project_id, version.id, JSON.stringify(version), input.now)
+    .prepare("INSERT OR IGNORE INTO cr_product_versions (project_id, id, doc, created_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM cr_product_versions WHERE project_id = ?) < ?")
+    .bind(version.project_id, version.id, JSON.stringify(version), input.now, version.project_id, input.max)
     .run();
   const created = Number(r.meta?.changes ?? 0) > 0;
   const stored = await getVersion(db, input.project_id, input.id);
-  if (!stored) throw new Error("storage_failure");
+  if (!stored) return null;
   return { version: stored, created };
 }
 
@@ -112,15 +125,35 @@ export async function versionsOf(db: DB, projectId: string): Promise<ProductVers
 
 // ── Hypothesis ───────────────────────────────────────────────────────────────
 
-export async function createHypothesis(db: DB, input: { project_id: string; statement: string; now: number }): Promise<Hypothesis> {
-  const h: Hypothesis = { schema: VENTURE_SCHEMA, kind: "hypothesis", id: newVentureId("hyp"), project_id: input.project_id, statement: input.statement, status: "open", revision: 1, created_at: input.now };
-  await db.prepare("INSERT INTO cr_hypotheses (id, project_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)").bind(h.id, h.project_id, JSON.stringify(h), input.now, input.now).run();
-  return h;
+/** The Project's open hypothesis with exactly this statement (one, by the unique index). */
+export async function openHypothesis(db: DB, projectId: string, statement: string): Promise<Hypothesis | null> {
+  return parse<Hypothesis>(await db.prepare("SELECT doc FROM cr_hypotheses WHERE project_id = ? AND open_statement = ?").bind(projectId, statement).first());
 }
 
-/** Undo a hypothesis stored by a start that then failed (POST /experiments), so a retry leaves no duplicate. */
+/**
+ * The open hypothesis with this statement, stored when there is none. One statement decides
+ * (INSERT OR IGNORE on the unique open statement), so starts sent at the same time store one;
+ * `created` tells which call stored it.
+ */
+export async function createHypothesis(db: DB, input: { project_id: string; statement: string; now: number }): Promise<{ hypothesis: Hypothesis; created: boolean }> {
+  const h: Hypothesis = { schema: VENTURE_SCHEMA, kind: "hypothesis", id: newVentureId("hyp"), project_id: input.project_id, statement: input.statement, status: "open", revision: 1, created_at: input.now };
+  const r = await db
+    .prepare("INSERT OR IGNORE INTO cr_hypotheses (id, project_id, doc, revision, open_statement, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)")
+    .bind(h.id, h.project_id, JSON.stringify(h), h.statement, input.now, input.now)
+    .run();
+  if (Number(r.meta?.changes ?? 0) > 0) return { hypothesis: h, created: true };
+  const existing = await openHypothesis(db, input.project_id, input.statement);
+  if (!existing) throw new Error("storage_failure");
+  return { hypothesis: existing, created: false };
+}
+
+/**
+ * Undo a hypothesis stored by a start that then failed (POST /experiments), so a retry leaves
+ * no duplicate. Kept when an experiment already names it (a start sent at the same time that
+ * found it and succeeded).
+ */
 export async function deleteHypothesis(db: DB, id: string): Promise<void> {
-  await db.prepare("DELETE FROM cr_hypotheses WHERE id = ?").bind(id).run();
+  await db.prepare("DELETE FROM cr_hypotheses WHERE id = ? AND NOT EXISTS (SELECT 1 FROM cr_experiments WHERE hypothesis_id = ?)").bind(id, id).run();
 }
 
 export async function getHypothesis(db: DB, id: string): Promise<Hypothesis | null> {
@@ -134,24 +167,34 @@ export async function hypothesesOf(db: DB, projectId: string): Promise<Hypothesi
 
 // ── Experiment (CR-39) ───────────────────────────────────────────────────────
 
-export type ExperimentRefusal = "hypothesis_unresolved" | "version_unresolved" | "variant_version_unresolved";
+export type ExperimentRefusal = "hypothesis_unresolved" | "version_unresolved" | "variant_version_unresolved" | "experiment_limit";
+
+/** The running experiment, with no link yet, that a start with this key made. */
+export async function openStart(db: DB, projectId: string, startKey: string): Promise<Experiment | null> {
+  return parse<Experiment>(await db.prepare("SELECT doc FROM cr_experiments WHERE project_id = ? AND open_start_key = ?").bind(projectId, startKey).first());
+}
 
 /**
  * Store an Experiment whose references resolve inside its Project: `hypothesis_id` names a
  * stored Hypothesis of the Project, and `product_version_id` (and every variant's version)
  * a stored version of the Project. Anything else is refused and nothing is written.
+ *
+ * One statement decides the rest, so starts sent at the same time cannot pass it together:
+ * the row is inserted only while the Project holds fewer than `max` experiments, and only
+ * when no running experiment without a link has the same `start_key` (the unique open start
+ * key). When such an experiment exists it is answered instead (`created: false`).
  */
 export async function createExperiment(
   db: DB,
-  input: Omit<Experiment, "schema" | "kind" | "created_at" | "id"> & { id?: string; now: number },
-): Promise<{ ok: true; experiment: Experiment } | { ok: false; code: ExperimentRefusal }> {
+  input: Omit<Experiment, "schema" | "kind" | "created_at" | "id"> & { id?: string; now: number; start_key: string; max: number },
+): Promise<{ ok: true; experiment: Experiment; created: boolean } | { ok: false; code: ExperimentRefusal }> {
   const h = await getHypothesis(db, input.hypothesis_id);
   if (!h || h.project_id !== input.project_id) return { ok: false, code: "hypothesis_unresolved" };
   if (!(await getVersion(db, input.project_id, input.product_version_id))) return { ok: false, code: "version_unresolved" };
   for (const v of input.declarations?.variants ?? []) {
     if (v.product_version_id && !(await getVersion(db, input.project_id, v.product_version_id))) return { ok: false, code: "variant_version_unresolved" };
   }
-  const { now, ...rest } = input;
+  const { now, start_key: startKey, max, ...rest } = input;
   const experiment: Experiment = {
     schema: VENTURE_SCHEMA,
     kind: "experiment",
@@ -160,11 +203,15 @@ export async function createExperiment(
     ...(input.declarations ? { declarations: input.declarations as ExperimentDeclarations } : {}),
     created_at: now,
   };
-  await db
-    .prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)")
-    .bind(experiment.id, experiment.project_id, experiment.hypothesis_id, experiment.product_version_id, JSON.stringify(experiment), now, now)
+  const r = await db
+    .prepare(
+      "INSERT OR IGNORE INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, open_start_key, created_at, updated_at) SELECT ?, ?, ?, ?, ?, 1, ?, ?, ? WHERE (SELECT COUNT(*) FROM cr_experiments WHERE project_id = ?) < ?",
+    )
+    .bind(experiment.id, experiment.project_id, experiment.hypothesis_id, experiment.product_version_id, JSON.stringify(experiment), startKey, now, now, experiment.project_id, max)
     .run();
-  return { ok: true, experiment };
+  if (Number(r.meta?.changes ?? 0) > 0) return { ok: true, experiment, created: true };
+  const same = await openStart(db, experiment.project_id, startKey);
+  return same ? { ok: true, experiment: same, created: false } : { ok: false, code: "experiment_limit" };
 }
 
 export async function getExperiment(db: DB, id: string): Promise<Experiment | null> {
@@ -176,19 +223,15 @@ export async function experimentsOf(db: DB, projectId: string): Promise<Experime
   return (rows.results ?? []).map((r) => parse<Experiment>(r)).filter((e): e is Experiment => !!e);
 }
 
-export async function countExperiments(db: DB, projectId: string): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM cr_experiments WHERE project_id = ?").bind(projectId).first<{ n: number }>();
-  return Number(row?.n ?? 0);
-}
-
 // ── TestLink (CR-18, CR-19, CR-73) ───────────────────────────────────────────
 
-export async function countLinks(db: DB, experimentId: string): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM cr_test_links WHERE experiment_id = ?").bind(experimentId).first<{ n: number }>();
-  return Number(row?.n ?? 0);
-}
-
-export async function createLink(db: DB, input: { project_id: string; experiment_id: string; channel?: string; variant_id?: string; expires_at: number; now: number }): Promise<TestLink> {
+/**
+ * Issue a link unless the experiment already holds `max`: the bound and the insert are one
+ * statement, so links requested at the same time cannot pass it together. null when refused.
+ * The experiment's open start key is cleared first: from its first link on, a start with the
+ * same fields is a new run, not a retry.
+ */
+export async function createLink(db: DB, input: { project_id: string; experiment_id: string; channel?: string; variant_id?: string; expires_at: number; now: number; max: number }): Promise<TestLink | null> {
   const link: TestLink = {
     schema: VENTURE_SCHEMA,
     kind: "test_link",
@@ -200,11 +243,14 @@ export async function createLink(db: DB, input: { project_id: string; experiment
     expires_at: input.expires_at,
     created_at: input.now,
   };
-  await db
-    .prepare("INSERT INTO cr_test_links (id, project_id, experiment_id, doc, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)")
-    .bind(link.id, link.project_id, link.experiment_id, JSON.stringify(link), link.expires_at, input.now)
+  await db.prepare("UPDATE cr_experiments SET open_start_key = NULL WHERE id = ? AND open_start_key IS NOT NULL").bind(link.experiment_id).run();
+  const r = await db
+    .prepare(
+      "INSERT INTO cr_test_links (id, project_id, experiment_id, doc, expires_at, revoked_at, created_at) SELECT ?, ?, ?, ?, ?, NULL, ? WHERE (SELECT COUNT(*) FROM cr_test_links WHERE experiment_id = ?) < ?",
+    )
+    .bind(link.id, link.project_id, link.experiment_id, JSON.stringify(link), link.expires_at, input.now, link.experiment_id, input.max)
     .run();
-  return link;
+  return Number(r.meta?.changes ?? 0) > 0 ? link : null;
 }
 
 /** The link as stored; `revoked_at` is the column (set once), merged over the document. */
@@ -256,15 +302,27 @@ export async function releaseSession(db: DB, linkId: string): Promise<void> {
  * `unknown` stays in the shape for sessions recorded without a link (participant-record.ts
  * `sessionsByChannel`, the record-side reading).
  */
-export async function channelCounts(db: DB, experimentId: string): Promise<{ channels: Record<string, number>; unlabelled: number; unknown: number }> {
+export type ChannelCounts = { channels: Record<string, number>; unlabelled: number; unknown: number };
+
+function addCount(out: ChannelCounts, r: { doc: string; sessions_opened: number }): void {
+  const n = Number(r.sessions_opened ?? 0);
+  const link = parse<TestLink>(r);
+  if (!link || n <= 0) return;
+  if (link.channel) out.channels[link.channel] = (out.channels[link.channel] ?? 0) + n;
+  else out.unlabelled += n;
+}
+
+export async function channelCounts(db: DB, experimentId: string): Promise<ChannelCounts> {
   const rows = await db.prepare("SELECT doc, sessions_opened FROM cr_test_links WHERE experiment_id = ?").bind(experimentId).all<{ doc: string; sessions_opened: number }>();
-  const out = { channels: {} as Record<string, number>, unlabelled: 0, unknown: 0 };
-  for (const r of rows.results ?? []) {
-    const n = Number(r.sessions_opened ?? 0);
-    const link = parse<TestLink>(r);
-    if (!link || n <= 0) continue;
-    if (link.channel) out.channels[link.channel] = (out.channels[link.channel] ?? 0) + n;
-    else out.unlabelled += n;
-  }
+  const out: ChannelCounts = { channels: {}, unlabelled: 0, unknown: 0 };
+  for (const r of rows.results ?? []) addCount(out, r);
+  return out;
+}
+
+/** `channelCounts` of every experiment of a Project, in one query (the Project read, CR-73). */
+export async function channelCountsOfProject(db: DB, projectId: string): Promise<Record<string, ChannelCounts>> {
+  const rows = await db.prepare("SELECT experiment_id, doc, sessions_opened FROM cr_test_links WHERE project_id = ?").bind(projectId).all<{ experiment_id: string; doc: string; sessions_opened: number }>();
+  const out: Record<string, ChannelCounts> = {};
+  for (const r of rows.results ?? []) addCount((out[r.experiment_id] ??= { channels: {}, unlabelled: 0, unknown: 0 }), r);
   return out;
 }

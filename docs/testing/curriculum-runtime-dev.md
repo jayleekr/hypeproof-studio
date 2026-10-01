@@ -95,6 +95,8 @@ cd worker && npm run test:cr-publish:d1                                         
 cd e2e && npm run test:cr-publish                                                                # the phone checks in Chromium
 ```
 
+On local workerd D1 (`--d1`) every query is a new loopback TCP connection, and macOS keeps closed ones in TIME_WAIT for a while out of a 16,384-port range. The `--d1` run therefore opens 60 visits in the classroom-scale check instead of the SQLite run's 500 (the per-visit R2 cost is still compared first against last). If a second `--d1` run right after another fails with `EADDRNOTAVAIL` or `fetch failed`, wait about a minute and run it again; that is the Mac, not the change.
+
 **In the app (background, scripted agent).** The same prepared copy as `cr-browser`:
 
 ```bash
@@ -110,6 +112,8 @@ It writes `e2e/test-results/cr-app/publish-result.json`. Its local Service is `a
 HPS_TEST_ORIGIN="https://<that host>" node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs 8787 "$STATE/local-participant-token.txt" on publish &
 python3 scripts/studio-dev.py --state-dir "$STATE" --provider service run --service local
 ```
+
+On this shared origin one part of CR-11 does not hold: "another project's published test version is refused". Every project's links are served from the one ngrok host, and the App allows the Experiment Browser by origin, so the agent and the test runner may act on another team's `/l/<link>/` there too. Check that case on the dedicated `http://{project}.test.invalid:<port>` origin (the Playwright runs above), never on the ngrok path.
 
 With `scripts/dev-stack.sh` (wrangler dev) instead: apply the migration to the local D1 once (`cd worker && npx wrangler d1 execute hypeproof-studio --local --file=migrations/0032-curriculum-runtime-publish.sql`), put `HPS_TEST_ORIGIN=https://<ngrok host>` in `worker/.dev.vars`, and use an adult workshop cohort whose profile has the switch on locally (no shipped profile does, and the kids default never gets it). ngrok's free plan shows its own "You are about to visit" page on the phone's first open; that page is ngrok's, not a HypeProof login. These by-hand paths were written from the scripts, not executed end to end; the Playwright and Chromium runs above are the executed ones.
 

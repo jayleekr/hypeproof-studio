@@ -89,9 +89,13 @@ const PATTERNS: readonly Pattern[] = [
   },
 ];
 
-// Any JWT or HypeProof-token-shaped value: base64url JSON beginning `{"` → "eyJ".
-const TOKEN_SHAPE = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,})?/g;
-const TOKEN_EXACT = /^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,})?$/;
+// Any JWT or HypeProof-token-shaped value: base64url JSON beginning `{"` → "eyJ". Linear time:
+// a value may start only where no base64url character precedes it (so a long `eyJ-eyJ-…` run
+// is tried from its first position only, not from every `eyJ` in it), and every segment is
+// bounded, so one attempt never backtracks over more than a token's length.
+const SEG = "[A-Za-z0-9_-]{10,16384}";
+const TOKEN_SHAPE = new RegExp(`(?<![A-Za-z0-9_-])eyJ${SEG}\\.${SEG}(?:\\.${SEG})?`, "g");
+const TOKEN_EXACT = new RegExp(`^eyJ${SEG}\\.${SEG}(?:\\.${SEG})?$`);
 
 function b64uJson(part: string): Record<string, unknown> | null {
   try {
@@ -135,10 +139,20 @@ export function judgeToken(value: string, ctx: ScanContext): string | null {
 
 export const isTokenShaped = (v: string): boolean => TOKEN_EXACT.test(v);
 
-function lineOf(text: string, index: number): number {
-  let n = 1;
-  for (let i = 0; i < index && i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
-  return n;
+/** Line numbers by index, from one pass over the text (a file with many hits stays linear). */
+function lineIndex(text: string): (index: number) => number {
+  const breaks: number[] = [];
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) breaks.push(i);
+  return (index) => {
+    let lo = 0;
+    let hi = breaks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (breaks[mid]! < index) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo + 1;
+  };
 }
 
 /**
@@ -148,7 +162,8 @@ function lineOf(text: string, index: number): number {
 export function scanFile(file: string, text: string, ctx: ScanContext): ScanHit[] {
   const hits: ScanHit[] = [];
   const judged = new Set<string>();
-  const hit = (rule: ScanRule, index: number, detail?: string) => hits.push({ file, line: lineOf(text, index), rule, ...(detail ? { detail } : {}) });
+  const lineOf = lineIndex(text);
+  const hit = (rule: ScanRule, index: number, detail?: string) => hits.push({ file, line: lineOf(index), rule, ...(detail ? { detail } : {}) });
   for (const p of PATTERNS) {
     p.re.lastIndex = 0;
     for (let m = p.re.exec(text); m; m = p.re.exec(text)) {
@@ -176,8 +191,9 @@ export function scanFile(file: string, text: string, ctx: ScanContext): ScanHit[
 /** Every two-part token-shaped value in a text, with its line (the Worker verifies each one's signature). */
 export function hypeproofTokensIn(text: string): Array<{ value: string; line: number }> {
   const out: Array<{ value: string; line: number }> = [];
+  const lineOf = lineIndex(text);
   TOKEN_SHAPE.lastIndex = 0;
-  for (let m = TOKEN_SHAPE.exec(text); m; m = TOKEN_SHAPE.exec(text)) if (m[0].split(".").length === 2) out.push({ value: m[0], line: lineOf(text, m.index) });
+  for (let m = TOKEN_SHAPE.exec(text); m; m = TOKEN_SHAPE.exec(text)) if (m[0].split(".").length === 2) out.push({ value: m[0], line: lineOf(m.index) });
   return out;
 }
 

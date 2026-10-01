@@ -88,6 +88,10 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const PORT = server.address().port;
 f = await localCurriculum({ testOrigin: `http://{project}.test.invalid:${PORT}` });
+// One synthetic student publishes 11 Projects here (each case needs its own origin), past the
+// per-student policy bound; the bound itself is checked in worker/test/cr-publish.test.mjs.
+const { PUBLISH_LIMITS } = await import("../../worker/src/routes/curriculum.ts");
+PUBLISH_LIMITS.maxProjectsPerStudent = 50;
 
 // A login wall the negative control serves (a link variant that sends the participant to log in).
 const loginWall = createServer((req, res) => {

@@ -1,13 +1,20 @@
 // Where published test versions are served (recon §6 "Test origin"; Jay's decision 5).
 //
 // One origin per project, never api.hypeproof-ai.xyz (its /admin uses Basic auth) and never
-// hypeproof-ai.xyz (member cookies). The host is configuration, `HPS_TEST_ORIGIN`:
+// hypeproof-ai.xyz (member cookies). That isolation is same-ORIGIN only: `*.try.hypeproof-ai.xyz`
+// is same-SITE with the Lab while try.hypeproof-ai.xyz is not on the Public Suffix List, so a
+// student page can still send the Lab's SameSite cookies on same-site requests and set cookies
+// with Domain=hypeproof-ai.xyz (on the Lab and on sibling projects' origins). Before the
+// production host goes live (decision 5), a separate registrable domain or a PSL entry for the
+// test origins is Jay's call. The host is configuration, `HPS_TEST_ORIGIN`:
 //   - `https://{project}.try.hypeproof-ai.xyz`: the production setting, live only once Jay
 //     approves the DNS and Worker route at a deploy (decision 5);
 //   - `http://{project}.test.invalid:<port>`: local and e2e runs (hostResolverRules map it);
 //   - one host without `{project}` (an ngrok URL): a dev-only shared origin so a phone can
 //     open a link before the wildcard domain exists. Refused when ENVIRONMENT is production,
-//     because every project would then share one origin and its storage.
+//     because every project would then share one origin and its storage. In this mode CR-11's
+//     "another project's published version is refused" does not hold: the App allows by origin,
+//     and every project's links are on the one origin (docs/testing/curriculum-runtime-dev.md).
 // Unset (the default) means no link can be issued: the publish route says so instead of
 // inventing a host.
 
