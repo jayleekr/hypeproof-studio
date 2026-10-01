@@ -10,8 +10,10 @@
 //           redirects to a login page fails the same check.
 //   CR-T61  an undeclared experiment's page calling getUserMedia is denied, even after the
 //           automation grants the permission to the context; a declared one leaves the
-//           browser's own prompt. Negative: a planted CR automation call that grants a
-//           device permission is caught by the source check.
+//           browser's own prompt. Chromium runs with a fake camera and microphone, and the
+//           declared origin with the permission granted does get the camera, so the denial
+//           is the policy and not a missing device. Negative: a planted CR automation call
+//           that grants a device permission is caught by the source check.
 //   CR-T60  in one browser: a declared experiment keeps one pseudonym across two sessions
 //           with two session ids; another experiment and an undeclared one do not share it.
 //   CR-T19  after revocation the same tab gets 410 and no content. A page that registers a
@@ -179,7 +181,13 @@ const secureOrigins = [s, deviceDeclared, repeated, repeatedOther, plain, pwa, p
 
 let browser;
 try {
-  browser = await chromium.launch({ headless: true, channel: "chromium", args: ["--host-resolver-rules=MAP *.test.invalid 127.0.0.1", `--unsafely-treat-insecure-origin-as-secure=${secureOrigins}`] });
+  browser = await chromium.launch({ headless: true, channel: "chromium", args: [
+    "--host-resolver-rules=MAP *.test.invalid 127.0.0.1",
+    `--unsafely-treat-insecure-origin-as-secure=${secureOrigins}`,
+    // A fake camera and microphone on every machine: without one (a CI runner) getUserMedia
+    // rejects with NotFoundError and CR-T61 could not tell a policy denial from no device.
+    "--use-fake-device-for-media-stream",
+  ] });
 } catch (err) {
   console.error(`could not launch Chromium: ${err.message}`);
   server.close();
@@ -250,13 +258,30 @@ try {
       state: (await navigator.permissions.query({ name: "camera" })).state,
     }));
     await ctx2.close();
+    // Control: the device exists. On the declared origin with the permission granted, the same
+    // call succeeds, so the undeclared page's NotAllowedError is the served policy, not a
+    // missing device.
+    const ctx3 = await browser.newContext(phone);
+    await ctx3.grantPermissions(["camera"], { origin: new URL(declared.url).origin });
+    const p3 = await ctx3.newPage();
+    await p3.goto(declared.url);
+    const deviceControl = await p3.evaluate(async () => {
+      try {
+        const st = await navigator.mediaDevices.getUserMedia({ video: true });
+        st.getTracks().forEach((t) => t.stop());
+        return "granted";
+      } catch (e) {
+        return e.name;
+      }
+    });
+    await ctx3.close();
     // Source check: no CR automation path grants a device permission (positive: none; negative: a planted call is caught).
     const GRANT = /Browser\.grantPermissions|Browser\.setPermission|grantPermissions\(/;
     const crSources = ["experimentBrowser.ts", "verifyRunner.ts", "verifySession.ts", "browserControl.ts", "browserMcp.ts", "publishSession.ts"].map((n) => readFileSync(join(ext, "src", n), "utf8"));
     const granted = crSources.filter((src) => GRANT.test(src)).length;
     const plantCaught = GRANT.test(crSources[0] + '\nawait cdp.send("Browser.grantPermissions", { permissions: ["videoCapture"] });');
-    const ok = undeclared.gum === "NotAllowedError" && undeclared.allows.camera === false && undeclared.allows.microphone === false && dec.allows.camera === true && dec.allows.microphone === false && dec.state === "prompt" && granted === 0 && plantCaught;
-    record("CR-T61", ok ? "PASS" : "FAIL", { undeclared, declared: dec, cr_sources_granting: granted, planted_grant_caught: plantCaught });
+    const ok = undeclared.gum === "NotAllowedError" && undeclared.allows.camera === false && undeclared.allows.microphone === false && dec.allows.camera === true && dec.allows.microphone === false && dec.state === "prompt" && deviceControl === "granted" && granted === 0 && plantCaught;
+    record("CR-T61", ok ? "PASS" : "FAIL", { undeclared, declared: dec, device_control_declared_granted: deviceControl, cr_sources_granting: granted, planted_grant_caught: plantCaught });
   }
 
   // ── CR-T60: pseudonyms in one real browser ──
