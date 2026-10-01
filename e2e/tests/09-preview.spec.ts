@@ -4,10 +4,21 @@
 // canned assistant turn with HTML already exists. That lets us exercise the
 // preview path (▶Run, sandbox, panel reuse, save-to-workspace, previewReady
 // handshake) without depending on a live LLM round-trip.
+//
+// Two preview paths ship (`revealBuilt` in chatPanelProvider.ts). A cohort whose
+// profile says `preview.type: "live_server"` (the dev-stack default, sk-biopharm)
+// gets the workspace served on 127.0.0.1 in a native browser tab (REQ-N1); every
+// other cohort, and a live server that fails to start, gets the sandboxed srcdoc
+// webview (`#frame`). Until 2026-10-01 this spec only looked for `#frame`, so on a
+// live-server cohort it measured a path the product never takes there and failed on
+// the unchanged tree too (recon F1). Each check now finds which path opened and
+// asserts that path's contract. REQ-D3 and REQ-D6 belong to the webview path;
+// studio-requirements.md §N says REQ-N1 replaces REQ-D3 for live_server cohorts.
 
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { Page } from "@playwright/test";
 import {
   type AppContext,
   closeApp,
@@ -16,6 +27,28 @@ import {
   previewFrame,
   runCommand,
 } from "../fixtures/app";
+
+/** The canned game sets this title once its script runs; a browser tab is labelled by its page title. */
+const LOADED_TITLE = "preview-test-loaded";
+const liveTabs = (win: Page) => win.locator(".tabs-container .tab", { hasText: LOADED_TITLE });
+
+/**
+ * Which preview opened: a native browser tab showing the canned game (live_server,
+ * REQ-N1) or the sandboxed webview iframe. Neither within the timeout fails the check.
+ */
+async function openedPreview(win: Page): Promise<"live" | "iframe"> {
+  const end = Date.now() + 20_000;
+  while (Date.now() < end) {
+    if ((await liveTabs(win).count()) > 0) return "live";
+    const outer = win.locator("iframe.webview.ready");
+    for (let i = 0; i < (await outer.count()); i++) {
+      const inner = win.frameLocator("iframe.webview.ready").nth(i).frameLocator("#active-frame");
+      if ((await inner.locator("#frame").count().catch(() => 0)) > 0) return "iframe";
+    }
+    await win.waitForTimeout(250);
+  }
+  throw new Error(`no preview opened: neither a browser tab titled "${LOADED_TITLE}" nor a webview with #frame`);
+}
 
 const CANNED_GAME = `<!doctype html>
 <html><head><meta charset="utf-8"><title>preview-test</title></head>
@@ -57,6 +90,16 @@ test("REQ-D1 + REQ-D3 + REQ-D6: Run Last Code opens preview with sandboxed ifram
 
   // REQ-D1: Run Last Code in Preview
   await runCommand(ctx.win, "HypeProof Chat: Run Last Code in Preview");
+  const opened = await openedPreview(ctx.win);
+
+  if (opened === "live") {
+    // REQ-D1 on the live-server path: the canned game itself is what the tab shows
+    // (its script ran and set the title), served from the saved workspace file.
+    await expect(liveTabs(ctx.win)).toHaveCount(1);
+    expect(fs.readFileSync(path.join(ctx.wsDir, "index.html"), "utf8")).toContain("REQ-D preview test game");
+    test.info().annotations.push({ type: "path", description: "live_server: REQ-D3/D6 are the webview path's; REQ-N1 replaces REQ-D3 here" });
+    return;
+  }
 
   // REQ-D6: previewReady handshake fires + queued HTML flushes
   const frame = await previewFrame(ctx.win);
@@ -93,8 +136,17 @@ test("REQ-D4: second Run reuses the existing preview panel (no second WebviewPan
 
   // First run — opens preview
   await runCommand(ctx.win, "HypeProof Chat: Run Last Code in Preview");
-  await previewFrame(ctx.win); // wait for attach
+  const opened = await openedPreview(ctx.win);
   await ctx.win.waitForTimeout(800);
+
+  if (opened === "live") {
+    // The live-server path reuses its browser tab (startLivePreview: same URL → reload).
+    await expect(liveTabs(ctx.win)).toHaveCount(1);
+    await runCommand(ctx.win, "HypeProof Chat: Run Last Code in Preview");
+    await ctx.win.waitForTimeout(1500);
+    await expect(liveTabs(ctx.win)).toHaveCount(1);
+    return;
+  }
 
   // Count webview iframes before second run
   const beforeCount = await ctx.win.locator("iframe.webview.ready").count();
