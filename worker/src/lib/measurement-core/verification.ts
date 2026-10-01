@@ -202,6 +202,11 @@ export function parsePlan(raw: unknown): { ok: true; plan: VerifyPlan } | { ok: 
         return { ok: false, code: "invalid_expectation" };
     }
   }
+  // A plan that does nothing and only expects an absence (no errors, no such text) holds on
+  // any page that loads, so it cannot test what a criterion says the product does.
+  if (!steps.length && expect.every((e) => e.kind === "no_errors" || ((e.kind === "text" || e.kind === "element") && e.absent))) {
+    return { ok: false, code: "plan_untestable" };
+  }
   return { ok: true, plan: { steps, expect } };
 }
 
@@ -263,6 +268,12 @@ export interface FinalObservation {
    * text or element, or a missing one, is then undecided, never pass or fail.
    */
   truncated?: boolean;
+  /**
+   * The page's event log dropped records past its per-document cap, or began after a
+   * document had loaded, on some page the run visited: "no errors seen" is then not
+   * "no errors", so `no_errors` is undecided and a clean run is not a pass.
+   */
+  recordsIncomplete?: boolean;
 }
 
 /** The same criterion across runs: its text, whitespace-normalized (CR-14 compares by text, not by event id). */
@@ -297,8 +308,23 @@ function lineText(line: string): string | null {
   }
   return /^[A-Za-z]+: (.*)$/.exec(line)?.[1] ?? null;
 }
-const TRUNCATED = "화면 내용이 길어 앞부분만 읽었어요";
-const textLine = (snapshot: string, text: string): string | null => snapshot.split("\n").find((l) => lineText(l)?.includes(text)) ?? null;
+/** Why an expectation or a step target past the snapshot's line cap is undecided (CR-15). */
+export const SNAPSHOT_TRUNCATED = "화면 내용이 길어 앞부분만 읽었어요";
+const TRUNCATED = SNAPSHOT_TRUNCATED;
+/** Why `no_errors` is undecided when the page's event log is incomplete. */
+export const RECORDS_INCOMPLETE = "콘솔 기록이 너무 많거나 늦게 읽기 시작해 일부를 읽지 못했어요";
+/**
+ * Does `line` show `text` starting at a word start? A plain substring would let "완료" match
+ * "미완료" and "complete" match "incomplete"; the end is left open because Korean attaches
+ * endings ("완료" still matches "완료되었어요").
+ */
+export function showsText(line: string, text: string): boolean {
+  for (let i = line.indexOf(text); i !== -1; i = line.indexOf(text, i + 1)) {
+    if (i === 0 || !/[\p{L}\p{N}]/u.test(line[i - 1]!)) return true;
+  }
+  return false;
+}
+const textLine = (snapshot: string, text: string): string | null => snapshot.split("\n").find((l) => { const t = lineText(l); return t !== null && showsText(t, text); }) ?? null;
 
 /**
  * Judge a plan's expectations against what the runner observed last. Pure: the same
@@ -331,9 +357,11 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
         break;
       }
       case "no_errors": {
-        const ok = final.errors.length === 0;
-        cites.push({ step: at, kind: "record", detail: ok ? "오류·실패한 요청 기록 0건" : final.errors.map((r) => `${r.kind}${r.step === null ? "" : ` 단계 ${r.step}`}: ${r.message}`).join(" | ").slice(0, 500) });
-        results.push({ kind: e.kind, ok, detail: "콘솔 오류·실행 오류·실패한 요청 없음" });
+        const clean = final.errors.length === 0;
+        // Zero errors seen in an incomplete log is not zero errors: undecided, never pass.
+        const ok = clean && final.recordsIncomplete ? null : clean;
+        cites.push({ step: at, kind: "record", detail: clean ? `오류·실패한 요청 기록 0건${final.recordsIncomplete ? ` (${RECORDS_INCOMPLETE})` : ""}` : final.errors.map((r) => `${r.kind}${r.step === null ? "" : ` 단계 ${r.step}`}: ${r.message}`).join(" | ").slice(0, 500) });
+        results.push({ kind: e.kind, ok, detail: `콘솔 오류·실행 오류·실패한 요청 없음${ok === null ? ` (${RECORDS_INCOMPLETE})` : ""}` });
         break;
       }
       case "visual": {
@@ -352,6 +380,8 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
   } else if (results.some((r) => r.ok === false)) status = "fail";
   else if (results.some((r) => r.ok === null)) status = "not_verified";
   else if (final.errors.length && !expect.some((e) => e.kind === "no_errors")) status = "warning";
+  // An unread error could have been a warning: a clean run on an incomplete log is not a pass.
+  else if (final.recordsIncomplete) status = "not_verified";
   else status = "pass";
   if (status === "warning") {
     for (const r of final.errors) cites.push({ step: at, kind: "record", detail: `${r.kind}${r.step === null ? "" : ` 단계 ${r.step}`}: ${r.message}`.slice(0, 300) });
@@ -361,6 +391,7 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
     method: "dom",
     steps,
     cites,
+    ...(status === "not_verified" && final.recordsIncomplete && !results.some((r) => r.ok === null) ? { reason: RECORDS_INCOMPLETE } : {}),
     expectations: results,
     runtime_errors: final.errors.filter((r) => r.kind !== "network"),
     network_errors: final.errors.filter((r) => r.kind === "network"),
@@ -656,12 +687,15 @@ export function validateVerificationReport(r: unknown): string[] {
 
 // ── CR-81: "verified" only for an all-pass report on that exact version ─────
 
+/** Which open result a criterion shows when several reports on a version disagree. */
+const OPEN_RANK: Record<ReportStatus, number> = { pass: 0, not_verified: 1, warning: 2, non_reproducible: 3, fail: 4 };
+
 export type ProductVerificationState = "verified" | "failed" | "incomplete" | "needs_recheck" | "not_verified";
 export interface ProductVerification {
   state: ProductVerificationState;
   run_id?: string;
   /** The report's criteria that are not pass, for the screen. */
-  open: Array<{ id: string; text: string; status: ReportStatus }>;
+  open: Array<{ id: string; text: string; status: ReportStatus; run_id: string }>;
   /** AE-37: the latest report of an earlier version, kept and shown, never erased. */
   previous?: { run_id: string; artifact_version_id: string };
 }
@@ -681,17 +715,24 @@ export function productVerification(events: readonly ObservationEvent[], version
   const sameVersion = versionId ? reports.filter((r) => r.artifact_version_id === versionId) : [];
   const here = sameVersion.at(-1);
   if (!here) return { state: previous ? "needs_recheck" : "not_verified", open: [], ...(previous ? { previous } : {}) };
-  const open = here.criteria.filter((c) => c.status !== "pass").map((c) => ({ id: c.id, text: c.text, status: c.status }));
-  // A later report never hides a decided fail or non-reproducible result for the same
-  // criterion on the same files (CR-14, CR-81): not by a start with fewer criteria, and not
-  // by a different plan that passed. The same files can only be fixed by changing them.
-  for (const r of sameVersion) {
+  const open = here.criteria.filter((c) => c.status !== "pass").map((c) => ({ id: c.id, text: c.text, status: c.status, run_id: here.run_id }));
+  // A later report never hides an earlier result that is not a pass for the same criterion
+  // on the same files (CR-14, CR-81), not by a start with fewer criteria and not by a
+  // different plan. A decided fail or non-reproducible result stays: the same files can
+  // only be fixed by changing them. A warning or not-verified result stays until a later
+  // report on the version passes that criterion.
+  for (let i = 0; i < sameVersion.length; i++) {
+    const r = sameVersion[i]!;
     if (r === here) continue;
     for (const c of r.criteria) {
-      if (c.status !== "fail" && c.status !== "non_reproducible") continue;
-      const at = open.findIndex((o) => criterionKey(o.text) === criterionKey(c.text));
-      if (at === -1) open.push({ id: c.id, text: c.text, status: c.status });
-      else if (open[at]!.status !== "fail" && open[at]!.status !== "non_reproducible") open[at] = { id: c.id, text: c.text, status: c.status };
+      if (c.status === "pass") continue;
+      const key = criterionKey(c.text);
+      const hard = c.status === "fail" || c.status === "non_reproducible";
+      if (!hard && sameVersion.slice(i + 1).some((later) => later.criteria.some((x) => x.status === "pass" && criterionKey(x.text) === key))) continue;
+      const entry = { id: c.id, text: c.text, status: c.status, run_id: r.run_id };
+      const at = open.findIndex((o) => criterionKey(o.text) === key);
+      if (at === -1) open.push(entry);
+      else if (OPEN_RANK[c.status] > OPEN_RANK[open[at]!.status]) open[at] = entry;
     }
   }
   const state: ProductVerificationState = open.length === 0 ? "verified" : open.some((c) => c.status === "fail") ? "failed" : "incomplete";

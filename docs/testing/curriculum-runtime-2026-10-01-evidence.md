@@ -14,7 +14,7 @@ No real-device run with a real model was made: the in-app runs use a scripted ag
 
 | Row | Layer and file | Result | Controls |
 |---|---|---|---|
-| CR-T02 (verify surfaces) | worker `cr-switch.test.mjs`, extension `cr-switch.smoke.mjs`, in-app `verify-app.spec.ts` | PASS | Off: no `verify_*` tool offered, the command absent from the palette, the session refuses every action without touching the record. On: both tools offered, the command opens the panel. Planted ungated manifest variants and a planted Worker route are caught by the existing instruments |
+| CR-T02 (verify surfaces) | worker `cr-switch.test.mjs`, extension `cr-switch.smoke.mjs`, in-app `verify-app.spec.ts` | PARTIAL (verify surfaces only; CR-02 not claimed) | The switch-off half that re-runs `09-preview.spec.ts` and the HTML generation specs is BLOCKED by pre-existing F1 (red on `origin/main` too), as recorded for cr-browser. Off: no `verify_*` tool offered, the command absent from the palette, the session refuses every action without touching the record. On: both tools offered, the command opens the panel. Planted ungated manifest variants and a planted Worker route are caught by the existing instruments |
 | CR-T03 (runner re-check) | `cr-provider-neutral.smoke.mjs`, `cr-verify.smoke.mjs` | PASS | The scan now includes the verify modules and reaches `verification.ts`; a planted SDK import in `verifyRunner.ts` is reported; one verify answer is identical through both adapters, a refusal is an error in both |
 | CR-T11 (runner cases) | `cr-verify.smoke.mjs`, in-app | PASS | Positive: runner steps on the preview origin run. Negative: a step to `https://example.com/` is not verified with "범위 밖이라 거절", no CDP call goes there, and in the app no web contents ever loaded it |
 | CR-T12 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs`, in-app | PASS | Positive: three typed criteria stored as the student's `criterion_set` and tested one by one. Negative: zero and six refused; an unconfirmed coach proposal starts no run (in the app no run reached the agent); a confirmed one keeps `adopted_from` |
@@ -61,13 +61,28 @@ Each control is a planted defect in a scratch run against the four slice suites 
 
 One planted defect survives: removing the read-back after `rec.record` of the result. It is a second guard behind the pre-record read-back of the same scrubbed text, so no input reaches it; kept as defence, not counted as a control.
 
+## Review round 3 fixes
+
+Branch merged with `origin/main` `bc3639d3` first (#1381; `styles.css` kept both blocks). Controls are planted defects run against `cr-verify.smoke.mjs` (40 checks) and `verify-panel.smoke.mjs` (7 checks); each turns its suite red, and the unplanted code is green.
+
+| Finding | Fix | Planted defect caught |
+|---|---|---|
+| An earlier fail on the version that a later run with the same words passed left a failed state with no failing row and no fix action (CR-81, CR-16) | the view carries the open results the shown report does not hold (`held`), drawn as rows with the fix request; "다시 테스트" re-runs them with their own plans | `held: []` in the view; the panel's held block removed; the re-test ignoring held results |
+| A step target past the 200-line snapshot cap was a recorded fail (CR-15) | `not_verified` with "화면 내용이 길어 앞부분만 읽었어요"; control: a short page without the button still fails | the truncation guard in the runner |
+| `no_errors` and warning ignored records the page event log dropped (CR-15, CR-81) | dropped or late-attached records of any visited document make `no_errors` undecided and a clean run `not_verified`; controls with 10 logs: fail and warning | the `droppedRecords`/`recordsPartial` carry removed |
+| A later start with fewer criteria hid an earlier warning or not-verified result (CR-81) | carried until a later report on the version passes the same words; the CR-T76 subset negative now covers fail, warning and not_verified; control: a later pass clears a not-verified result | the carry limited to fail and non-reproducible |
+| A drawer write during a re-test was lost (whole-snapshot persist) | the re-test holds its recorder (`verifyRunRecorder`) and `prepareObservation` hands it to every writer until the re-test releases it | each of the three host guards removed (source assertions); the session's release (behaviour) |
+| A zero-step plan with only `no_errors` verified a behavioural criterion | refused as `plan_untestable` with a reason for the coach; controls: a positive expectation or one step is accepted | the refusal removed |
+| `text` matched substrings ("완료" in "미완료") | matched from a word start; controls: "주문 완료되었어요", "완료", "(완료)" pass | `includes` restored |
+| Stale comments on version artifacts | `learning-events.ts` and `browserResult.ts` now point to `isVersionArtifact` | — |
+
 ## Shared files this evidence depends on
 
 `cr-verify.verification_inputs` pins the slice's own implementation and tests. These shared files also carry its controls and are not pinned, so that edits by other slices do not reopen this item (ledger-contract warnings): `worker/test/cr-switch.test.mjs`, `extensions/hypeproof-chat/test/cr-switch.smoke.mjs` and `cr-provider-neutral.smoke.mjs` (CR-T02, CR-T03 for the verify surfaces), `e2e/curriculum-runtime/app-service.mjs` (the scripted verify agent) and `fixtures/kiosk-practice/app.js` (the `?plant=flaky` CR-T14 negative). A change to them should re-run this record's rows.
 
 ## Known limitation
 
-The coach writes each plan's expectations, so a plan that does not test what the criterion says can still pass (for example zero steps and only an absent text). No mechanical rule separates it from a legitimate absence or no-error criterion, so it is not refused; the panel shows each verdict's expectations next to it ("확인한 것") and the steps under it.
+The coach writes each plan's expectations, so a plan that does not test what the criterion says can still pass. Only the trivial form (zero steps with only `no_errors` or absent expectations) is refused (`plan_untestable`); no mechanical rule separates the rest from a legitimate absence or no-error criterion. The panel shows each verdict's expectations next to it ("확인한 것") and the steps under it.
 
 ## Instrument corrections during the run
 
@@ -83,3 +98,4 @@ Recorded because each was the instrument, not the product (verification rule 6):
 - CR-T57 with a real provider (CR-61), and any real-model run of the coach writing plans. CR-61 stays open; the PR says `Refs #1392`, not `Closes`.
 - A vision judgment step (CR-15 vision half). CR-15 is partial and not claimed; it stays open with CR-61 under `Refs #1392`.
 - Real phone: not part of this item.
+- CR-T02's switch-off regressions (`09-preview.spec.ts`, HTML generation specs): BLOCKED by pre-existing F1, so CR-02 is not claimed by this item; cr-e2e re-runs the full switch-off inventory.

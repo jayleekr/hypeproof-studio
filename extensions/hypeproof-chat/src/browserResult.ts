@@ -10,8 +10,10 @@
 // to the same local record, content-addressed (`LocalRecord.putBlob`). There is no
 // browser-result store, validator or schema of its own.
 //
-// The version is not recorded as an `artifact` event: a version is a file set, and an
-// `artifact` event per version would change what `observableAssets` counts as a revision.
+// A browser result does not record the version as an `artifact` event; the keys above
+// reference it. cr-verify does record versions that way for `artifact_after`, tagged
+// `hps-artifact-version/1`, and `observableAssets` skips those (`isVersionArtifact`,
+// measurement-core verification.ts), so they never count as revisions.
 //
 // Pure and vscode-free.
 

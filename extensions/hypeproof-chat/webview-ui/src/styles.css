@@ -1516,6 +1516,7 @@ html, body, #root {
 .hps-verify-ai { font-size: 11px; opacity: 0.85; }
 .hps-verify-proposals { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .hps-verify-result { padding: 4px 0; border-top: 1px solid var(--vscode-panel-border, #8882); }
+.hps-verify-held { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--vscode-panel-border, #8884); }
 .hps-verify-badge { font-weight: 600; }
 .hps-verify-fail .hps-verify-badge, .hps-verify-non_reproducible .hps-verify-badge { color: var(--vscode-errorForeground, #c62828); }
 .hps-verify-pass .hps-verify-badge { color: #2e7d32; }

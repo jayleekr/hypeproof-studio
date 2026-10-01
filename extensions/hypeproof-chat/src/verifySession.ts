@@ -25,6 +25,7 @@ import type { ObservationEvent } from "../../../worker/src/lib/measurement-core/
 import {
   CRITERIA_MAX,
   VERIFY_RESULT_TEXT_CAP,
+  criterionKey,
   VERIFY_TOOL,
   buildFixRequest,
   checkCriteria,
@@ -73,6 +74,8 @@ export interface VerifyHostPorts {
   storeScreenshot?(base64: string, mimeType: string): Promise<string | null>;
   /** CR-68, chat-panel half: a run is acting on the page. */
   onRun?(running: boolean): void;
+  /** A re-test ended: the recorder it held may be let go (the host shares it with other writers meanwhile). */
+  release?(): void;
   now?(): number;
 }
 
@@ -145,6 +148,11 @@ export class VerifySession {
 
   get activeRun(): ActiveRun | null {
     return this.run;
+  }
+
+  /** Is a re-test under way (from the click until its last verdict is written)? */
+  get retestActive(): boolean {
+    return this.retesting;
   }
 
   /** Is a run acting on the page, or a re-test under way? */
@@ -241,7 +249,10 @@ export class VerifySession {
     // One verdict per criterion per run: a second plan is not a retry, it is shopping for a pass.
     if (run.done.includes(criterion.id)) return { isError: true, text: `이 조건은 이번 테스트에서 이미 판정했어요: ${criterion.id}. 다시 확인은 학생의 "다시 테스트"가 해요.` };
     const parsed = parsePlan(input.plan);
-    if (!parsed.ok) return { isError: true, text: `계획을 읽지 못했어요 (${parsed.code}). steps와 expect를 다시 보내 주세요.` };
+    if (!parsed.ok) {
+      const why = parsed.code === "plan_untestable" ? " 아무 단계 없이 '없어야 할 것'(no_errors, absent)만 보는 계획은 어떤 페이지에서도 맞아서 조건을 확인하지 못해요. 조건이 말하는 동작과 그 결과를 넣어 주세요." : "";
+      return { isError: true, text: `계획을 읽지 못했어요 (${parsed.code}).${why} steps와 expect를 다시 보내 주세요.` };
+    }
     return this.exclusive(async () => {
       // The run may have closed, or been tested, while this call waited for the tab.
       if (this.run !== run || run.done.includes(criterion.id)) return { isError: true, text: "이 테스트는 이미 끝났어요." };
@@ -277,7 +288,25 @@ export class VerifySession {
       const report = latest ? verificationReport(events, latest) : null;
       // Every criterion of the latest run, untested ones included: those have no plan and
       // stay in the new run as not verified, so a re-test never shrinks the set (CR-81).
-      const criteria: VerifyCriterion[] = (report?.criteria ?? []).map((c) => ({ id: c.id, text: c.text }));
+      // A result on that version that is not a pass and that the latest run does not hold
+      // (an earlier start with more criteria, or another plan for the same words) is re-run
+      // too, with its own plan: a re-test after "테스트 시작" with fewer criteria never drops
+      // it, and for the same words the open result's plan is the one re-run. Over
+      // CRITERIA_MAX, passing criteria of the latest run make room first.
+      const held = report ? productVerification(events, report.artifact_version_id).open.filter((o) => !report.criteria.some((c) => c.id === o.id)) : [];
+      const set: Array<{ id: string; text: string; open: boolean; decided: boolean }> = (report?.criteria ?? []).map((c) => ({ id: c.id, text: c.text, open: c.status !== "pass", decided: c.status === "fail" || c.status === "non_reproducible" }));
+      for (const o of held) {
+        const at = set.findIndex((x) => criterionKey(x.text) === criterionKey(o.text));
+        const entry = { id: o.id, text: o.text, open: true, decided: o.status === "fail" || o.status === "non_reproducible" };
+        if (at === -1) set.push(entry);
+        else if (!set[at]!.open || (entry.decided && !set[at]!.decided)) set[at] = entry;
+      }
+      while (set.length > CRITERIA_MAX) {
+        let at = set.length - 1;
+        while (at >= 0 && set[at]!.open) at--;
+        set.splice(at === -1 ? set.length - 1 : at, 1);
+      }
+      const criteria: VerifyCriterion[] = set.map((c) => ({ id: c.id, text: c.text }));
       const plans: Array<{ criterion: VerifyCriterion; plan: VerifyPlan }> = [];
       for (const c of criteria) {
         const r = [...events].reverse().map((e) => readVerifyResult(e)).find((x) => x?.criterion_id === c.id);
@@ -296,6 +325,7 @@ export class VerifySession {
       return { ok: true, run_id: run.run_id };
     } finally {
       this.retesting = false;
+      this.ports.release?.();
     }
   }
 
@@ -417,8 +447,15 @@ export class VerifySession {
     const ids = runIds(events);
     const here = [...ids].reverse().map((id) => verificationReport(events, id)).find((r) => r && r.artifact_version_id === version) ?? null;
     const report = here ?? (ids.length ? verificationReport(events, ids.at(-1)!) : null);
+    // Open results of this version the shown report does not hold, as their own rows.
+    const held = here
+      ? verification.open
+          .filter((o) => !here.criteria.some((c) => c.id === o.id))
+          .map((o) => verificationReport(events, o.run_id)?.criteria.find((c) => c.id === o.id))
+          .filter((c): c is NonNullable<typeof c> => !!c)
+      : [];
     const reason = !on ? refusalText("switch_off") : !rec ? refusalText("no_record") : !this.ports.startUrl() ? refusalText("no_preview") : null;
-    return { available: on && !!rec, reason, version, verification, report, run: this.run, proposals: [...this.proposals], running: this.running, notice: this.notice };
+    return { available: on && !!rec, reason, version, verification, report, held, run: this.run, proposals: [...this.proposals], running: this.running, notice: this.notice };
   }
 
   setNotice(text: string | null): void {
@@ -433,6 +470,7 @@ export function coachRunContext(run: ActiveRun, startUrl: string): string {
     `- criterion_id: 아래 id 그대로. plan: JSON 문자열 {"steps":[...],"expect":[...]}.`,
     `- steps는 미리보기(${startUrl})를 새로 연 상태에서 시작한다. action: click·type·select·scroll·hover·reload·navigate, 요소는 {"target":{"role":"button","name":"주문하기"}}처럼 접근성 역할과 이름으로.`,
     `- expect: {"kind":"text","text":"..."} · {"kind":"element","role":"...","name":"..."} · {"kind":"route","path":"/..."} · {"kind":"no_errors"} · 눈으로만 판단할 것만 {"kind":"visual","question":"..."}(판단은 적지 않는다: 적으면 거절되고, visual은 확인 안 됨으로 남는다).`,
+    `- text는 화면 글자에서 단어 첫머리부터 맞아야 한다("완료"는 "미완료"에 맞지 않는다). steps 없이 no_errors나 absent만 기대하는 계획은 거절된다.`,
     `- 조건마다 한 번만 부른다. 같은 조건을 다른 계획으로 다시 부르면 거절된다.`,
     `- 판정은 러너가 관찰로 한다. 결과를 통과로 바꾸어 말하지 말고, 실패하면 실패라고 전해라.`,
     ...run.criteria.map((c) => `- ${c.id}: ${c.text}`),

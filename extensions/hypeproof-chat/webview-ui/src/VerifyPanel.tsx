@@ -7,6 +7,7 @@
 import { useState } from "react";
 import type { VerifyView } from "../../src/verifyView";
 
+type ReportCriterion = VerifyView["held"][number];
 type Draft = { text: string; proposed_by: "student" | "ai"; confirmed: boolean; adopted_from?: string };
 
 const STATE_LINE: Record<VerifyView["verification"]["state"], string> = {
@@ -55,6 +56,61 @@ export function VerifyPanel(props: {
   const [fixText, setFixText] = useState<Record<string, string>>({});
   const disabled = props.busy || view.running || !view.available;
   const set = (i: number, d: Partial<Draft>) => setDrafts((all) => all.map((x, j) => (j === i ? { ...x, ...d } : x)));
+  /** One criterion's result, with the fix action when it failed or warned on this version (CR-16). */
+  const resultRow = (c: ReportCriterion, onVersion: boolean, testId: string) => (
+    <div className={`hps-verify-result hps-verify-${c.status}`} key={c.id} data-testid={testId} data-status={c.status} data-criterion={c.id} data-test-kind={c.test_kind ?? ""}>
+      <div>
+        <span className="hps-verify-badge">{STATUS_LABEL[c.status] ?? c.status}</span> {c.text}
+        {c.method === "vision" && <span className="hps-verify-vision"> · 화면 판단</span>}
+      </div>
+      {c.reason && <div className="hps-verify-reason">{c.reason}</div>}
+      {/* The coach writes the expectations, so the student sees what the verdict was judged on. */}
+      {c.expectations.length > 0 && (
+        <ul className="hps-verify-expect" data-testid="verify-expectations">
+          {c.expectations.map((e, i) => (
+            <li key={i}>
+              {e.ok === true ? "✓" : e.ok === false ? "✗" : "?"} 확인한 것: {e.detail}
+            </li>
+          ))}
+        </ul>
+      )}
+      {c.steps.length > 0 && (
+        <details>
+          <summary>한 일과 근거 보기</summary>
+          <ol>
+            {c.steps.map((s) => (
+              <li key={s.index}>
+                {s.ok ? "✓" : "✗"} {ACTION_LABEL[s.action] ?? "단계"}
+                {s.target ? ` · ${s.target}` : ""} — {s.message}
+              </li>
+            ))}
+          </ol>
+          <ul>
+            {c.cites.map((x, i) => (
+              <li key={i}>
+                근거({CITE_LABEL[x.kind] ?? "관찰"}): {x.detail}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {(c.status === "fail" || c.status === "warning") && c.test_ref && onVersion && (
+        <div className="hps-verify-fix">
+          <input
+            type="text"
+            maxLength={500}
+            placeholder="무엇을 고쳐 달라고 할지 내 말로 적어요"
+            data-testid="verify-fix-text"
+            value={fixText[c.id] ?? ""}
+            onChange={(e) => setFixText((all) => ({ ...all, [c.id]: e.target.value }))}
+          />
+          <button type="button" data-testid="verify-fix" disabled={disabled} onClick={() => props.onFix(c.id, fixText[c.id] ?? "")}>
+            고쳐 달라고 하기
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <section className="hps-verify" aria-label="내 제품 테스트" data-testid="verify-panel">
@@ -137,60 +193,13 @@ export function VerifyPanel(props: {
           <div className="hps-verify-label">
             {view.report.artifact_version_id === view.version ? "이 버전의 테스트 결과" : "이전 버전의 테스트 결과"}
           </div>
-          {view.report.criteria.map((c) => (
-            <div className={`hps-verify-result hps-verify-${c.status}`} key={c.id} data-testid="verify-result" data-status={c.status} data-criterion={c.id} data-test-kind={c.test_kind ?? ""}>
-              <div>
-                <span className="hps-verify-badge">{STATUS_LABEL[c.status] ?? c.status}</span> {c.text}
-                {c.method === "vision" && <span className="hps-verify-vision"> · 화면 판단</span>}
-              </div>
-              {c.reason && <div className="hps-verify-reason">{c.reason}</div>}
-              {/* The coach writes the expectations, so the student sees what the verdict was judged on. */}
-              {c.expectations.length > 0 && (
-                <ul className="hps-verify-expect" data-testid="verify-expectations">
-                  {c.expectations.map((e, i) => (
-                    <li key={i}>
-                      {e.ok === true ? "✓" : e.ok === false ? "✗" : "?"} 확인한 것: {e.detail}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {c.steps.length > 0 && (
-                <details>
-                  <summary>한 일과 근거 보기</summary>
-                  <ol>
-                    {c.steps.map((s) => (
-                      <li key={s.index}>
-                        {s.ok ? "✓" : "✗"} {ACTION_LABEL[s.action] ?? "단계"}
-                        {s.target ? ` · ${s.target}` : ""} — {s.message}
-                      </li>
-                    ))}
-                  </ol>
-                  <ul>
-                    {c.cites.map((x, i) => (
-                      <li key={i}>
-                        근거({CITE_LABEL[x.kind] ?? "관찰"}): {x.detail}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {(c.status === "fail" || c.status === "warning") && c.test_ref && view.report?.artifact_version_id === view.version && (
-                <div className="hps-verify-fix">
-                  <input
-                    type="text"
-                    maxLength={500}
-                    placeholder="무엇을 고쳐 달라고 할지 내 말로 적어요"
-                    data-testid="verify-fix-text"
-                    value={fixText[c.id] ?? ""}
-                    onChange={(e) => setFixText((all) => ({ ...all, [c.id]: e.target.value }))}
-                  />
-                  <button type="button" data-testid="verify-fix" disabled={disabled} onClick={() => props.onFix(c.id, fixText[c.id] ?? "")}>
-                    고쳐 달라고 하기
-                  </button>
-                </div>
-              )}
+          {view.report.criteria.map((c) => resultRow(c, view.report?.artifact_version_id === view.version, "verify-result"))}
+          {view.held.length > 0 && (
+            <div className="hps-verify-held" data-testid="verify-held">
+              <div className="hps-verify-label">이 버전의 앞선 테스트에서 통과하지 못한 조건 — 파일을 고친 뒤 다시 테스트해야 해요</div>
+              {view.held.map((c) => resultRow(c, true, "verify-held-result"))}
             </div>
-          ))}
+          )}
           <button type="button" data-testid="verify-retest" disabled={disabled} onClick={props.onRetest}>
             같은 조건으로 다시 테스트
           </button>

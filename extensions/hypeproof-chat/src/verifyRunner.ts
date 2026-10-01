@@ -18,6 +18,7 @@
 import { checkAgentOrigin, failuresOf, type CrToolResult, type Observation } from "./experimentBrowser.ts";
 import { AX_SNAPSHOT_MAX_LINES } from "./browserControlHelpers.ts";
 import {
+  SNAPSHOT_TRUNCATED,
   elementRef,
   evaluate,
   finalizeVerdict,
@@ -69,6 +70,8 @@ const ACTION_TOOL: Record<PlanStep["action"], string> = {
 /** The reason a run whose files changed while it ran is not verified. */
 export const VERSION_CHANGED = "테스트하는 동안 파일이 바뀌어서 판정하지 않았어요. 다시 테스트해 주세요.";
 
+/** Did the snapshot stop at its line cap (so lines past it were never read)? */
+const isTruncated = (snapshot: string) => snapshot.split("\n").length >= AX_SNAPSHOT_MAX_LINES;
 const textOf = (r: CrToolResult) => r.content.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("\n");
 const notVerified = (steps: StepLog[], reason: string, artifact: Observation["artifact"] | null = null, observation: Observation | null = null): RunOutcome => ({
   verdict: finalizeVerdict({ status: "not_verified", method: "dom", steps, cites: [], expectations: [], runtime_errors: [], network_errors: [], screenshot: null, viewport: observation?.viewport ?? null, reason }),
@@ -96,8 +99,12 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
     const seen = new Set<string>();
     const errors: ErrorRecord[] = [];
     const runnerStep = new Map<number, number>();
+    // A document whose event log dropped records past its cap, or began after it loaded, may
+    // have had an error the run never read (CR-15): carried into the verdict, never ignored.
+    let recordsIncomplete = false;
     const collect = (o: Observation, index: number) => {
       if (typeof o.step === "number") runnerStep.set(o.step, index);
+      if (o.droppedRecords > 0 || o.recordsPartial) recordsIncomplete = true;
       for (const f of failuresOf(o.records)) {
         const key = `${o.documentGeneration}|${f.kind}|${f.step}|${f.message}`;
         if (seen.has(key)) continue;
@@ -115,6 +122,12 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
         target = `${step.target.role} "${step.target.name}"`;
         const ref = elementRef(last.snapshot, step.target.role, step.target.name);
         if (!ref) {
+          // A snapshot cut at its line cap was never read past the cut: the element may be
+          // there, so this is not an observed failure (CR-15).
+          if (isTruncated(last.snapshot)) {
+            steps.push({ index, action: step.action, target, ok: false, message: `${target}을(를) 읽은 화면 안에서 찾지 못했어요 (${SNAPSHOT_TRUNCATED})`, route: last.route });
+            return notVerified(steps, SNAPSHOT_TRUNCATED, artifact, last);
+          }
           // The element the plan needs is not on the page: an observed failure of this step.
           steps.push({ index, action: step.action, target, ok: false, message: `${target}을(를) 화면에서 찾지 못했어요`, route: last.route });
           break;
@@ -166,7 +179,8 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
         screenshot,
         viewport: last.viewport,
         // The snapshot stops at its line cap; text past it was never read (CR-15).
-        truncated: last.snapshot.split("\n").length >= AX_SNAPSHOT_MAX_LINES,
+        truncated: isTruncated(last.snapshot),
+        recordsIncomplete,
       },
       plan.expect,
       steps,

@@ -17,7 +17,7 @@ const V0 = `sha256:${"a".repeat(64)}`;
 const V1 = `sha256:${"b".repeat(64)}`;
 const crit = (id, text, status, extra = {}) => ({ id, text, status, method: "dom", reproducible: status !== "non_reproducible", steps: [{ index: 0, action: "navigate", ok: true, message: "이동 완료" }], cites: [{ step: 0, kind: "snapshot", detail: "heading: 주문이 완료되었어요" }], expectations: [], errors: [], result_ref: `r-${id}`, test_ref: `t-${id}`, test_kind: "test_observed", ...extra });
 const report = (version, criteria) => ({ format: "hps-verification/1", run_id: "run-1", artifact_version_id: version, tested_at: new Date(0).toISOString(), viewport: { width: 800, height: 600 }, criteria, runtime_errors: [], network_errors: [], screenshots: [], steps: [] });
-const view = (over = {}) => ({ available: true, reason: null, version: V0, verification: { state: "not_verified", open: [] }, report: null, run: null, proposals: [], running: false, notice: null, ...over });
+const view = (over = {}) => ({ available: true, reason: null, version: V0, verification: { state: "not_verified", open: [] }, report: null, held: [], run: null, proposals: [], running: false, notice: null, ...over });
 const props = (v, extra = {}) => ({ view: v, error: null, busy: false, onStart() {}, onRetest() {}, onFix() {}, onClose() {}, ...extra });
 const render = async (v, extra) => {
   const html = await renderComponent("VerifyPanel", props(v, extra));
@@ -54,6 +54,22 @@ const ok = (n) => { passed++; console.log(`✓ ${n}`); };
   assert.match(text, /실패 완료 화면이 보인다/);
   assert.equal((html.match(/data-testid="verify-fix"/g) ?? []).length, 1, "a fix request control on the failed criterion only");
   ok("CR-T76 UI positive: a report with a fail shows the fail and offers a fix request for that criterion");
+}
+{
+  // An earlier run on this version failed the same words with another plan; the latest
+  // report passes. The failing result is drawn with its fix action (CR-81, CR-16).
+  const latest = report(V0, [crit("b1", "주문하면 완료 화면이 보인다", "pass")]);
+  const heldFail = crit("a1", "주문하면 완료 화면이 보인다", "fail");
+  const v = view({ verification: { state: "failed", run_id: "run-1", open: [{ id: "a1", text: "주문하면 완료 화면이 보인다", status: "fail", run_id: "run-0" }] }, report: latest, held: [heldFail] });
+  const { html, text } = await render(v);
+  assert.match(html, /data-testid="verify-held"/);
+  assert.match(html, /data-testid="verify-held-result" data-status="fail" data-criterion="a1"/);
+  assert.match(text, /이 버전의 앞선 테스트에서 통과하지 못한 조건/);
+  assert.equal((html.match(/data-testid="verify-fix"/g) ?? []).length, 1, "the held fail offers the fix request");
+  // Control: the same report with nothing held shows no fail row and no fix action.
+  const bare = await render(view({ verification: { state: "verified", run_id: "run-1", open: [] }, report: latest }));
+  assert.doesNotMatch(bare.html, /verify-held|data-status="fail"|verify-fix"/);
+  ok("CR-T76 UI positive: an earlier fail on this version that the latest report does not hold is shown with its fix request");
 }
 {
   for (const [label, v] of [

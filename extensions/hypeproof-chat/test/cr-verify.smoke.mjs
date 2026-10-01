@@ -407,7 +407,7 @@ await test("CR-T76 (CR-81 lifecycle): a run closes when every criterion has a ve
   const [c1, c2] = s.session.activeRun.criteria;
   assert.match((await s.session.runTool({ criterion_id: c2.id, plan: PLAN(PLAN_ORDER) })).text, /^\[실패\]/);
   // Shopping for a pass with a weaker plan, in the same run.
-  const again = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) });
+  const again = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [{ action: "reload" }], expect: [{ kind: "no_errors" }] }) });
   assert.equal(again.isError, true);
   assert.match(again.text, /이미 판정했어요/);
   await s.session.runTool({ criterion_id: c1.id, plan: PLAN(PLAN_START) });
@@ -416,7 +416,7 @@ await test("CR-T76 (CR-81 lifecycle): a run closes when every criterion has a ve
   await s.session.fix(c2.id, "완료 화면이 나오게 고쳐 주세요");
   s.version.current = vid("b");
   const before = s.recorder.batch.events.length;
-  const self = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) });
+  const self = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [{ action: "reload" }], expect: [{ kind: "no_errors" }] }) });
   assert.equal(self.isError, true);
   assert.equal(s.recorder.batch.events.length, before);
   assert.equal(gates({ events: valid(s.recorder).events }).verification.state === "confirmed", false);
@@ -563,7 +563,7 @@ await test("CR-T14 + CR-T76 (CR-81 lifecycle): parallel coach calls never share 
   const t = seat();
   await t.session.start([{ text: "완료 화면이 보인다" }]);
   const [c] = t.session.activeRun.criteria;
-  const [first, second] = await Promise.all([t.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_ORDER) }), t.session.runTool({ criterion_id: c.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) })]);
+  const [first, second] = await Promise.all([t.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_ORDER) }), t.session.runTool({ criterion_id: c.id, plan: PLAN({ steps: [{ action: "reload" }], expect: [{ kind: "no_errors" }] }) })]);
   assert.match(first.text, /^\[통과\]/);
   assert.equal(second.isError, true);
   assert.match(second.text, /이미 끝났어요|이미 판정했어요/);
@@ -643,7 +643,7 @@ await test("a fix request during a re-test is refused; a criterion stays not don
   assert.equal(valid(u.recorder).events.filter((x) => x.kind === "test_observed").length, 0);
   assert.equal(u.recorder.batch.incomplete, undefined);
   assert.ok(u.session.activeRun?.criteria.some((x) => x.id === e.id), "the run is still open for the criterion");
-  assert.match((await u.session.runTool({ criterion_id: e.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) })).text, /^\[통과\]/, "control: a plan whose result reads back is recorded");
+  assert.match((await u.session.runTool({ criterion_id: e.id, plan: PLAN({ steps: [{ action: "reload" }], expect: [{ kind: "no_errors" }] }) })).text, /^\[통과\]/, "control: a plan whose result reads back is recorded");
 });
 
 await test("a long result fits under the recorder's text cap and the record stays complete", async () => {
@@ -694,6 +694,173 @@ await test("CR-T15: a snapshot cut at its line cap leaves an absent or missing t
   assert.equal((await runCriterionPlan(executorFor(kiosk()).ex, { steps: [], expect: [{ kind: "text", text: "주문 오류", absent: true }] }, { startUrl: START, allowedOrigins: () => [ORIGIN] })).verdict.status, "pass");
 });
 
+// ── review round 3 (#1392): truncated targets, dropped records, held results, vacuous plans ──
+
+await test("CR-T15: a step target past the snapshot's line cap is not verified, never fail", async () => {
+  const many = Array.from({ length: 205 }, (_, i) => ({ key: `h${i}`, role: "heading", name: `메뉴 ${i}`, tag: "h3" }));
+  const page = makeFakePage({
+    elements: [...many, { key: "pay", role: "button", name: "주문하기", tag: "button", id: "pay" }],
+    onClick: (p, key) => {
+      if (key === "pay") p.state.elements = [{ key: "done", role: "heading", name: "주문이 완료되었어요", tag: "h2" }];
+    },
+  });
+  const plan = { steps: [{ action: "click", target: { role: "button", name: "주문하기" } }], expect: [{ kind: "text", text: "주문이 완료되었어요" }] };
+  const out = await runCriterionPlan(executorFor(page).ex, plan, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(out.verdict.status, "not_verified", JSON.stringify(out.verdict.steps));
+  assert.match(out.verdict.reason, /앞부분만 읽었어요/);
+  // Control: a short page without the button is an observed failure of the step.
+  const short = await runCriterionPlan(executorFor(kiosk()).ex, plan, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(short.verdict.status, "fail", JSON.stringify(short.verdict.steps));
+});
+
+await test("CR-T15/CR-81: no_errors on a page whose event log dropped records is not verified, never pass", async () => {
+  const noisy = (logs) => makeFakePage({
+    elements: [{ key: "pay", role: "button", name: "주문하기", tag: "button", id: "pay" }],
+    onLoad: (p) => {
+      for (let i = 0; i < logs; i++) p.consoleLog(`log ${i}`);
+    },
+    onClick: (p, key) => {
+      if (key === "pay") {
+        p.consoleError("결제 처리 중 오류");
+        p.state.elements = [{ key: "done", role: "heading", name: "주문이 완료되었어요", tag: "h2" }];
+      }
+    },
+  });
+  const click = [{ action: "click", target: { role: "button", name: "주문하기" } }];
+  const opts = { startUrl: START, allowedOrigins: () => [ORIGIN] };
+  const dropped = await runCriterionPlan(executorFor(noisy(100)).ex, { steps: click, expect: [{ kind: "no_errors" }] }, opts);
+  assert.equal(dropped.verdict.status, "not_verified", JSON.stringify(dropped.verdict.expectations));
+  assert.equal(dropped.verdict.expectations[0].ok, null);
+  // Without a no_errors expectation, the unread error could have been a warning: not a pass.
+  const quiet = await runCriterionPlan(executorFor(noisy(100)).ex, { steps: click, expect: [{ kind: "text", text: "주문이 완료되었어요" }] }, opts);
+  assert.equal(quiet.verdict.status, "not_verified", JSON.stringify(quiet.verdict));
+  assert.match(quiet.verdict.reason, /일부를 읽지 못했어요/);
+  // Controls: with 10 logs the error is read: no_errors fails and the other plan warns.
+  assert.equal((await runCriterionPlan(executorFor(noisy(10)).ex, { steps: click, expect: [{ kind: "no_errors" }] }, opts)).verdict.status, "fail");
+  assert.equal((await runCriterionPlan(executorFor(noisy(10)).ex, { steps: click, expect: [{ kind: "text", text: "주문이 완료되었어요" }] }, opts)).verdict.status, "warning");
+});
+
+await test("CR-81, CR-16: an earlier fail on this version that a later run with the same words passed is shown with its fix action and re-tested", async () => {
+  const s = seat({ page: kiosk({ noDone: true }) });
+  const X = "주문하면 완료 화면이 보인다";
+  await s.session.start([{ text: X }]);
+  const [a] = s.session.activeRun.criteria;
+  await s.session.runTool({ criterion_id: a.id, plan: PLAN(PLAN_ORDER) });
+  s.session.endTurn();
+  await s.session.start([{ text: X }]);
+  const [b] = s.session.activeRun.criteria;
+  await s.session.runTool({ criterion_id: b.id, plan: PLAN(PLAN_START) });
+  const view = await s.session.view();
+  assert.deepEqual(view.report.criteria.map((c) => [c.id, c.status]), [[b.id, "pass"]], "the latest report alone passes");
+  assert.equal(view.verification.state, "failed");
+  assert.deepEqual(view.held.map((c) => [c.id, c.status, !!c.test_ref]), [[a.id, "fail", true]], "the failing result is in the view, with its own row");
+  // The held row is usable as a fix request.
+  const fixed = await s.session.fix(a.id, "완료 화면이 나오게 해 주세요");
+  assert.equal(fixed.ok, true, JSON.stringify(fixed));
+  // A re-test runs the held criterion with its own (failing) plan, not the lenient one.
+  const r = await s.session.retest();
+  const again = (await s.session.view()).report;
+  assert.equal(again.run_id, r.run_id);
+  assert.deepEqual(again.criteria.map((c) => [c.id, c.status]), [[a.id, "fail"]]);
+  // Control: with no earlier fail nothing is held.
+  const t = seat();
+  await t.session.start([{ text: X }]);
+  await t.session.runTool({ criterion_id: t.session.activeRun.criteria[0].id, plan: PLAN(PLAN_ORDER) });
+  const tv = await t.session.view();
+  assert.equal(tv.verification.state, "verified");
+  assert.deepEqual(tv.held, []);
+});
+
+await test("CR-T76 negative: a later start with fewer criteria never hides an earlier warning or not-verified result", async () => {
+  const BEGIN = [{ key: "begin", role: "button", name: "주문 시작", tag: "button", id: "begin" }];
+  const warnPage = () => makeFakePage({
+    elements: [...BEGIN],
+    onLoad: (p) => {
+      p.state.elements = [...BEGIN];
+    },
+    onClick: (p, key) => {
+      if (key === "begin") {
+        p.consoleError("메뉴를 불러오지 못했어요");
+        p.state.elements = [{ key: "drink", role: "combobox", name: "음료 고르기", tag: "select", options: [{ value: "tea", text: "아이스티" }] }];
+      }
+    },
+  });
+  const A = "제목이 보인다";
+  const B = "주문 시작을 누르면 음료 고르기가 보인다";
+  const PLAN_A = { steps: [{ action: "reload" }], expect: [{ kind: "element", role: "button", name: "주문 시작" }] };
+  for (const [label, planB, expected] of [
+    ["warning", PLAN_START, "warning"],
+    ["not_verified", { ...PLAN_START, expect: [{ kind: "visual", question: "메뉴가 잘 보이나요?" }] }, "not_verified"],
+  ]) {
+    const s = seat({ page: warnPage() });
+    await s.session.start([{ text: A }, { text: B }]);
+    const [a, b] = s.session.activeRun.criteria;
+    await s.session.runTool({ criterion_id: a.id, plan: PLAN(PLAN_A) });
+    await s.session.runTool({ criterion_id: b.id, plan: PLAN(planB) });
+    assert.equal((await s.session.view()).verification.state, "incomplete", label);
+    await s.session.start([{ text: A }]);
+    await s.session.runTool({ criterion_id: s.session.activeRun.criteria[0].id, plan: PLAN(PLAN_A) });
+    const v = await s.session.view();
+    assert.equal(v.verification.state, "incomplete", `${label}: the shorter start does not verify the version`);
+    assert.deepEqual(v.verification.open.map((o) => [o.text, o.status]), [[B, expected]], label);
+    // The re-test keeps the held criterion in the set.
+    await s.session.retest();
+    const rv = await s.session.view();
+    assert.ok(rv.report.criteria.some((c) => c.id === b.id), `${label}: the re-test re-ran the held criterion`);
+    assert.notEqual(rv.verification.state, "verified", label);
+  }
+  // Control: a later report that passes the same words clears an earlier not-verified result.
+  const t = seat();
+  await t.session.start([{ text: B }]);
+  await t.session.runTool({ criterion_id: t.session.activeRun.criteria[0].id, plan: PLAN({ ...PLAN_START, expect: [{ kind: "visual", question: "잘 보이나요?" }] }) });
+  await t.session.start([{ text: B }]);
+  await t.session.runTool({ criterion_id: t.session.activeRun.criteria[0].id, plan: PLAN(PLAN_START) });
+  assert.equal((await t.session.view()).verification.state, "verified", "a later pass of the same words clears a not-verified result");
+});
+
+await test("a plan with no steps that only expects an absence is refused (plan_untestable); a step or a positive expectation is accepted", async () => {
+  const s = seat({ page: kiosk({ noDone: true }) });
+  await s.session.start([{ text: "주문하기를 누르면 주문 완료 화면이 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  const before = s.recorder.batch.events.length;
+  for (const expect of [[{ kind: "no_errors" }], [{ kind: "text", text: "오류", absent: true }, { kind: "no_errors" }], [{ kind: "element", role: "button", name: "x", absent: true }]]) {
+    const r = await s.session.runTool({ criterion_id: c.id, plan: PLAN({ steps: [], expect }) });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /plan_untestable/);
+  }
+  assert.equal(s.recorder.batch.events.length, before, "nothing recorded");
+  // Controls: a zero-step plan with a positive expectation, and a plan with a step, are taken.
+  const { parsePlan } = await import("../../../worker/src/lib/measurement-core/verification.ts");
+  assert.equal(parsePlan({ steps: [], expect: [{ kind: "element", role: "button", name: "주문 시작" }] }).ok, true);
+  assert.equal(parsePlan({ steps: [{ action: "reload" }], expect: [{ kind: "no_errors" }] }).ok, true);
+});
+
+await test("a text expectation matches from a word start: '완료' does not match '미완료'", async () => {
+  const page = (name) => makeFakePage({ elements: [{ key: "h", role: "heading", name, tag: "h2" }] });
+  const plan = { steps: [], expect: [{ kind: "text", text: "완료" }] };
+  const opts = { startUrl: START, allowedOrigins: () => [ORIGIN] };
+  assert.equal((await runCriterionPlan(executorFor(page("주문이 아직 미완료 상태예요")).ex, plan, opts)).verdict.status, "fail");
+  assert.equal((await runCriterionPlan(executorFor(page("incomplete")).ex, { steps: [], expect: [{ kind: "text", text: "complete" }] }, opts)).verdict.status, "fail");
+  // Controls: a word start, with a Korean ending attached, and after punctuation.
+  for (const name of ["주문 완료되었어요", "완료", "(완료)"]) assert.equal((await runCriterionPlan(executorFor(page(name)).ex, plan, opts)).verdict.status, "pass", name);
+});
+
+await test("a re-test holds its recorder until it ends and then lets it go (host release)", async () => {
+  const mode = { noDone: true };
+  const s = seat({ page: kiosk(mode) });
+  await s.session.start([{ text: "완료 화면이 보인다" }]);
+  await s.session.runTool({ criterion_id: s.session.activeRun.criteria[0].id, plan: PLAN(PLAN_ORDER) });
+  let released = 0;
+  const ports = Reflect.get(s.session, "ports");
+  ports.release = () => released++;
+  assert.equal(s.session.retestActive, false);
+  const pending = s.session.retest();
+  assert.equal(s.session.retestActive, true, "held from the click");
+  await pending;
+  assert.equal(s.session.retestActive, false);
+  assert.equal(released, 1, "released once at the end");
+});
+
 // ── the host wiring the session relies on (chatPanelProvider.ts, ChatPanel) ──
 
 const providerSrc = readFileSync(new URL("../src/chatPanelProvider.ts", import.meta.url), "utf8");
@@ -706,7 +873,11 @@ const WIRING = {
   verifyWhileTurn: /if \(this\.pendingSends > 0 \|\| this\.activeStreams\.size > 0\) return this\.postVerifyState\(\{ error: refusalText\("turn_running"\) \}\);\s*if \(msg\.type === "verifyStart"\)/,
   // The coach's verify calls write to the turn's own recorder.
   turnRecorder: /const observation = await this\.prepareObservation\(proxyUrl, token, profile\);\s*\/\/[^\n]*\n\s*this\.verifyTurnRecorder = observation\?\.batch\.format === 'hps-observation\/2' \? observation : null;/,
-  turnRecorderFirst: /const recorder = this\.verifyTurnRecorder \?\? /,
+  turnRecorderFirst: /const recorder = \(retest \? this\.verifyRunRecorder : null\) \?\? this\.verifyTurnRecorder \?\? /,
+  // A re-test holds its recorder; every other writer gets the same one until it ends (no lost writes).
+  retestHeld: /await this\.observationWrites;\s*(?:\/\/[^\n]*\n\s*)*if \(this\.verifyRunRecorder && this\.verifySession\.retestActive\) return \(this\.nativeObservation = this\.verifyRunRecorder\);/,
+  retestHolds: /if \(retest\) this\.verifyRunRecorder = recorder;/,
+  retestRelease: /release: \(\) => \{ this\.verifyRunRecorder = null; \}/,
 };
 const wiringProblems = (src) => Object.entries(WIRING).filter(([, re]) => !re.test(src)).map(([k]) => k);
 
@@ -718,7 +889,10 @@ await test("host wiring: the turn's end closes the run, sends and verify actions
     sendWhileRunning: providerSrc.replace("if (this.verifySession?.running) {", "if (false) {"),
     verifyWhileTurn: providerSrc.replace('if (this.pendingSends > 0 || this.activeStreams.size > 0) return this.postVerifyState({ error: refusalText("turn_running") });', ""),
     turnRecorder: providerSrc.replace("this.verifyTurnRecorder = observation?.batch.format", "void observation?.batch.format"),
-    turnRecorderFirst: providerSrc.replace("const recorder = this.verifyTurnRecorder ?? ", "const recorder = "),
+    turnRecorderFirst: providerSrc.replace("const recorder = (retest ? this.verifyRunRecorder : null) ?? this.verifyTurnRecorder ?? ", "const recorder = "),
+    retestHeld: providerSrc.replace("if (this.verifyRunRecorder && this.verifySession.retestActive) return (this.nativeObservation = this.verifyRunRecorder);", ""),
+    retestHolds: providerSrc.replace("if (retest) this.verifyRunRecorder = recorder;", ""),
+    retestRelease: providerSrc.replace("release: () => { this.verifyRunRecorder = null; },", ""),
   };
   for (const [name, src] of Object.entries(planted)) {
     assert.notEqual(src, providerSrc, `${name}: the plant changed the source`);

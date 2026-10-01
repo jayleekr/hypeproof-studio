@@ -275,6 +275,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
     await this.observationWrites;
+    // A re-test runs outside any turn and writes and persists its recorder for seconds. A new
+    // recorder built from the saved batch now would be persisted over by the re-test, or
+    // persist over it: whole snapshots, last write wins. Every writer shares the re-test's
+    // recorder until it ends.
+    if (this.verifyRunRecorder && this.verifySession.retestActive) return (this.nativeObservation = this.verifyRunRecorder);
     this.nativeObservation = null;
     // P1 — both `/1` and `/2` are accepted. Which one is used is the profile's call
     // (design §관측 이벤트와 필드: "the profile's observation.format decides which one is used").
@@ -567,6 +572,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
     // CR-68, chat-panel half: the panel shows the run while it acts on the page.
     onRun: () => void this.postVerifyState(),
+    release: () => { this.verifyRunRecorder = null; },
   });
 
   /**
@@ -576,6 +582,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * so verdicts written anywhere else during the turn would be overwritten.
    */
   private verifyTurnRecorder: NativeObservationRecorder | null = null;
+  /**
+   * The recorder a re-test writes to, held from its first recorder call until it ends
+   * (`release`). Meanwhile `prepareObservation` hands this one out instead of building
+   * another, so a drawer write during a re-test lands on the same record.
+   */
+  private verifyRunRecorder: NativeObservationRecorder | null = null;
 
   /**
    * The record a verify action writes to. Inside a turn this is the turn's own recorder
@@ -583,8 +595,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * outside a turn it is prepared from the saved batch. Learning events need `/2`.
    */
   private async verifyRecorder(): Promise<VerifyRecorderPort | null> {
-    const recorder = this.verifyTurnRecorder ?? (this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder());
+    // During a re-test every verify action (the panel's view included) uses the re-test's
+    // recorder; outside one, nothing is held.
+    const retest = this.verifySession.retestActive;
+    if (!retest) this.verifyRunRecorder = null;
+    const recorder = (retest ? this.verifyRunRecorder : null) ?? this.verifyTurnRecorder ?? (this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder());
     if (!recorder) return null;
+    if (retest) this.verifyRunRecorder = recorder;
     const profile = await this.ensureProfile();
     const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
     const context = verifyContext({
