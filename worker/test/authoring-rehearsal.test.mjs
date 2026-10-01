@@ -54,6 +54,22 @@ await check('judge — negative controls: each disagreement fails with its own r
   assert.equal(R.parseReport({ ...report(CURRICULUM_A), steps: [{ id: 'a', visited: true, help_offered: ['everything'], help_default: null, surface: 'chat' }] }), 'invalid help_offered');
   assert.deepEqual(R.requestToolNames({ tools: [{ name: 'Read' }, { name: 'Read' }, { type: 'web_search_20250305' }, { function: { name: 'x' } }] }), ['Read', 'web_search_20250305', 'x']);
 });
+await check('judge — mixed runtimes: every completed agent-sdk turn is read; a proxy first turn does not make the boundary server-enforced', async () => {
+  const j = (content, turns) => R.judgeRehearsal({ content, lessonSha: 'a', profile, report: report(content), turns });
+  // Positive control: proxy only → the Service enforced tools itself.
+  const p = j(CURRICULUM_A, [turn('a', { runtime: 'proxy', tool_names: [] })]);
+  assert.deepEqual([p.verdict, p.checks.tools.runtime, p.checks.tools.boundary], ['passed', 'proxy', 'server_enforced']);
+  // Negative control: the same agent-sdk turn alone fails …
+  const sdkOnly = j(CURRICULUM_A, [turn('a', { tool_names: ['Read', 'Write'] })]);
+  assert.deepEqual([sdkOnly.verdict, sdkOnly.reasons], ['failed', ['tool_boundary_crossed']]);
+  // … and must still fail when a proxy turn came first (#1247 review): the first turn's runtime cannot vouch for the rest.
+  const mixed = j(CURRICULUM_A, [turn('a', { runtime: 'proxy', tool_names: [] }), turn('a', { tool_names: ['Read', 'Write'] })]);
+  assert.deepEqual([mixed.verdict, mixed.reasons, mixed.checks.tools.runtime, mixed.checks.tools.boundary], ['failed', ['tool_boundary_crossed'], 'mixed', 'violated'], JSON.stringify(mixed.checks.tools));
+  const clean = j(CURRICULUM_A, [turn('a', { runtime: 'proxy', tool_names: [] }), turn('a')]);
+  assert.deepEqual([clean.verdict, clean.checks.tools.runtime, clean.checks.tools.boundary], ['passed', 'mixed', 'held'], 'mixed but clean SDK turns are judged, not waved through');
+  const missing = R.judgeRehearsal({ content: CURRICULUM_B, lessonSha: 'b', profile, report: report(CURRICULUM_B), turns: [turn('b', { step_id: 'revise', runtime: 'proxy', tool_names: [] }), turn('b', { step_id: 'revise' })] });
+  assert.deepEqual([missing.verdict, missing.reasons], ['failed', ['allowed_tool_missing']], 'a write lesson whose SDK turns carried no write tool');
+});
 await check('state — issued is running (never ready), expiry is its own state, a pass on another policy is stale', async () => {
   const row = { verdict: null, expires_at: 10, policy_digest: 'p' };
   assert.equal(R.rehearsalState(null, { now: 0, currentDigest: 'p' }), 'not_run');
@@ -134,6 +150,16 @@ try {
     f.db.prepare('UPDATE authoring_rehearsals SET expires_at=1 WHERE rehearsal_id=?').run(z.json.rehearsal_id);
     assert.equal((await readiness(VB2)).state, 'expired');
     assert.deepEqual(await send(z.json.token, report(CURRICULUM_B)).then((r) => [r.status, r.json.reason]), [410, 'rehearsal_expired']);
+  });
+
+  await check('retry of an expired rehearsal: 410 rehearsal_expired and no token; a live one is re-signed with time left', async () => {
+    const id = KEY(), first = await rehearse(VB2, 'rehearsal-t1', id); assert.equal(first.status, 200, first.raw);
+    const live = await rehearse(VB2, 'rehearsal-t1', id); assert.equal(live.status, 200, live.raw); // positive control
+    const { verify } = await import('../src/lib/tokens.ts');
+    assert.ok((await verify(live.json.token, TEST_SECRET)).exp > Date.now() / 1000, 'a retried live code is usable');
+    f.db.prepare('UPDATE authoring_rehearsals SET expires_at=? WHERE rehearsal_id=?').run(Date.now() - 1, first.json.rehearsal_id);
+    const dead = await rehearse(VB2, 'rehearsal-t1', id);
+    assert.deepEqual([dead.status, dead.json.reason, dead.json.token], [410, 'rehearsal_expired', undefined], dead.raw);
   });
 
   await check('authority: only the course owner issues; the learner must be on the roster of an open session; ordinary codes cannot report', async () => {
