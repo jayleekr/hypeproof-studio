@@ -10,14 +10,18 @@
 // It proves transport, enforcement and the browser behaviour, never a real model's
 // judgement. Nothing here reaches production; no key is used.
 //
-//   node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs <port> <token-file> <on|off>
+//   node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs <port> <token-file> <on|off> [publish]
+//
+// `publish` (cr-publish #1393): the Service also gets SQLite D1 (schema.sql), an in-memory R2
+// and HPS_TEST_ORIGIN = http://{project}.test.invalid:<port>, so the App can publish a test
+// version and a request whose Host is a test origin reaches the published runtime.
 //
 // Control routes (the spec only): GET /__cr/state · POST /__cr/reset.
 import "../../worker/test/harness/loader.mjs";
 import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 
-const [portArg, tokenFile, switchArg] = process.argv.slice(2);
+const [portArg, tokenFile, switchArg, modeArg] = process.argv.slice(2);
 const { bootApp, createMockEnv, makeCtx, TEST_SECRET } = await import("../../worker/test/harness/index.mjs");
 const { getProfile } = await import("../../worker/src/profiles/index.ts");
 const { issue } = await import("../../worker/src/lib/tokens.ts");
@@ -35,6 +39,18 @@ const env = createMockEnv({
   environment: "development",
   env: { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "synthetic-no-live-key", OPENAI_API_KEY: undefined, ANTHROPIC_PROXY_URL: undefined },
 });
+if (modeArg === "publish") {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { readFileSync } = await import("node:fs");
+  const { sqliteBinding, memoryR2 } = await import("../../worker/test/harness/curriculum.mjs");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys=ON");
+  db.exec(readFileSync(new URL("../../worker/schema.sql", import.meta.url), "utf8"));
+  // The rows usage accounting references (as the classroom-ops fixture mirrors them), so a turn's usage row is not refused.
+  db.prepare("INSERT OR IGNORE INTO cohorts(id, display_name) VALUES(?, ?)").run(cohort, cohort);
+  db.prepare("INSERT OR IGNORE INTO sessions(id, cohort_id, profile_id, starts_at, ends_at) VALUES(?, ?, ?, ?, ?)").run("cr-app-session", cohort, profile.id, new Date(Date.now() - 60_000).toISOString(), new Date(Date.now() + 6 * 3600_000).toISOString());
+  Object.assign(env, { HPS_DB: sqliteBinding(db), HPS_TRACES: memoryR2(), HPS_TEST_ORIGIN: process.env.HPS_TEST_ORIGIN || `http://{project}.test.invalid:${portArg}` });
+}
 const now = Date.now();
 await env.HPS_KV.put(`cohort:${cohort}:active_session`, JSON.stringify({ session_id: "cr-app-session", profile_id: profile.id, starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now + 6 * 3600_000).toISOString() }));
 await env.HPS_KV.put(`cohort:${cohort}:roster`, JSON.stringify({ users: ["cr-adult-a"] }));
@@ -233,7 +249,11 @@ const server = createServer(async (req, res) => {
     const parts = [];
     for await (const p of req) parts.push(p);
     const body = Buffer.concat(parts);
-    const r = await app.fetch(new Request(`http://127.0.0.1:${portArg}${req.url}`, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), env, makeCtx());
+    // A test origin (cr-publish: `*.test.invalid`, or an ngrok host given as HPS_TEST_ORIGIN for a
+    // phone) keeps its own Host so the Service dispatches it as one; everything else is this Service.
+    const h = req.headers.host ?? "";
+    const host = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || !h ? `127.0.0.1:${portArg}` : h;
+    const r = await app.fetch(new Request(`http://${host}${req.url}`, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), env, makeCtx());
     res.writeHead(r.status, Object.fromEntries(r.headers));
     if (r.body) for await (const chunk of r.body) res.write(Buffer.from(chunk));
     res.end();

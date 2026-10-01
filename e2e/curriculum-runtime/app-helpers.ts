@@ -25,9 +25,10 @@ export function screenLocked(): boolean | null {
 
 export class Service {
   private proc!: ChildProcess;
-  async start(on: boolean): Promise<void> {
+  /** `mode: "publish"` adds the Publish for User Test storage and test origin (cr-publish). */
+  async start(on: boolean, mode?: "publish"): Promise<void> {
     fs.mkdirSync(path.dirname(process.env.HPS_E2E_TOKEN_FILE!), { recursive: true });
-    this.proc = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", "--no-warnings", path.join(here, "app-service.mjs"), String(PORT), process.env.HPS_E2E_TOKEN_FILE!, on ? "on" : "off"], { cwd: repo, stdio: ["ignore", "pipe", "inherit"] });
+    this.proc = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", "--no-warnings", path.join(here, "app-service.mjs"), String(PORT), process.env.HPS_E2E_TOKEN_FILE!, on ? "on" : "off", ...(mode ? [mode] : [])], { cwd: repo, stdio: ["ignore", "pipe", "inherit"] });
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("service did not start")), 30_000);
       this.proc.stdout!.on("data", (d) => { if (/READY/.test(String(d))) { clearTimeout(t); resolve(); } });
