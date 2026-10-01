@@ -17,6 +17,11 @@
 //   CR-T76 (session)  the panel says verified only for an all-pass report of the current
 //                     version; a coach message changes nothing
 //   CR-T03 (verify)   the verify tool answer is the same through both runtimes' adapters
+//   CR-T15 (session)  a judgment the coach writes into a plan never decides a verdict
+//   CR-T81 (session)  a re-test keeps every criterion of the run; a run closes when done,
+//                     when its turn ends or when the files change; a verdict is bound to
+//                     the entry page's version even when the run ends on another page;
+//                     runs on the one tab never interleave
 //
 // Run: node --experimental-strip-types test/cr-verify.smoke.mjs
 
@@ -78,11 +83,11 @@ function kiosk(mode = {}) {
   return page;
 }
 
-function executorFor(page, version = { current: vid("a") }) {
+function executorFor(page, version = { current: vid("a") }, artifactVersion = null) {
   const indicator = [];
   const ex = new CrExecutor(fakePort(page), {
     allowedOrigins: () => [ORIGIN],
-    artifactVersion: async () => ({ id: version.current, entry: "index.html", files: [{ path: "index.html", sha256: version.current.slice(7), bytes: 10 }] }),
+    artifactVersion: artifactVersion ?? (async () => ({ id: version.current, entry: "index.html", files: [{ path: "index.html", sha256: version.current.slice(7), bytes: 10 }] })),
     onIndicator: (visible, tool) => indicator.push({ visible, tool }),
     settleMs: 0,
     sleep: (ms) => tick(Math.min(ms, 5)),
@@ -174,12 +179,12 @@ await test("CR-T63 negative: a runner step with no visible indicator is caught",
 
 // ── the session over a real recorder ────────────────────────────────────────
 
-function seat({ page = kiosk(), version = { current: vid("a") }, on = { value: true }, preview = START } = {}) {
+function seat({ page = kiosk(), version = { current: vid("a") }, on = { value: true }, preview = START, artifactVersion = null, storeScreenshot = null } = {}) {
   const recorder = new NativeObservationRecorder({ format: "hps-observation/2", scope: "synthetic-cr-verify", session: "s1", program: "p1" });
   const task = "task-1";
   const context = verifyContext({ task });
   let persisted = 0;
-  const { ex, indicator } = executorFor(page, version);
+  const { ex, indicator } = executorFor(page, version, artifactVersion);
   const runs = [];
   const port = {
     events: () => recorder.batch.events,
@@ -197,6 +202,7 @@ function seat({ page = kiosk(), version = { current: vid("a") }, on = { value: t
       executor: () => ex,
       currentVersion: async () => version.current,
       onRun: (r) => runs.push(r),
+      ...(storeScreenshot ? { storeScreenshot } : {}),
       now: () => 1_700_000_000_000 + n,
     },
     () => `id-${++n}`,
@@ -332,6 +338,13 @@ await test("CR-T76 negative: a run the coach did not finish is not verified (an 
   assert.deepEqual(view.report.criteria.map((c) => [c.id, c.status]), [[c1.id, "pass"], [c2.id, "not_verified"]]);
   assert.equal(view.verification.state, "incomplete");
   assert.deepEqual(await s.session.fix(c2.id, "고쳐 주세요"), { ok: false, code: "criterion_not_tested" });
+  // "다시 테스트" keeps the untested criterion in the set: never verified by shrinking it.
+  const again = await s.session.retest();
+  assert.equal(again.ok, true);
+  const after = await s.session.view();
+  assert.notEqual(after.report.run_id, view.report.run_id);
+  assert.deepEqual(after.report.criteria.map((c) => [c.id, c.status]), [[c1.id, "pass"], [c2.id, "not_verified"]]);
+  assert.equal(after.verification.state, "incomplete");
 });
 
 await test("CR-T76 negative: no report, or a report of another version, never shows verified", async () => {
@@ -354,6 +367,201 @@ await test("the session refuses runs that cannot be bound, and the batch stays r
   assert.match((await t.session.runTool({ criterion_id: c.id, plan: "not json" })).text, /plan_not_json/);
   assert.match((await t.session.runTool({ criterion_id: "other", plan: PLAN(PLAN_START) })).text, /이 테스트의 조건이 아니에요/);
   valid(t.recorder);
+});
+
+// ── CR-T15 / CR-T81: what the coach cannot do ───────────────────────────────
+
+const PLAN_VISUAL = (extra) => ({ steps: PLAN_ORDER.steps, expect: [{ kind: "visual", question: "완료 화면이 보이나요?", ...extra }] });
+
+await test("CR-T15 negative: a vision judgment written into the plan is refused and never sets verified", async () => {
+  // The order never completes, so a claimed "pass" would be a lie.
+  // A seat that stores screenshots, as a signed-in App seat does.
+  const shots = [];
+  const s = seat({ page: kiosk({ noDone: true }), storeScreenshot: async (b) => (shots.push(b), `sha256:${"d".repeat(64)}`) });
+  await s.session.start([{ text: "주문하면 완료 화면이 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  const claimed = await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_VISUAL({ judgment: "pass", method: "vision" })) });
+  assert.equal(claimed.isError, true);
+  assert.match(claimed.text, /plan_judgment/);
+  assert.equal((await s.session.view()).verification.state, "not_verified");
+  assert.equal(valid(s.recorder).events.filter((e) => e.kind === "test_observed").length, 0, "nothing recorded from the claim");
+  // Control: the question alone runs, and stays "not verified" (no vision step exists).
+  const asked = await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_VISUAL({})) });
+  assert.match(asked.text, /^\[확인 안 됨\]/);
+  const view = await s.session.view();
+  assert.deepEqual(view.report.criteria.map((x) => [x.status, x.method]), [["not_verified", "dom"]]);
+  assert.equal(shots.length, 1, "the screenshot was stored, and still decided nothing");
+  assert.equal(view.verification.state, "incomplete");
+});
+
+await test("CR-T81: a run closes when every criterion has a verdict; a second plan for a done criterion is refused", async () => {
+  const s = seat({ page: kiosk({ noDone: true }) });
+  await s.session.start([{ text: "음료 고르기가 보인다" }, { text: "완료 화면이 보인다" }]);
+  const [c1, c2] = s.session.activeRun.criteria;
+  assert.match((await s.session.runTool({ criterion_id: c2.id, plan: PLAN(PLAN_ORDER) })).text, /^\[실패\]/);
+  // Shopping for a pass with a weaker plan, in the same run.
+  const again = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) });
+  assert.equal(again.isError, true);
+  assert.match(again.text, /이미 판정했어요/);
+  await s.session.runTool({ criterion_id: c1.id, plan: PLAN(PLAN_START) });
+  assert.equal(s.session.activeRun, null, "every criterion has a verdict: the run is closed");
+  // The coach checks its own fix in a later turn: no run, nothing recorded, state unchanged.
+  await s.session.fix(c2.id, "완료 화면이 나오게 고쳐 주세요");
+  s.version.current = vid("b");
+  const before = s.recorder.batch.events.length;
+  const self = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [], expect: [{ kind: "no_errors" }] }) });
+  assert.equal(self.isError, true);
+  assert.equal(s.recorder.batch.events.length, before);
+  assert.equal(gates({ events: valid(s.recorder).events }).verification.state === "confirmed", false);
+  assert.equal(valid(s.recorder).events.filter((e) => e.kind === "retest_confirmed").length, 0);
+});
+
+await test("CR-T81: an open run is closed by its turn's end and by changed files", async () => {
+  const s = seat();
+  await s.session.start([{ text: "음료 고르기가 보인다" }, { text: "완료 화면이 보인다" }]);
+  const [c1] = s.session.activeRun.criteria;
+  s.session.endTurn();
+  assert.equal(s.session.activeRun, null);
+  assert.equal((await s.session.runTool({ criterion_id: c1.id, plan: PLAN(PLAN_START) })).isError, true);
+  // A run pinned to v-a, after the files became v-b: refused and closed, nothing recorded.
+  await s.session.start([{ text: "음료 고르기가 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  s.version.current = vid("b");
+  const before = s.recorder.batch.events.length;
+  const r = await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_START) });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /파일이 바뀌어/);
+  assert.equal(s.recorder.batch.events.length, before);
+  assert.equal(s.session.activeRun, null);
+  // Control: a run on an unchanged version is tested.
+  await s.session.start([{ text: "음료 고르기가 보인다" }]);
+  const [d] = s.session.activeRun.criteria;
+  assert.equal((await s.session.runTool({ criterion_id: d.id, plan: PLAN(PLAN_START) })).isError, false);
+});
+
+await test("CR-T81: a criterion that ends on another page is bound to the entry page's version (multi-page)", async () => {
+  const page = kiosk();
+  const version = { current: vid("a") };
+  // Each entry HTML has its own version, as the App computes it (artifactVersionFor(root, path)).
+  const artifactVersion = async (url) => {
+    const b = new URL(url).pathname === "/b.html";
+    const id = b ? vid("b") : version.current;
+    return { id, entry: b ? "b.html" : "index.html", files: [{ path: b ? "b.html" : "index.html", sha256: id.slice(7), bytes: 10 }] };
+  };
+  const s = seat({ page, version, artifactVersion });
+  await s.session.start([{ text: "주문 시작 버튼이 있다" }, { text: "안내 페이지로 갈 수 있다" }]);
+  const [c1, c2] = s.session.activeRun.criteria;
+  await s.session.runTool({ criterion_id: c1.id, plan: PLAN({ steps: [], expect: [{ kind: "element", role: "button", name: "주문 시작" }] }) });
+  const a2 = await s.session.runTool({ criterion_id: c2.id, plan: PLAN({ steps: [{ action: "navigate", path: "/b.html" }], expect: [{ kind: "route", path: "/b.html" }] }) });
+  assert.match(a2.text, /^\[통과\]/);
+  const view = await s.session.view();
+  assert.deepEqual(view.report.criteria.map((c) => [c.id, c.status]), [[c1.id, "pass"], [c2.id, "pass"]], JSON.stringify(view.report.criteria));
+  assert.equal(view.report.artifact_version_id, vid("a"));
+  assert.equal(view.verification.state, "verified");
+});
+
+await test("CR-T81 negative: files that change while a run is on the page make the verdict not verified", async () => {
+  const version = { current: vid("a") };
+  const page = kiosk();
+  const click = page.state.onClick;
+  page.state.onClick = (p, key) => {
+    click(p, key);
+    if (key === "begin") version.current = vid("c"); // the coach's file write lands mid-run
+  };
+  const s = seat({ page, version });
+  await s.session.start([{ text: "음료 고르기가 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  const r = await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_START) });
+  assert.match(r.text, /^\[확인 안 됨\].*파일이 바뀌어서/);
+  const view = await s.session.view();
+  assert.notEqual(view.verification.state, "verified");
+  // Bound to the version the run started on, not the one it ended on.
+  assert.equal(valid(s.recorder).events.find((e) => e.kind === "test_observed").artifact_after, "a".repeat(64));
+  // The runner sees it on its own too (same entry page, another version at the end).
+  version.current = vid("a");
+  const out = await runCriterionPlan(executorFor(page, version).ex, PLAN_START, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(out.verdict.status, "not_verified");
+  assert.equal(out.artifact.id, vid("a"));
+});
+
+await test("CR-T81: runs never share the tab; a re-test refuses a second re-test and the coach's call", async () => {
+  const s = seat();
+  await s.session.start([{ text: "완료 화면이 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_ORDER) });
+  const [a, b] = await Promise.all([s.session.retest(), s.session.retest()]);
+  assert.deepEqual([a.ok, b.ok], [true, false]);
+  assert.equal(b.code, "busy");
+  await s.session.start([{ text: "음료 고르기가 보인다" }]);
+  const [d] = s.session.activeRun.criteria;
+  const [rt, tool] = await Promise.all([s.session.retest(), s.session.runTool({ criterion_id: d.id, plan: PLAN(PLAN_START) })]);
+  assert.equal(rt.ok, true);
+  assert.equal(tool.isError, true);
+  assert.match(tool.text, /이미 진행 중/);
+  const outcomes = valid(s.recorder).events.filter((e) => e.kind === "test_observed").map((e) => e.outcome);
+  assert.ok(outcomes.every((o) => o === "match"), JSON.stringify(outcomes));
+  assert.equal((await s.session.view()).verification.state, "verified");
+});
+
+await test("the session's switch check refuses runTool on its own, with nothing recorded", async () => {
+  const s = seat();
+  await s.session.start([{ text: "음료 고르기가 보인다" }]);
+  const [c] = s.session.activeRun.criteria;
+  s.on.value = false;
+  const before = s.recorder.batch.events.length;
+  const calls = s.page.calls.length;
+  const r = await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_START) });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /쓸 수 없어요/);
+  assert.equal(s.recorder.batch.events.length, before);
+  assert.equal(s.page.calls.length, calls, "the tab was not touched");
+  // Control: switched back on, the same open run is tested.
+  s.on.value = true;
+  assert.equal((await s.session.runTool({ criterion_id: c.id, plan: PLAN(PLAN_START) })).isError, false);
+});
+
+await test("the runner refuses an off-origin navigate on its own, with an executor that would allow anything", async () => {
+  const seen = [];
+  const permissive = {
+    async execute(name, input) {
+      seen.push([name, input?.url]);
+      return { isError: false, content: [{ type: "text", text: "ok" }], observation: { url: START, route: "/index.html", title: "", snapshot: '[ref=e1] button "주문 시작"', refs: ["e1"], screenshot: { mimeType: "image/jpeg", data: "" }, viewport: { width: 800, height: 600 }, documentGeneration: "g1", records: [], droppedRecords: 0, step: 0, artifact: { id: vid("a"), entry: "index.html", files: [] } } };
+    },
+  };
+  const out = await runCriterionPlan(permissive, { steps: [{ action: "navigate", path: "https://example.com/x" }], expect: [{ kind: "no_errors" }] }, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(out.verdict.status, "not_verified");
+  assert.deepEqual(seen, [["browser_navigate", START]], "only the entry page was asked for");
+  // Control: a same-origin path goes to the executor.
+  seen.length = 0;
+  await runCriterionPlan(permissive, { steps: [{ action: "navigate", path: "/b.html" }], expect: [{ kind: "no_errors" }] }, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.deepEqual(seen.map((x) => x[1]), [START, `${ORIGIN}/b.html`]);
+});
+
+await test("no_errors reads every document the run visited, not only the last", async () => {
+  const page = kiosk();
+  const click = page.state.onClick;
+  page.state.onClick = (p, key) => {
+    click(p, key);
+    if (key === "begin") p.consoleError("메뉴를 불러오지 못했어요");
+  };
+  const { ex } = executorFor(page);
+  const plan = { steps: [{ action: "click", target: { role: "button", name: "주문 시작" } }, { action: "navigate", path: "/index.html?again=1" }], expect: [{ kind: "no_errors" }] };
+  const out = await runCriterionPlan(ex, plan, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(out.verdict.status, "fail", JSON.stringify(out.verdict.cites));
+  assert.ok(out.verdict.cites.some((c) => /메뉴를 불러오지 못했어요/.test(c.detail)));
+  // Control: the same plan on a page with no error passes.
+  const clean = await runCriterionPlan(executorFor(kiosk()).ex, plan, { startUrl: START, allowedOrigins: () => [ORIGIN] });
+  assert.equal(clean.verdict.status, "pass", JSON.stringify(clean.verdict.cites));
+});
+
+await test("recordChecked takes back a write the validator refuses; the batch stays valid", async () => {
+  const recorder = new NativeObservationRecorder({ format: "hps-observation/2", scope: "synthetic-cr-verify", session: "s1", program: "p1" });
+  const context = verifyContext({ task: "task-1" });
+  recordChecked(recorder.batch, validateObservation, () => recorder.recordLearningEvent({ kind: "criterion_set", actor: "user", evidence_type: "criterion", source_state: "self_reported", student_text: "a", context }));
+  const before = recorder.batch.events.length;
+  assert.throws(() => recordChecked(recorder.batch, validateObservation, () => recorder.recordLearningEvent({ kind: "criterion_set", actor: "user", evidence_type: "criterion", source_state: "self_reported", student_text: "b", context: { ...context, step_id: "" } })));
+  assert.equal(recorder.batch.events.length, before, "the refused event is gone");
+  validateObservation(structuredClone(recorder.batch));
 });
 
 // ── CR-T03 (verify tool): one answer, both runtimes ─────────────────────────

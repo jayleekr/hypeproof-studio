@@ -17,6 +17,10 @@ export interface ActiveRun {
   criteria: VerifyCriterion[];
   /** Criterion ids the runner has a recorded verdict for, in this run. */
   done: string[];
+  /** The version current when the run started; coach calls on another version are refused. */
+  version: string | null;
+  /** Who started it: the student's "테스트 시작" (the coach plans) or "다시 테스트" (stored plans). */
+  origin: "coach" | "retest";
 }
 
 /** What the panel draws. Plain data, computed from the record every time. */

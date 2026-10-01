@@ -99,8 +99,13 @@ export type Expectation =
   | { kind: "element"; role: string; name: string; absent?: boolean }
   | { kind: "route"; path: string }
   | { kind: "no_errors" }
-  /** Needs visual judgment: decided only by a vision judgment labelled as such (CR-15). */
-  | { kind: "visual"; question: string; judgment?: "pass" | "fail"; method?: "vision" };
+  /**
+   * Needs visual judgment. The plan only asks the question: a judgment written into the
+   * plan would be the coach deciding before anything was observed (CR-15, CR-81), so it is
+   * refused at parse time. This slice has no vision step, so a visual expectation stays
+   * "not verified" until a judgment made on the stored screenshot exists.
+   */
+  | { kind: "visual"; question: string };
 export interface VerifyPlan {
   steps: PlanStep[];
   expect: Expectation[];
@@ -187,10 +192,9 @@ export function parsePlan(raw: unknown): { ok: true; plan: VerifyPlan } | { ok: 
       case "visual": {
         const question = s(raw.question);
         if (!question) return { ok: false, code: "invalid_expectation" };
-        if (raw.judgment !== undefined && raw.judgment !== "pass" && raw.judgment !== "fail") return { ok: false, code: "invalid_expectation" };
-        // CR-15 — a visual judgment that does not say it is vision-based is refused.
-        if (raw.judgment !== undefined && raw.method !== "vision") return { ok: false, code: "unlabelled_vision" };
-        expect.push({ kind: "visual", question, ...(raw.judgment ? { judgment: raw.judgment as "pass" | "fail", method: "vision" as const } : {}) });
+        // CR-15/CR-81 — a verdict the coach wrote before the page was observed is not a judgment.
+        if (raw.judgment !== undefined || raw.method !== undefined) return { ok: false, code: "plan_judgment" };
+        expect.push({ kind: "visual", question });
         break;
       }
       default:
@@ -228,7 +232,10 @@ export interface ExpectationResult {
 }
 export interface CriterionVerdict {
   status: VerdictStatus;
-  /** `vision` only when a labelled visual judgment decided part of it (CR-15). */
+  /**
+   * `vision` only when a labelled visual judgment made on the stored screenshot decided
+   * part of it (CR-15). The runner of this slice has no vision step and always says `dom`.
+   */
   method: "dom" | "vision";
   steps: StepLog[];
   cites: Citation[];
@@ -255,17 +262,33 @@ export interface FinalObservation {
 const OBSERVATION_KINDS = new Set<Citation["kind"]>(["snapshot", "record", "screenshot", "route"]);
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The snapshot line `[ref=eN] role "name"` for an element, or null. */
+const refLineRe = (role: string, name: string) => new RegExp(`^\\[ref=(e\\d+)\\] ${escapeRe(role)} ${escapeRe(JSON.stringify(name))}$`, "m");
+
+/**
+ * The snapshot line for an element, or null: `[ref=eN] role "name"` for an interactive
+ * element, `role: name` for a text role (heading, paragraph, text), which has no ref.
+ */
 export function elementLine(snapshot: string, role: string, name: string): string | null {
-  const re = new RegExp(`^\\[ref=(e\\d+)\\] ${escapeRe(role)} ${escapeRe(JSON.stringify(name))}$`, "m");
-  return re.exec(snapshot)?.[0] ?? null;
+  return refLineRe(role, name).exec(snapshot)?.[0] ?? new RegExp(`^${escapeRe(role)}: ${escapeRe(name)}$`, "m").exec(snapshot)?.[0] ?? null;
 }
-/** The ref of that element, or null. */
+/** The ref of an interactive element, or null (a text role has none to act on). */
 export function elementRef(snapshot: string, role: string, name: string): string | null {
-  const line = elementLine(snapshot, role, name);
-  return line ? /^\[ref=(e\d+)\]/.exec(line)![1]! : null;
+  return refLineRe(role, name).exec(snapshot)?.[1] ?? null;
 }
-const textLine = (snapshot: string, text: string): string | null => snapshot.split("\n").find((l) => l.includes(text)) ?? null;
+/** The text a snapshot line shows: an element's accessible name, or a text role's text; never the ref or role tokens. */
+function lineText(line: string): string | null {
+  const ref = /^\[ref=e\d+\] [A-Za-z]+ (".*")$/.exec(line);
+  if (ref) {
+    try {
+      const v: unknown = JSON.parse(ref[1]!);
+      return typeof v === "string" ? v : null;
+    } catch {
+      return null;
+    }
+  }
+  return /^[A-Za-z]+: (.*)$/.exec(line)?.[1] ?? null;
+}
+const textLine = (snapshot: string, text: string): string | null => snapshot.split("\n").find((l) => lineText(l)?.includes(text)) ?? null;
 
 /**
  * Judge a plan's expectations against what the runner observed last. Pure: the same
@@ -274,7 +297,6 @@ const textLine = (snapshot: string, text: string): string | null => snapshot.spl
 export function evaluate(final: FinalObservation, expect: readonly Expectation[], steps: StepLog[]): CriterionVerdict {
   const cites: Citation[] = [];
   const results: ExpectationResult[] = [];
-  let vision = false;
   const at = final.step;
   for (const e of expect) {
     switch (e.kind) {
@@ -305,14 +327,8 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
         break;
       }
       case "visual": {
-        // Vision only for what needs it, and only with a stored screenshot to point at.
-        if (!e.judgment || e.method !== "vision" || !final.screenshot) {
-          results.push({ kind: e.kind, ok: null, detail: `눈으로 판단해야 함(판단 없음): ${e.question}` });
-          break;
-        }
-        vision = true;
-        cites.push({ step: at, kind: "screenshot", detail: final.screenshot });
-        results.push({ kind: e.kind, ok: e.judgment === "pass", detail: `화면으로 판단(비전): ${e.question}` });
+        // No vision judgment exists in this slice: undecided, never the coach's word.
+        results.push({ kind: e.kind, ok: null, detail: `눈으로 판단해야 함(판단 없음): ${e.question}` });
         break;
       }
     }
@@ -332,7 +348,7 @@ export function evaluate(final: FinalObservation, expect: readonly Expectation[]
   }
   return finalizeVerdict({
     status,
-    method: vision ? "vision" : "dom",
+    method: "dom",
     steps,
     cites,
     expectations: results,
@@ -433,15 +449,21 @@ export const outcomeOf = (status: VerdictStatus): "match" | "mismatch" | "unknow
   status === "pass" ? "match" : status === "fail" ? "mismatch" : "unknown";
 
 /**
- * Which learning event a verdict is recorded as. A pass of a criterion that has a fix
- * request (change_requested) after its last failing test is the re-test SX-15 asks for:
- * `retest_confirmed`. Everything else is `test_observed`.
+ * Which learning event a verdict is recorded as. The re-test SX-15 asks for is
+ * `retest_confirmed`: a pass, in a run the student started with "다시 테스트", on a version
+ * other than the one the criterion last failed on, with a fix request (change_requested)
+ * after that failure. Everything else, a coach's own check included, is `test_observed`.
  */
-export function testEventKind(events: readonly ObservationEvent[], criterionId: string, status: VerdictStatus): "test_observed" | "retest_confirmed" {
-  if (status !== "pass") return "test_observed";
+export function testEventKind(
+  events: readonly ObservationEvent[],
+  criterionId: string,
+  status: VerdictStatus,
+  run: { retest: boolean; versionHex: string },
+): "test_observed" | "retest_confirmed" {
+  if (status !== "pass" || !run.retest) return "test_observed";
   const mine = [...events].sort((a, b) => a.seq - b.seq).filter((e) => e.criterion_ref === criterionId);
   const lastFail = [...mine].reverse().find((e) => (e.kind === "test_observed" || e.kind === "retest_confirmed") && e.outcome === "mismatch");
-  if (!lastFail) return "test_observed";
+  if (!lastFail || lastFail.artifact_after === run.versionHex) return "test_observed";
   return mine.some((e) => e.kind === "change_requested" && e.seq > lastFail.seq) ? "retest_confirmed" : "test_observed";
 }
 
@@ -524,18 +546,24 @@ export function verificationReport(events: readonly ObservationEvent[], runId: s
     return typeof c?.student_text === "string" ? c.student_text : fallback;
   };
   const version = mine[0]!.result.artifact_version;
+  // One verdict per criterion per run: the last one bound (the session refuses a second
+  // call; this keeps an older record that has one readable).
+  const lastOf = new Map<string, BoundResult>();
+  for (const b of mine) if (b.result.artifact_version === version) lastOf.set(b.result.criterion_id, b);
+  const planKey = (r: VerifyResult) => JSON.stringify(r.plan);
   const criteria: ReportCriterion[] = [];
-  for (const b of mine) {
-    if (b.result.artifact_version !== version) continue;
+  for (const b of lastOf.values()) {
     const v = b.result.verdict;
     const decided = (x: VerdictStatus) => x !== "not_verified";
+    // CR-14 compares re-runs of the same plan: a different plan is a different test.
     const others = all.filter(
       (o) =>
-        o !== b &&
+        o.result.run_id !== runId &&
         o.result.criterion_id === b.result.criterion_id &&
         o.result.artifact_version === version &&
         vpKey(o.result.verdict.viewport) === vpKey(v.viewport) &&
-        o.result.criterion_text === b.result.criterion_text,
+        o.result.criterion_text === b.result.criterion_text &&
+        planKey(o.result) === planKey(b.result),
     );
     const reproducible = !decided(v.status) || others.every((o) => !decided(o.result.verdict.status) || o.result.verdict.status === v.status);
     criteria.push({

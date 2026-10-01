@@ -3021,22 +3021,11 @@
         "extensions/hypeproof-chat/webview-ui/src/styles.css"
       ],
       "verification_inputs": [
-        "docs/requirements/curriculum-runtime.md",
-        "docs/testing/curriculum-runtime.md",
         "worker/test/cr-verify.test.mjs",
-        "worker/test/cr-switch.test.mjs",
-        "worker/test/measurement-core.test.mjs",
         "extensions/hypeproof-chat/test/cr-verify.smoke.mjs",
         "extensions/hypeproof-chat/test/verify-panel.smoke.mjs",
-        "extensions/hypeproof-chat/test/cr-switch.smoke.mjs",
-        "extensions/hypeproof-chat/test/cr-provider-neutral.smoke.mjs",
-        "extensions/hypeproof-chat/test/sx-render.mjs",
-        "extensions/hypeproof-chat/test/fixtures/fake-cdp-page.mjs",
         "e2e/curriculum-runtime/verify-app.spec.ts",
         "e2e/curriculum-runtime/app-helpers.ts",
-        "e2e/curriculum-runtime/app-service.mjs",
-        "e2e/curriculum-runtime/playwright.config.ts",
-        "e2e/curriculum-runtime/fixtures/kiosk-practice",
         "docs/testing/curriculum-runtime-2026-10-01-evidence.md"
       ]
     },

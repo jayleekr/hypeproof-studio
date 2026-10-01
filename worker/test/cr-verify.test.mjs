@@ -7,8 +7,10 @@
 //                  check catches a verify module that writes anywhere else
 //   CR-T14 (unit)  the same criterion, version and viewport with differing verdicts is
 //                  non-reproducible, never the pass of either run
-//   CR-T15         every verdict cites an observation; uncited is "not verified"; an
-//                  unlabelled vision verdict is refused
+//   CR-T15         every verdict cites an observation; uncited is "not verified"; a
+//                  judgment written into the plan is refused (no vision verdict before
+//                  anything was observed); element and text expectations read the
+//                  snapshot's names and text, never its ref or role tokens
 //   CR-T16 (unit)  a fix request carries report, criterion and version, or is refused; a
 //                  pass after it is retest_confirmed and SX-15's gate confirms it
 //   CR-T76 (unit)  "verified" only for an all-pass report bound to that exact version
@@ -64,7 +66,7 @@ function recorder() {
     batch: b,
     criterion: (text, extra = {}) => push({ kind: "criterion_set", actor: "user", context: CTX, evidence_type: "criterion", source_state: "self_reported", student_text: text, ...extra }),
     /** One runner verdict, recorded exactly as VerifySession.execute does. */
-    verdict({ run, criterion, version, verdict, plan = PLAN, kind }) {
+    verdict({ run, criterion, version, verdict, plan = PLAN, kind, retest = false }) {
       const h = version.slice(7);
       const last = [...b.events].reverse().find((e) => e.kind === "artifact");
       if (last?.sha256 !== h) push({ kind: "artifact", text: versionArtifactText({ id: version, entry: "index.html", files: [] }), sha256: h });
@@ -79,7 +81,7 @@ function recorder() {
         text: verifyResultText({ format: "hps-verify-result/1", run_id: run, criterion_id: criterion.id, criterion_text: criterion.student_text, artifact_version: version, tested_at: 5_000 + n, plan, verdict }),
       });
       return push({
-        kind: kind ?? testEventKind(b.events, criterion.id, verdict.status),
+        kind: kind ?? testEventKind(b.events, criterion.id, verdict.status, { retest, versionHex: h }),
         actor: "ai",
         context: CTX,
         evidence_type: "action",
@@ -136,23 +138,39 @@ test("CR-T15 positive: a pass cites a snapshot line, a fail cites the console re
   assert.deepEqual(verdictProblems(p), []);
 });
 
-test("CR-T15 negative: an uncited verdict is not verified; an unlabelled vision verdict is refused", () => {
+test("CR-T15 negative: an uncited verdict is not verified; a judgment the coach wrote into the plan never decides", () => {
   const stripped = finalizeVerdict({ ...pass(), cites: [] });
   assert.equal(stripped.status, "not_verified", "a pass with its citations removed is not a pass");
   assert.equal(finalizeVerdict({ ...fail(), cites: [] }).status, "not_verified", "nor is an uncited fail");
-  // Vision only when labelled: the plan parser refuses a judgment without method "vision".
-  assert.deepEqual(parsePlan({ steps: [], expect: [{ kind: "visual", question: "버튼이 큰가", judgment: "pass" }] }), { ok: false, code: "unlabelled_vision" });
-  const labelled = parsePlan({ steps: [], expect: [{ kind: "visual", question: "버튼이 큰가", judgment: "pass", method: "vision" }] });
-  assert.equal(labelled.ok, true);
-  const v = evaluate(final({ screenshot: `sha256:${hex("shot")}` }), labelled.plan.expect, steps);
-  assert.equal(v.method, "vision");
-  assert.ok(v.cites.some((c) => c.kind === "screenshot"));
-  // A vision verdict without the screenshot it was judged on is not verified.
-  assert.equal(evaluate(final(), labelled.plan.expect, steps).status, "not_verified");
+  // A judgment in the plan is made before the page is observed: refused, labelled or not.
+  for (const planted of [{ judgment: "pass", method: "vision" }, { judgment: "pass" }, { judgment: "fail", method: "vision" }, { method: "vision" }]) {
+    assert.deepEqual(parsePlan({ steps: [], expect: [{ kind: "visual", question: "완료 화면이 보이나요?", ...planted }] }), { ok: false, code: "plan_judgment" }, JSON.stringify(planted));
+  }
+  // Even a judgment smuggled past the parser is not read: the runner has no vision step,
+  // so a visual expectation stays undecided with a screenshot stored, and the verdict is dom.
+  const smuggled = evaluate(final({ screenshot: `sha256:${hex("shot")}` }), [{ kind: "visual", question: "완료 화면이 보이나요?", judgment: "pass", method: "vision" }], steps);
+  assert.equal(smuggled.status, "not_verified");
+  assert.equal(smuggled.method, "dom");
+  // Control: the question alone parses, and stays not verified.
+  const asked = parsePlan({ steps: [], expect: [{ kind: "visual", question: "예쁜가" }] });
+  assert.equal(asked.ok, true);
+  assert.equal(evaluate(final({ screenshot: `sha256:${hex("shot")}` }), asked.plan.expect, steps).status, "not_verified");
   // A stored verdict that decided a visual expectation but says "dom" is refused on read.
-  assert.deepEqual(verdictProblems({ ...v, method: "dom" }), ["unlabelled_vision"]);
-  // A visual expectation with no judgment is never decided by the runner.
-  assert.equal(evaluate(final({ screenshot: `sha256:${hex("shot")}` }), [{ kind: "visual", question: "예쁜가" }], steps).status, "not_verified");
+  assert.deepEqual(verdictProblems({ ...pass(), expectations: [{ kind: "visual", ok: true, detail: "x" }] }), ["unlabelled_vision"]);
+});
+
+test("CR-T15: element expectations match text roles; text expectations never match ref or role tokens", () => {
+  // Positive: a heading (a text role, no ref) is found by role and name.
+  const heading = evaluate(final(), [{ kind: "element", role: "heading", name: "주문이 완료되었어요" }], steps);
+  assert.equal(heading.status, "pass", JSON.stringify(heading.expectations));
+  assert.ok(heading.cites.some((c) => c.detail === "heading: 주문이 완료되었어요"));
+  assert.equal(evaluate(final(), [{ kind: "element", role: "heading", name: "주문이 완료되었어요", absent: true }], steps).status, "fail", "absent is the opposite");
+  assert.equal(evaluate(final(), [{ kind: "element", role: "heading", name: "없는 제목" }], steps).status, "fail");
+  // Negative: the snapshot's own tokens ("ref", "button", "heading") are not page text.
+  for (const token of ["button", "ref=e1", "heading"]) assert.equal(evaluate(final(), [{ kind: "text", text: token }], steps).status, "fail", token);
+  // Control: an accessible name and a text line are page text.
+  assert.equal(evaluate(final(), [{ kind: "text", text: "주문하기" }], steps).status, "pass");
+  assert.equal(evaluate(final(), [{ kind: "text", text: "장바구니: 2개" }], steps).status, "pass");
 });
 
 // ── CR-T13 ───────────────────────────────────────────────────────────────────
@@ -254,6 +272,25 @@ test("CR-T14 negative: a criterion whose verdict differs between runs is non-rep
   r2.verdict({ run: "run-1", criterion: c2, version: V0, verdict: pass() });
   r2.verdict({ run: "run-2", criterion: c2, version: V0, verdict: { ...fail(), viewport: { width: 390, height: 844 } } });
   assert.equal(verificationReport(r2.batch.events, "run-1").criteria[0].status, "pass");
+  // Control: another plan is another test, so it is not compared either.
+  const r3 = recorder();
+  const c3 = r3.criterion("x");
+  r3.verdict({ run: "run-1", criterion: c3, version: V0, verdict: fail(), plan: { ...PLAN, expect: [{ kind: "text", text: "음료 고르기!" }] } });
+  r3.verdict({ run: "run-2", criterion: c3, version: V0, verdict: pass() });
+  assert.equal(verificationReport(r3.batch.events, "run-2").criteria[0].status, "pass");
+});
+
+test("CR-T14: one row per criterion per run, the last verdict, so repeated calls never overflow the report", () => {
+  const r = recorder();
+  const cs = ["a", "b", "c", "d", "e"].map((t) => r.criterion(t));
+  for (const c of cs) {
+    r.verdict({ run: "run-1", criterion: c, version: V0, verdict: fail() });
+    r.verdict({ run: "run-1", criterion: c, version: V0, verdict: pass() });
+  }
+  const report = verificationReport(r.batch.events, "run-1");
+  assert.equal(report.criteria.length, 5);
+  assert.deepEqual(validateVerificationReport(report), []);
+  assert.ok(report.criteria.every((c) => c.status === "pass" && c.reproducible), "rows of one run are not compared with each other");
 });
 
 // ── CR-T16 ───────────────────────────────────────────────────────────────────
@@ -277,7 +314,7 @@ test("CR-T16 positive: a fix request carries report, criterion and version; a pa
   r.push({ ...built.request.event, actor: "user", context: CTX, evidence_type: "change", source_state: "self_reported" });
   // The coach fixes the file; the re-test runs criterion 2 on v1 and passes.
   r.push({ kind: "artifact", text: "index.html\n<html>fixed", sha256: hex("fixed-file") });
-  const retest = r.verdict({ run: "run-2", criterion: c2, version: V1, verdict: { ...pass(), cites: [{ step: 1, kind: "snapshot", detail: "heading: 결제 완료" }] } });
+  const retest = r.verdict({ run: "run-2", criterion: c2, version: V1, retest: true, verdict: { ...pass(), cites: [{ step: 1, kind: "snapshot", detail: "heading: 결제 완료" }] } });
   assert.equal(retest.kind, "retest_confirmed");
   assert.equal(gates({ events: r.batch.events }).verification.state, "confirmed");
   assert.equal(gates({ events: r.batch.events }).verification.source_state, "real", "bound to an executed result on that version");
@@ -296,7 +333,14 @@ test("CR-T16 negative: a fix request without report, criterion or version is ref
   assert.deepEqual(buildFixRequest({ ...base, version: V1 }), { ok: false, code: "version_mismatch" });
   assert.deepEqual(buildFixRequest({ ...base, student_text: " " }), { ok: false, code: "missing_student_text" });
   // A pass that comes with no fix request in between stays test_observed.
-  assert.equal(testEventKind(r.batch.events, c.id, "pass"), "test_observed");
+  assert.equal(testEventKind(r.batch.events, c.id, "pass", { retest: true, versionHex: V1.slice(7) }), "test_observed");
+  r.push({ kind: "change_requested", actor: "user", context: CTX, evidence_type: "change", source_state: "self_reported", student_text: "고쳐 주세요", criterion_ref: c.id, artifact_before: V0.slice(7), turn_ref: report.criteria[0].test_ref });
+  // After the fix request: the coach's own check is never the student's re-test, and a
+  // pass on the very version that failed is not a fix.
+  assert.equal(testEventKind(r.batch.events, c.id, "pass", { retest: false, versionHex: V1.slice(7) }), "test_observed");
+  assert.equal(testEventKind(r.batch.events, c.id, "pass", { retest: true, versionHex: V0.slice(7) }), "test_observed");
+  // Control: the student's re-test on another version.
+  assert.equal(testEventKind(r.batch.events, c.id, "pass", { retest: true, versionHex: V1.slice(7) }), "retest_confirmed");
 });
 
 // ── CR-T76 ───────────────────────────────────────────────────────────────────

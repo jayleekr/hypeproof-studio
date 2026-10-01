@@ -45,7 +45,11 @@ export interface RunOptions {
 
 export interface RunOutcome {
   verdict: CriterionVerdict;
-  /** The R4 version the run observed; null when nothing was observed. */
+  /**
+   * The R4 version of the entry page at step 0, which every verdict of the run is bound to
+   * (the version the student is testing), even when the run ends on another page of the
+   * product; null when nothing was observed.
+   */
   artifact: Observation["artifact"] | null;
   /** The last observation, for the coach's tool result (never stored as is). */
   observation: Observation | null;
@@ -60,6 +64,9 @@ const ACTION_TOOL: Record<PlanStep["action"], string> = {
   reload: "browser_reload",
   navigate: "browser_navigate",
 };
+
+/** The reason a run whose files changed while it ran is not verified. */
+export const VERSION_CHANGED = "테스트하는 동안 파일이 바뀌어서 판정하지 않았어요. 다시 테스트해 주세요.";
 
 const textOf = (r: CrToolResult) => r.content.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("\n");
 const notVerified = (steps: StepLog[], reason: string, artifact: Observation["artifact"] | null = null, observation: Observation | null = null): RunOutcome => ({
@@ -81,6 +88,19 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
     if (first.isError || !first.observation) return notVerified(steps, textOf(first).slice(0, 300) || "미리보기를 열지 못했어요");
     let last: Observation = first.observation;
     const artifact = last.artifact;
+    // The failures of every document the run visited, not just the last one (a console
+    // error before a navigate or reload still counts).
+    const seen = new Set<string>();
+    const errors: ErrorRecord[] = [];
+    const collect = (o: Observation) => {
+      for (const f of failuresOf(o.records)) {
+        const key = `${o.documentGeneration}|${f.kind}|${f.step}|${f.message}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        errors.push({ kind: f.kind, message: f.message, step: f.step });
+      }
+    };
+    collect(last);
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i]!;
       const index = i + 1;
@@ -123,9 +143,13 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
         return notVerified(steps, message, artifact, last);
       }
       last = r.observation;
+      collect(last);
       steps.push({ index, action: step.action, ...(target ? { target } : {}), ok: true, message: textOf(r).split("\n")[0]!.slice(0, 300), route: last.route });
     }
-    const errors: ErrorRecord[] = failuresOf(last.records).map((f) => ({ kind: f.kind, message: f.message, step: f.step }));
+    // The entry page's files changed under the run: what was observed is not one version.
+    if (artifact && last.artifact && last.artifact.entry === artifact.entry && last.artifact.id !== artifact.id) {
+      return notVerified(steps, VERSION_CHANGED, artifact, last);
+    }
     let screenshot: string | null = null;
     if (opts.storeScreenshot && last.screenshot?.data) screenshot = await opts.storeScreenshot(last.screenshot.data, last.screenshot.mimeType).catch(() => null);
     const verdict = evaluate(
@@ -133,7 +157,7 @@ export async function runCriterionPlan(ex: VerifyExecutor, plan: VerifyPlan, opt
       plan.expect,
       steps,
     );
-    return { verdict, artifact: last.artifact ?? artifact, observation: last };
+    return { verdict, artifact, observation: last };
   } catch (err) {
     return notVerified(steps, err instanceof Error ? err.message : String(err));
   } finally {

@@ -20,11 +20,26 @@ No real-device run with a real model was made: the in-app runs use a scripted ag
 | CR-T12 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs`, in-app | PASS | Positive: three typed criteria stored as the student's `criterion_set` and tested one by one. Negative: zero and six refused; an unconfirmed coach proposal starts no run (in the app no run reached the agent); a confirmed one keeps `adopted_from` |
 | CR-T13 | `cr-verify.test.mjs` | PASS | The report round-trips through `criterion_set` / `test_observed` on a batch the one validator accepts; missing `artifact_version_id`, `tested_at` or `steps` refused; the store inventory catches four planted stores |
 | CR-T14 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs`, in-app | PASS | Positive: two runs, identical verdicts, and the re-test makes no model call. Negative: the planted flaky page (`?plant=flaky`) gives pass then `non_reproducible`, never pass |
-| CR-T15 | `cr-verify.test.mjs` | PASS | Uncited pass and fail become not verified; an unlabelled vision judgment is refused at parse and on read; a vision verdict without its screenshot is not verified |
+| CR-T15 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs` | PASS (DOM half) | Uncited pass and fail become not verified; a `judgment` written into a plan is refused (`plan_judgment`) labelled or not, and a smuggled one decides nothing; on a page where the order never completes, a coach-claimed visual "pass" records nothing and the version is not verified, with a screenshot stored. `element` expectations match headings; `text` expectations never match the snapshot's ref or role tokens. No vision step exists, so a visual criterion stays not verified (CR-15 vision half open) |
 | CR-T16 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs`, in-app | PASS | In the app the fix request carried the failed run, criterion 2 and `sha256:7187b0db…`; after the file fix the re-test ran on `sha256:cc6ceb45…` and criterion 2 is `retest_confirmed`. Requests without report, criterion, version or the student's words are refused and nothing is sent |
 | CR-T63 (runner case) | `cr-verify.smoke.mjs`, in-app | PASS | 125 of 214 sampled preview frames carried the outline during the run, the last 5 none; the panel showed "테스트 중". A planted executor whose outline never reaches the page is caught |
 | CR-T76 | `cr-verify.test.mjs`, `cr-verify.smoke.mjs`, `verify-panel.smoke.mjs`, in-app | PASS | "검증됨" for the all-pass version; a fail shows the fail; no report, another version's report, an untested criterion and a coach saying "완료했어요" never show it; after the file change the earlier result is kept and labelled |
 | CR-T57 | in-app, Studio half only | PARTIAL | Ten re-tests of the five-step order criterion: median 2.99 s, max 3.04 s. No model call is in a re-test; the first run's model time with a real provider is NOT RUN, so CR-61 is not claimed |
+
+## Review round 1 fixes (synthetic layers re-run)
+
+The in-app rows above were run on `a6ee4a8f`, before these fixes; the fixes are covered at the unit and smoke layers, and the in-app spec was not re-run on the fixed head (NOT RUN below).
+
+| Finding | Fix | Control (red on the planted defect) |
+|---|---|---|
+| A plan-supplied vision judgment set "검증됨" | `parsePlan` refuses `judgment`/`method`; `evaluate` never reads one | M1 plan judgment accepted: both suites red |
+| "다시 테스트" dropped untested criteria | the re-test carries every criterion of the latest run | M2 retest keeps the planned subset: smoke red |
+| A verdict ending on another page was bound to that page's version | bound to the step-0 entry version; a mid-run file change is not verified | M3 bound to last page, M16 no mid-run check: smoke red |
+| `element` never matched headings; `text` matched ref/role tokens | text-role lines match; text reads names and text only | M4, M15: unit red |
+| Reproducibility compared different plans; repeated calls overflowed the report | one row per criterion per run; only the same plan is compared; a second call is refused | M5 unit red; M6 smoke red |
+| A run never closed; a coach check could be `retest_confirmed` | closes when done, at turn end, on a version change; `retest_confirmed` needs the student's re-test on another version | M7, M8 smoke red; M10 unit red |
+| Runs could interleave on the one tab | re-test claims the tab synchronously; one chain per tab; composer and host refuse sends/re-tests meanwhile | M9 retesting claimed late: smoke red |
+| Untested guards | switch-off `runTool`, runner-level scope check, `recordChecked` rollback, errors of every visited document | M11, M12, M13, M14: smoke red |
 
 ## Instrument corrections during the run
 
@@ -37,5 +52,7 @@ Recorded because each was the instrument, not the product (verification rule 6):
 
 ## NOT RUN
 
-- CR-T57 with a real provider (CR-61), and any real-model run of the coach writing plans.
+- CR-T57 with a real provider (CR-61), and any real-model run of the coach writing plans. CR-61 stays open; the PR says `Refs #1392`, not `Closes`.
+- `verify-app.spec.ts` in the app on the head carrying the review-round-1 fixes.
+- A vision judgment step (CR-15 vision half).
 - Real phone: not part of this item.

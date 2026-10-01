@@ -390,6 +390,7 @@ export function App() {
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
         verifyPanel={verifyPanel}
+        sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });
           postToHost({ type: "removeElementContext" });

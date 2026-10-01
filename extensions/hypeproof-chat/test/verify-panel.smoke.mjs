@@ -34,6 +34,10 @@ const ok = (n) => { passed++; console.log(`✓ ${n}`); };
   assert.match(text, /이 버전의 테스트 결과/);
   assert.equal((html.match(/data-status="pass"/g) ?? []).length, 3);
   assert.doesNotMatch(html, /verify-fix"/, "nothing to fix");
+  // The evidence is in Korean: no raw step action or citation kind reaches the student.
+  assert.match(text, /✓ 이동/);
+  assert.match(text, /근거\(화면 내용\)/);
+  assert.doesNotMatch(text, /✓ navigate|근거\((?:snapshot|record|screenshot|route)\)/);
   ok("CR-T76 UI positive: a version with a three-pass report bound to it shows 검증됨 with each result");
 }
 {

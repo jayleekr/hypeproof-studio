@@ -24,6 +24,23 @@ const STATUS_LABEL: Record<string, string> = {
   non_reproducible: "결과가 매번 달라요",
 };
 
+/** Student-facing names for the runner's step actions and evidence kinds (never the raw tokens). */
+const ACTION_LABEL: Record<string, string> = {
+  click: "누르기",
+  type: "입력",
+  select: "고르기",
+  scroll: "스크롤",
+  hover: "마우스 올리기",
+  reload: "새로 고침",
+  navigate: "이동",
+};
+const CITE_LABEL: Record<string, string> = {
+  snapshot: "화면 내용",
+  record: "오류 기록",
+  screenshot: "화면 캡처",
+  route: "주소",
+};
+
 export function VerifyPanel(props: {
   view: VerifyView;
   error: string | null;
@@ -133,7 +150,7 @@ export function VerifyPanel(props: {
                   <ol>
                     {c.steps.map((s) => (
                       <li key={s.index}>
-                        {s.ok ? "✓" : "✗"} {s.action}
+                        {s.ok ? "✓" : "✗"} {ACTION_LABEL[s.action] ?? "단계"}
                         {s.target ? ` · ${s.target}` : ""} — {s.message}
                       </li>
                     ))}
@@ -141,7 +158,7 @@ export function VerifyPanel(props: {
                   <ul>
                     {c.cites.map((x, i) => (
                       <li key={i}>
-                        근거({x.kind}): {x.detail}
+                        근거({CITE_LABEL[x.kind] ?? "관찰"}): {x.detail}
                       </li>
                     ))}
                   </ul>

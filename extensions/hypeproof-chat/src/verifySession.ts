@@ -13,7 +13,11 @@
 //   3. A failed criterion becomes a fix request that references the report, the criterion
 //      and the version (CR-16), recorded as `change_requested` and sent to the coach.
 //   4. "다시 테스트" re-runs the stored plans with no model call (CR-14); a pass after a fix
-//      request is `retest_confirmed` (SX-15).
+//      request, on a version other than the failing one, is `retest_confirmed` (SX-15).
+//
+// A run is pinned to the version current when it started and closes once every criterion
+// has a verdict, when the turn it rode with ends, or when the files change; a closed run
+// takes no more coach calls. One run acts on the browser tab at a time (`exclusive`).
 //   5. "검증됨" only for a version with an all-pass report bound to it (CR-81).
 
 import { randomUUID } from "node:crypto";
@@ -36,7 +40,7 @@ import {
   type CriterionInput,
   type VerifyPlan,
 } from "../../../worker/src/lib/measurement-core/verification.ts";
-import { runCriterionPlan, verdictLine, type VerifyExecutor } from "./verifyRunner.ts";
+import { VERSION_CHANGED, runCriterionPlan, verdictLine, type VerifyExecutor } from "./verifyRunner.ts";
 import type { ActiveRun, VerifyCriterion, VerifyProposal, VerifyView } from "./verifyView.ts";
 
 export const VERIFY_PROPOSE_TOOL = "verify_propose_criteria";
@@ -94,6 +98,8 @@ const REFUSAL: Record<string, string> = {
   criterion_not_tested: "그 조건은 아직 테스트하지 않았어요. 먼저 테스트해 주세요.",
   missing_student_text: "무엇을 고쳐 달라고 할지 내 말로 적어 주세요.",
   no_plans: "다시 돌릴 테스트가 없어요. 먼저 '테스트 시작'을 해 주세요.",
+  turn_running: "코치가 답하는 중이에요. 답이 끝난 뒤에 다시 눌러 주세요.",
+  record_failed: "조건을 기록하지 못해 테스트를 시작하지 않았어요. 다시 시도해 주세요.",
 };
 export const refusalText = (code: string): string => REFUSAL[code] ?? `처리하지 못했어요 (${code}).`;
 
@@ -102,7 +108,10 @@ export class VerifySession {
   private proposals: VerifyProposal[] = [];
   /** Runs acting on the page right now (CR-68): the coach's verify calls and a re-test. */
   private acting = 0;
+  /** Set synchronously when a re-test is asked for, before its first await. */
   private retesting = false;
+  /** The one browser tab: every run on it goes through this chain, one at a time. */
+  private tab: Promise<unknown> = Promise.resolve();
   private coachContext: string | null = null;
   private notice: string | null = null;
   private readonly ports: VerifyHostPorts;
@@ -118,6 +127,18 @@ export class VerifySession {
     const c = this.coachContext;
     this.coachContext = null;
     return c;
+  }
+
+  /** The turn ended: an open run takes no more coach calls (a later turn cannot test on its own). */
+  endTurn(): void {
+    this.run = null;
+  }
+
+  /** Run `fn` when the tab is free; one run on the tab at a time. */
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.tab.then(fn, fn);
+    this.tab = next.catch(() => undefined);
+    return next;
   }
 
   get activeRun(): ActiveRun | null {
@@ -140,6 +161,7 @@ export class VerifySession {
     if (!checked.ok) return checked;
     const startUrl = this.ports.startUrl();
     if (!startUrl) return { ok: false, code: "no_preview" };
+    const version = await this.ports.currentVersion().catch(() => null);
     const rec = await this.ports.recorder();
     if (!rec) return { ok: false, code: "no_record" };
     const criteria: VerifyCriterion[] = [];
@@ -155,10 +177,13 @@ export class VerifySession {
         });
         criteria.push({ id: e.id, text: c.text });
       }
+    } catch {
+      // Refused by name; criteria already written stay as the student's own (never a run).
+      return { ok: false, code: "record_failed" };
     } finally {
       rec.persist();
     }
-    this.run = { run_id: this.newId(), criteria, done: [] };
+    this.run = { run_id: this.newId(), criteria, done: [], version, origin: "coach" };
     this.proposals = this.proposals.filter((p) => !checked.criteria.some((c) => c.adopted_from === p.id));
     this.coachContext = coachRunContext(this.run, startUrl);
     this.notice = null;
@@ -206,16 +231,30 @@ export class VerifySession {
    */
   async runTool(input: Record<string, unknown>): Promise<ToolAnswer> {
     if (!this.ports.switchOn()) return { isError: true, text: refusalText("switch_off") };
+    if (this.retesting) return { isError: true, text: refusalText("busy") };
     const run = this.run;
     if (!run) return { isError: true, text: `진행 중인 테스트가 없어요. 학생이 "테스트 시작"을 눌러야 ${VERIFY_TOOL}을 쓸 수 있어요.` };
     const criterion = run.criteria.find((c) => c.id === input.criterion_id);
     if (!criterion) return { isError: true, text: `이 테스트의 조건이 아니에요: ${String(input.criterion_id)}. 조건 id: ${run.criteria.map((c) => c.id).join(", ")}` };
+    // One verdict per criterion per run: a second plan is not a retry, it is shopping for a pass.
+    if (run.done.includes(criterion.id)) return { isError: true, text: `이 조건은 이번 테스트에서 이미 판정했어요: ${criterion.id}. 다시 확인은 학생의 "다시 테스트"가 해요.` };
     const parsed = parsePlan(input.plan);
     if (!parsed.ok) return { isError: true, text: `계획을 읽지 못했어요 (${parsed.code}). steps와 expect를 다시 보내 주세요.` };
-    const answer = await this.execute(run, criterion, parsed.plan);
-    if (!answer.isError && !run.done.includes(criterion.id)) run.done.push(criterion.id);
-    const left = run.criteria.filter((c) => !run.done.includes(c.id));
-    return { ...answer, text: `${answer.text}${left.length ? `\n남은 조건: ${left.map((c) => c.id).join(", ")}` : "\n모든 조건을 테스트했어요. 결과를 학생에게 짧게 알려 주세요 — 통과로 바꾸어 말하지 마세요."}` };
+    return this.exclusive(async () => {
+      // The run may have closed, or been tested, while this call waited for the tab.
+      if (this.run !== run || run.done.includes(criterion.id)) return { isError: true, text: "이 테스트는 이미 끝났어요." };
+      // The run is pinned to the version it started on: changed files close it.
+      const now = await this.ports.currentVersion().catch(() => null);
+      if (run.version !== now) {
+        this.run = null;
+        return { isError: true, text: `테스트를 시작한 뒤 파일이 바뀌어 이 테스트를 닫았어요. 학생이 다시 "테스트 시작"이나 "다시 테스트"를 해야 해요.` };
+      }
+      const answer = await this.execute(run, criterion, parsed.plan);
+      if (!answer.isError && !run.done.includes(criterion.id)) run.done.push(criterion.id);
+      const left = run.criteria.filter((c) => !run.done.includes(c.id));
+      if (!left.length && this.run === run) this.run = null;
+      return { ...answer, text: `${answer.text}${left.length ? `\n남은 조건: ${left.map((c) => c.id).join(", ")}` : "\n모든 조건을 테스트했어요. 결과를 학생에게 짧게 알려 주세요 — 통과로 바꾸어 말하지 마세요."}` };
+    });
   }
 
   /**
@@ -226,30 +265,36 @@ export class VerifySession {
   async retest(): Promise<{ ok: true; run_id: string } | { ok: false; code: string }> {
     if (!this.ports.switchOn()) return { ok: false, code: "switch_off" };
     if (this.running) return { ok: false, code: "busy" };
-    const rec = await this.ports.recorder();
-    if (!rec) return { ok: false, code: "no_record" };
-    const events = rec.events();
-    const latest = runIds(events).at(-1);
-    const report = latest ? verificationReport(events, latest) : null;
-    const want = report?.criteria.map((c) => c.id) ?? [];
-    const plans: Array<{ criterion: VerifyCriterion; plan: VerifyPlan }> = [];
-    for (const id of want) {
-      const r = [...events].reverse().map((e) => readVerifyResult(e)).find((x) => x?.criterion_id === id);
-      if (r) plans.push({ criterion: { id, text: r.criterion_text }, plan: r.plan });
-    }
-    if (!plans.length) return { ok: false, code: "no_plans" };
-    const run: ActiveRun = { run_id: this.newId(), criteria: plans.map((p) => p.criterion), done: [] };
+    // Claimed before the first await, so a second click or a coach call is refused.
     this.retesting = true;
     try {
-      for (const p of plans) {
-        const a = await this.execute(run, p.criterion, p.plan, rec);
-        if (!a.isError) run.done.push(p.criterion.id);
+      const rec = await this.ports.recorder();
+      if (!rec) return { ok: false, code: "no_record" };
+      const events = rec.events();
+      const latest = runIds(events).at(-1);
+      const report = latest ? verificationReport(events, latest) : null;
+      // Every criterion of the latest run, untested ones included: those have no plan and
+      // stay in the new run as not verified, so a re-test never shrinks the set (CR-81).
+      const criteria: VerifyCriterion[] = (report?.criteria ?? []).map((c) => ({ id: c.id, text: c.text }));
+      const plans: Array<{ criterion: VerifyCriterion; plan: VerifyPlan }> = [];
+      for (const c of criteria) {
+        const r = [...events].reverse().map((e) => readVerifyResult(e)).find((x) => x?.criterion_id === c.id);
+        if (r) plans.push({ criterion: { id: c.id, text: r.criterion_text }, plan: r.plan });
       }
+      if (!plans.length) return { ok: false, code: "no_plans" };
+      const version = await this.ports.currentVersion().catch(() => null);
+      const run: ActiveRun = { run_id: this.newId(), criteria, done: [], version, origin: "retest" };
+      this.run = null;
+      await this.exclusive(async () => {
+        for (const p of plans) {
+          const a = await this.execute(run, p.criterion, p.plan, rec);
+          if (!a.isError) run.done.push(p.criterion.id);
+        }
+      });
+      return { ok: true, run_id: run.run_id };
     } finally {
       this.retesting = false;
     }
-    this.run = run;
-    return { ok: true, run_id: run.run_id };
   }
 
   /** CR-16 — a failed criterion as a fix request to the coach. */
@@ -289,6 +334,14 @@ export class VerifySession {
     } finally {
       this.acting--;
     }
+    // The files changed under the run (the entry page is not the version it started on):
+    // bound to the start version, but not verified.
+    if (outcome.artifact && outcome.verdict.status !== "not_verified") {
+      const now = await this.ports.currentVersion().catch(() => null);
+      if (now !== null && now !== outcome.artifact.id) {
+        outcome = { ...outcome, verdict: { ...outcome.verdict, status: "not_verified", reason: VERSION_CHANGED } };
+      }
+    }
     const line = verdictLine(criterion.text, outcome.verdict);
     // A run that observed nothing has no version to bind to: answered, never recorded.
     if (!outcome.artifact) return { isError: true, text: `${line}\n(산출물 버전을 정하지 못해 결과를 기록하지 않았어요.)` };
@@ -318,7 +371,7 @@ export class VerifySession {
       );
       const status = outcome.verdict.status;
       rec.recordLearning({
-        kind: testEventKind(rec.events(), criterion.id, status),
+        kind: testEventKind(rec.events(), criterion.id, status, { retest: run.origin === "retest", versionHex: hex }),
         actor: "ai",
         evidence_type: "action",
         source_state: "real",
@@ -360,7 +413,8 @@ export function coachRunContext(run: ActiveRun, startUrl: string): string {
     `[Studio 제품 테스트 ${run.run_id}] 학생이 "테스트 시작"을 눌렀다. 아래 기대 조건마다 ${VERIFY_TOOL}를 한 번씩 불러라.`,
     `- criterion_id: 아래 id 그대로. plan: JSON 문자열 {"steps":[...],"expect":[...]}.`,
     `- steps는 미리보기(${startUrl})를 새로 연 상태에서 시작한다. action: click·type·select·scroll·hover·reload·navigate, 요소는 {"target":{"role":"button","name":"주문하기"}}처럼 접근성 역할과 이름으로.`,
-    `- expect: {"kind":"text","text":"..."} · {"kind":"element","role":"...","name":"..."} · {"kind":"route","path":"/..."} · {"kind":"no_errors"} · 눈으로만 판단할 것만 {"kind":"visual","question":"..."}.`,
+    `- expect: {"kind":"text","text":"..."} · {"kind":"element","role":"...","name":"..."} · {"kind":"route","path":"/..."} · {"kind":"no_errors"} · 눈으로만 판단할 것만 {"kind":"visual","question":"..."}(판단은 적지 않는다: 적으면 거절되고, visual은 확인 안 됨으로 남는다).`,
+    `- 조건마다 한 번만 부른다. 같은 조건을 다른 계획으로 다시 부르면 거절된다.`,
     `- 판정은 러너가 관찰로 한다. 결과를 통과로 바꾸어 말하지 말고, 실패하면 실패라고 전해라.`,
     ...run.criteria.map((c) => `- ${c.id}: ${c.text}`),
   ].join("\n");

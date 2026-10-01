@@ -52,6 +52,8 @@ interface Props {
   onRemoveElement?: () => void;
   /** cr-verify — the "내 제품 테스트" panel, drawn above the composer when the host shows it. */
   verifyPanel?: import("react").ReactNode;
+  /** cr-verify — a product test is driving the browser: nothing is sent until it ends. */
+  sendLocked?: boolean;
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
   /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
@@ -405,7 +407,7 @@ export function ChatPanel(props: Props) {
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
-    if ((!value && pendingImages.length === 0) || streaming || unavailable) return;
+    if ((!value && pendingImages.length === 0) || streaming || unavailable || props.sendLocked) return;
     // `text` given = the PARKED message going out when the turn ended (#416). It is its own message: it never contained the
     // prompt the learner imported into the draft meanwhile, so it carries no import reference — and the draft typed while
     // waiting is not thrown away with it (observed in the browser run: the parked send took the draft's provenance and
@@ -427,6 +429,8 @@ export function ChatPanel(props: Props) {
     // #751 U4 — a turn the instructor cut off hands the parked message back, exactly like the learner's own Stop. Never sent.
     if (shouldRestoreQueue(prev, streaming, queued, !!props.stopNotice)) { restoreQueuedToDraft(); return; }
     if (unavailable || !shouldFlushQueue(prev, streaming, queued, !!props.stopNotice)) return;
+    // cr-verify — a product test holds the tab: the parked message goes back to the draft, never lost.
+    if (props.sendLocked) { restoreQueuedToDraft(); return; }
     const text = queued as string;
     setQueued(null);
     submit(text);
@@ -1148,7 +1152,7 @@ export function ChatPanel(props: Props) {
             ) : (
               <button
                 onClick={() => submit()}
-                disabled={!draft.trim() && pendingImages.length === 0}
+                disabled={(!draft.trim() && pendingImages.length === 0) || props.sendLocked}
                 className="hps-btn-send"
               >
                 Send

@@ -616,6 +616,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (msg.type === "verifyOpen") return this.postVerifyState();
+    // A run or re-test while the coach is answering would share the tab and the record with that turn.
+    if (this.pendingSends > 0 || this.activeStreams.size > 0) return this.postVerifyState({ error: refusalText("turn_running") });
     if (msg.type === "verifyStart") {
       const r = await this.verifySession.start(msg.criteria);
       return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
@@ -3043,6 +3045,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     images?: string[],
     instructorPromptRefs?: Array<{ object_id: string; revision: number }>,
   ): Promise<void> {
+    // cr-verify — a re-test is driving the tab and writing the record: the turn waits for it.
+    if (this.verifySession?.running) {
+      await this.post({type:"inputRejected",text,images});
+      await this.post({type:"streamError",streamId:"activity",error:"제품 테스트가 끝난 뒤에 보내 주세요."});
+      return;
+    }
     this.pendingSends++;
     let releaseActivity: (()=>void) | undefined;
     let preflightComplete=false;
@@ -3857,6 +3865,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
       if (this.effortTurn?.id === streamId) void this.refreshEffortResult().catch(() => { /* panel may have closed */ });
       this.activeStreams.delete(streamId);
+      // cr-verify — the run this turn carried takes no more coach calls once the turn ends.
+      this.verifySession?.endTurn();
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
