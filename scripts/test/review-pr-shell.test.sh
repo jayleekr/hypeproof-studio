@@ -149,6 +149,96 @@ else
 fi
 rm -f "$_TMP_DB"
 
+# 18. --profile / --cohort args present in script
+if grep -q '\-\-profile' "$SCRIPT" && grep -q '\-\-cohort' "$SCRIPT"; then
+  ok "--profile / --cohort args declared in script"
+else
+  fail "--profile / --cohort args not found in script"
+fi
+
+# 19. --no-app arg present in script
+if grep -q '\-\-no-app' "$SCRIPT"; then
+  ok "--no-app arg declared in script"
+else
+  fail "--no-app arg not found in script"
+fi
+
+# 20. --after arg present in script
+if grep -q '\-\-after' "$SCRIPT"; then
+  ok "--after arg declared in script"
+else
+  fail "--after arg not found in script"
+fi
+
+# 21. Default profile hardcoded (not from grep on all *.ts)
+# Old pattern: grep -h -m1 ... worker/src/profiles/*.ts (multiline)
+# New pattern: DEFAULT_PROFILE="sk-biopharm-kids-..." from literal
+if grep -q 'DEFAULT_PROFILE="sk-biopharm-kids-' "$SCRIPT"; then
+  ok "DEFAULT_PROFILE hardcoded literal found (not grep on all *.ts)"
+else
+  fail "DEFAULT_PROFILE hardcoded literal not found"
+fi
+
+# 22. Old multiline grep pattern removed (grep -h -m1 on all *.ts)
+if grep -qE 'grep.*-m1.*profiles/\*\.ts' "$SCRIPT"; then
+  fail "old grep -m1 profiles/*.ts pattern still present (multiline PROFILE_ID bug)"
+else
+  ok "old grep -m1 profiles/*.ts pattern absent"
+fi
+
+# 23. Line-count validation for PROFILE_ID present
+if grep -q 'PROFILE_LINE_COUNT' "$SCRIPT"; then
+  ok "PROFILE_LINE_COUNT validation present"
+else
+  fail "PROFILE_LINE_COUNT validation not found"
+fi
+
+# 24. Line-count validation for COHORT_ID present
+if grep -q 'COHORT_LINE_COUNT' "$SCRIPT"; then
+  ok "COHORT_LINE_COUNT validation present"
+else
+  fail "COHORT_LINE_COUNT validation not found"
+fi
+
+# 25. Draft PUT failure exits with exit 1 (no WARNING fallback)
+if grep -q 'authoring draft PUT failed' "$SCRIPT"; then
+  ok "draft PUT failure exits with error message (no WARNING fallback)"
+else
+  fail "draft PUT failure error message not found"
+fi
+
+# 26. REVIEW_SERVER_URL exported for --after script
+if grep -q 'export REVIEW_SERVER_URL' "$SCRIPT"; then
+  ok "REVIEW_SERVER_URL exported for --after script"
+else
+  fail "REVIEW_SERVER_URL not exported"
+fi
+
+# 27. REVIEW_ISSUER_TOKEN_FILE (file path, not value) exported for --after script
+if grep -q 'export REVIEW_ISSUER_TOKEN_FILE' "$SCRIPT"; then
+  ok "REVIEW_ISSUER_TOKEN_FILE (file path) exported for --after script"
+else
+  fail "REVIEW_ISSUER_TOKEN_FILE not exported"
+fi
+
+# 28. Token value itself NOT exported (only file path)
+if grep -qE '^export REVIEW_TOKEN=' "$SCRIPT" || grep -qE '^export ISSUER_TOKEN=' "$SCRIPT"; then
+  fail "token value exported directly (security violation — only file path should be exported)"
+else
+  ok "token value not directly exported (only file path via REVIEW_ISSUER_TOKEN_FILE)"
+fi
+
+# 29. --no-app: PROFILE_ID validation code present before NO_APP branch
+# Both validations must appear before step 5 (the NO_APP conditional)
+PROFILE_VAL_LINE="$(grep -n 'PROFILE_LINE_COUNT' "$SCRIPT" | head -1 | cut -d: -f1)"
+NO_APP_LINE="$(grep -n 'NO_APP.*-eq.*1' "$SCRIPT" | head -1 | cut -d: -f1)"
+if [[ -n "$PROFILE_VAL_LINE" ]] && [[ -n "$NO_APP_LINE" ]] && \
+   [[ "$PROFILE_VAL_LINE" -lt "$NO_APP_LINE" ]]; then
+  ok "PROFILE_ID validation runs before --no-app branch (same path regardless of --no-app)"
+else
+  fail "PROFILE_ID validation not found before --no-app branch"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
