@@ -62,7 +62,7 @@ export interface CrSurfaceInventory {
 }
 
 export const CR_SURFACES: CrSurfaceInventory = {
-  commands: ["hypeproof-chat.pickElement"],
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"],
   mcpTools: CR_BROWSER_TOOL_NAMES.map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES],
   webviewMessages: ["removeElementContext"],

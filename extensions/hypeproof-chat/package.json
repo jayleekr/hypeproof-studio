@@ -155,6 +155,11 @@
         "title": "HypeProof: 화면에서 요소 골라 코치에게 묻기",
         "icon": "$(inspect)",
         "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.browserResults",
+        "title": "HypeProof: 실험 브라우저 결과 기록 보기",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
       }
     ],
     "menus": {
@@ -206,6 +211,10 @@
         },
         {
           "command": "hypeproof-chat.pickElement",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.browserResults",
           "when": "hypeproof-chat.curriculumRuntimeEnabled"
         }
       ]

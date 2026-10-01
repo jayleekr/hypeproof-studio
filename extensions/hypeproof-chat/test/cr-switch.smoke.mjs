@@ -62,7 +62,9 @@ assert.ok(plant((m) => (cmd(m).command = "hypeproof-chat.renamed")).some((p) => 
 ok("commands: the manifest gates every inventoried CR command; planted ungated variants are caught");
 // Every command handler re-checks the served switch (a command runs without its menu).
 assert.match(providerSrc, /async pickElement\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
-ok("commands: the pickElement handler re-checks the served switch before anything else");
+assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
+assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"], "both CR commands are in the inventory the manifest check walks");
+ok("commands: the pickElement and browserResults handlers re-check the served switch before anything else");
 
 // ── MCP tools: granted and registered only with the switch on ───────────────
 const adult = { game: { template_tier: "website" }, sdk_tools: { browser: true }, minor_cohort: false };

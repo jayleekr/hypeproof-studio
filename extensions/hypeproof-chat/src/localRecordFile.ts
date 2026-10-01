@@ -4,6 +4,10 @@ import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { StoragePort } from '../../../worker/src/lib/measurement-core/local-record.ts';
 
+/** The local record's directory under the extension's global storage: the local review
+ * (localReviewPanel.ts) and CR-10's browser-result bytes (chatPanelProvider.ts) share it. */
+export const LOCAL_RECORD_DIR = 'local-review-v1';
+
 /** Private flat namespace. Complete files are fsynced before atomic publication.
  * Interrupted temporary writes are never listed as records. No network or eviction. */
 export class FileRecordStorage implements StoragePort {

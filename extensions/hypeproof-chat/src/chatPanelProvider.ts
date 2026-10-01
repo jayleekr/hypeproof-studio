@@ -57,7 +57,13 @@ import {
   recordProxyCrResult,
   recordElementCapture,
   proxyTurnBrowser,
+  crResultHistory,
+  crResultEntries,
+  assessmentBatch,
+  type BlobSink,
 } from "./crHostWiring";
+import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
+import { LocalRecord } from "../../../worker/src/lib/measurement-core/local-record";
 import { isMinorTier } from "./sdkCoachHelpers";
 import { toMcpToolResult } from "./browserMcp";
 
@@ -445,6 +451,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private mcpBrowser?: BrowserControl;
   /** CR-10 — Experiment Browser results the SDK path produced, matched to their tool_result (crHostWiring). */
   private readonly crSdkResults = new SdkCrResults();
+  /**
+   * CR-10 — the local measurement-core record (`hps-local-record/1`, the store the local
+   * review uses) that holds a browser result's screenshot and trace bytes by digest.
+   * Opened on first use; writes are serialized here and run under the record's file lock.
+   */
+  private crRecord: { store: FileRecordStorage; record: LocalRecord } | null = null;
+  private crBlobWrites: Promise<unknown> = Promise.resolve();
+  private crRecordHandle(): { store: FileRecordStorage; record: LocalRecord } {
+    if (!this.crRecord) {
+      const store = new FileRecordStorage(path.join(this.context.globalStorageUri.fsPath, LOCAL_RECORD_DIR));
+      this.crRecord = { store, record: new LocalRecord(store) };
+    }
+    return this.crRecord;
+  }
+  private readonly crBlobSink: BlobSink = (blob) => {
+    const next = this.crBlobWrites.then(async () => {
+      try {
+        const { store, record } = this.crRecordHandle();
+        return await store.exclusive(() => record.putBlob(blob));
+      } catch {
+        // Busy (a local review in another window holds the lock), full or failed: the
+        // event then carries no digest for these bytes, never a dangling one.
+        return null;
+      }
+    });
+    this.crBlobWrites = next;
+    return next;
+  };
   /** CR-09 — the element the student picked for the NEXT turn, until sent or removed. */
   private readonly elementQueue = new ElementQueue();
   /** CR-09 — a pick is waiting for the student's click; a second one is refused, not stacked. */
@@ -753,6 +787,62 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     this.attachElementContext(ctx);
     await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+  }
+
+  /**
+   * CR-10 — the Experiment Browser results stored on this seat's record, read back and
+   * labelled with the version they were taken against: "현재 버전" when the page's files
+   * are still at that version, "이전 버전" when they changed since, "버전 확인 안 됨" when
+   * the preview is off. A result whose screenshot bytes are stored can be attached to the
+   * next message, with a line saying which version it shows.
+   */
+  async showBrowserResults(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("지금 수업에서는 실험 브라우저 기록을 볼 수 없어요.");
+      return;
+    }
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    const proxy = vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+    const recorder = this.nativeObservation ?? await this.prepareObservation(proxy, token, await this.ensureProfile());
+    const events = recorder?.snapshot().events ?? [];
+    const root = this.liveServer.currentRoot();
+    const current = new Map<string, string | null>();
+    for (const entry of crResultEntries(events)) {
+      try {
+        current.set(entry, root ? (await artifactVersionFor(root, '/' + entry)).id : null);
+      } catch {
+        current.set(entry, null);
+      }
+    }
+    const items = crResultHistory(events, (entry) => current.get(entry) ?? null);
+    if (!items.length) {
+      this.postPageNotice("아직 기록된 실험 브라우저 결과가 없어요.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      items.map((item) => ({ label: item.label, description: item.description, detail: item.detail, item })),
+      { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" },
+    );
+    if (!picked?.item.screenshot_digest) return;
+    if (!this.isImagePasteEnabled()) {
+      this.postPageNotice("이 수업에서는 기록된 화면을 코치에게 보낼 수 없어요.");
+      return;
+    }
+    let blob: Awaited<ReturnType<LocalRecord['getBlob']>> = null;
+    try {
+      blob = await this.crRecordHandle().record.getBlob(picked.item.screenshot_digest);
+    } catch {
+      blob = null;
+    }
+    if (!blob) {
+      this.postPageNotice("기록된 화면을 찾지 못했어요.");
+      return;
+    }
+    this.pendingPageImage = `data:${blob.media_type};base64,${Buffer.from(blob.bytes).toString('base64')}`;
+    this.pendingPageContext =
+      `[실험 브라우저 기록] 붙인 화면은 ${picked.item.label}에서 찍은 것이다 (${picked.item.description}). ` +
+      (picked.item.state === "current" ? "지금 파일과 같은 버전이다." : "지금 파일과 다를 수 있다. 지금 화면처럼 말하지 마라.");
+    this.postPageNotice(`${picked.item.label} 화면을 다음 메시지에 붙였어요.`);
   }
 
   /** Queue a picked element for the NEXT turn and show the student exactly what goes. */
@@ -2271,7 +2361,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const r = await this.mcpBrowser.execute({ id: `mcp-${name}`, name, input });
           // CR-10 — a CR result is recorded against its artifact version when the SDK
           // reports this call's tool_result (onActivity takes it from this queue).
-          this.crSdkResults.onInspect(name, input, r.observation);
+          this.crSdkResults.onInspect(name, input, r.observation, this.crBlobSink);
           // BrowserToolResult(content: text | image_url) → McpToolResult(text | image), the
           // same conversion the CR-03 adapter parity check runs.
           return toMcpToolResult(r);
@@ -2376,7 +2466,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if(JSON.stringify(msg.eventIds)!==JSON.stringify(snapshot.events.map(e=>e.id))){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'새 작업 기록이 추가됐습니다. 보낼 내용을 다시 확인해 주세요.'});return;}
         const controller=new AbortController();this.observationAssessment=controller;
         try{
-          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
+          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(assessmentBatch(snapshot)),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
           if(!response.ok){const failure=await response.json() as {error?:{code?:string}};throw Error(/^[a-z_0-9]{1,80}$/.test(failure.error?.code??'')?failure.error!.code:'assessment_failed');}
           const result=await response.json() as {findings:unknown;capability_model?:unknown};
           // Against the model the SERVICE says it wrote them in, not a constant. The
@@ -2920,10 +3010,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       catch { observation.batch.incomplete=true;this.persistObservation(observation);this.nativeObservationError='관찰 기록이 불완전합니다. 이 기록으로 수행 능력을 판단하지 않습니다.'; }
     };
     recordObservation('user',text);
-    // CR-10 — the element capture is a browser result bound to its artifact version.
-    if (element) void recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element);
     const observationFiles = new Map<string,string>();
     const observationCaptures: Promise<void>[] = [];
+    // CR-10 — the element capture is a browser result bound to its artifact version; its
+    // bytes are stored first, and the turn's end waits for it (observationCaptures).
+    if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, this.crBlobSink));
     const messageId = randomId();
     const ctrl = new AbortController();
     this.activeStreams.set(streamId, ctrl);
@@ -3100,7 +3191,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (a.kind==='tool_result') {
           const recordDefault = () => recordObservation('tool_result',a.isError?(a.reason??'도구 실패'):(toolLabels.get(a.id)??'도구 실행 완료'),{tool_id:a.id,outcome:a.isError?'error':'success'});
           const crResult = this.crSdkResults.onToolResult(a.id, a.isError);
-          if (crResult) void crResult.then((t) => recordObservation('tool_result', t, { tool_id: a.id, outcome: 'success' }), recordDefault);
+          if (crResult) observationCaptures.push(crResult.then((r) => recordObservation('tool_result', r.text, { ...r.refs, tool_id: a.id, outcome: 'success' }), recordDefault));
           else recordDefault();
         }
         if (a.kind==='tool_result' && !a.isError && observationFiles.has(a.id)) {
@@ -3244,6 +3335,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             onDelta,
             onCitations,
             recordObservation,
+            trackObservation: (q) => observationCaptures.push(q),
           });
         } else {
           await runProxy();
@@ -3645,6 +3737,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       value: string,
       extra?: Partial<import("./nativeObservationContract").ObservationEvent>,
     ) => void;
+    /** CR-10 — the turn's end waits for these recordings (their bytes are stored first). */
+    trackObservation?: (p: Promise<void>) => void;
   }): Promise<void> {
     // CR-11/CR-09 — with the switch on the turn drives the long-lived control, so the scope
     // guard and the picked element's refs outlive the turn (proxyTurnBrowser).
@@ -3738,7 +3832,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           toolResults.push(toProxyToolResult(call.id, tr, fixed.note));
           // CR-10 — with the switch on, the result is recorded against its artifact version.
           if (tr.observation && p.recordObservation) {
-            void recordProxyCrResult(p.recordObservation, call.id, fixed.call.name, fixed.call.input ?? {}, tr.observation);
+            const recording = recordProxyCrResult(p.recordObservation, call.id, fixed.call.name, fixed.call.input ?? {}, tr.observation, this.crBlobSink);
+            if (p.trackObservation) p.trackObservation(recording);
+            else void recording;
           }
         }
         scratch.push({ role: "user", content: toolResults });

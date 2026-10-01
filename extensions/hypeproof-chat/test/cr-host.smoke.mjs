@@ -3,7 +3,9 @@
 //   CR-09  a removed element sends nothing; what is sent equals what was previewed; the
 //          crop joins a queued page screenshot instead of replacing it.
 //   CR-10  one proxy call, one SDK tool_result and one pick each put a
-//          `hps-browser-result/1` tool_result on the record.
+//          `hps-browser-result/1` tool_result on the record, its artifact references as
+//          event keys and its screenshot and trace bytes stored on the local record first;
+//          the stored results read back labelled by version.
 //   CR-11  with the switch on the SDK `browser_open` refuses other origins before any tab
 //          call, and `browser_screenshot` does not fall back past a CR refusal.
 // Each with a control that must pass and a planted defect that must be caught.
@@ -16,6 +18,7 @@ import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.m
 
 const w = await import("../src/crHostWiring.ts");
 const { readBrowserResultEvent } = await import("../src/browserResult.ts");
+const { LocalRecord, validateObservation } = await import("../../../worker/src/lib/measurement-core/index.ts");
 const { CrExecutor, checkAgentOrigin } = await import("../src/experimentBrowser.ts");
 const { buildHypeproofMcpServer, crBrowserOpenRefusal, MCP_CR_BROWSER_TOOLS } = await import("../src/browserMcp.ts");
 const providerSrc = readFileSync(new URL("../src/chatPanelProvider.ts", import.meta.url), "utf8");
@@ -100,40 +103,102 @@ function observationOf(page) {
   return ex;
 }
 
-await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put a browser result on the record", async () => {
+/** The local record the provider's sink writes to, on an in-memory port. */
+function localRecord() {
+  const store = new Map();
+  const record = new LocalRecord({
+    read: async (k) => store.get(k) ?? null,
+    write: async (k, v, o) => { if (o?.ifAbsent && store.has(k)) throw new Error("exists"); store.set(k, v); },
+    list: async (p) => [...store.keys()].filter((k) => k.startsWith(p)).sort(),
+    remove: async (k) => { store.delete(k); },
+  });
+  return { store, record, sink: (blob) => record.putBlob(blob) };
+}
+
+/** Every event must also pass the one validator, on the format the recorder writes. */
+function validBatch(events) {
+  const evs = events.map((e, i) => ({ id: `x${i + 1}`, seq: i + 1, task: "t", at: i, assistance: "unknown", ...e }));
+  return validateObservation({ format: "hps-observation/1", scope: "s", session: "s", program: "p", events: evs }).batch.events;
+}
+
+await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put a browser result on the record, its bytes stored and resolvable", async () => {
   const ex = observationOf(makeFakePage());
   const obs = (await ex.execute("browser_observe")).observation;
   const click = (await ex.execute("browser_click", { ref: "e1" })).observation;
+  const local = localRecord();
 
   const proxy = recorder();
-  await w.recordProxyCrResult(proxy.record, "call-1", "browser_click", { ref: "e1" }, click);
+  await w.recordProxyCrResult(proxy.record, "call-1", "browser_click", { ref: "e1" }, click, local.sink);
   assert.deepEqual(proxy.events.map((e) => [e.kind, e.tool_id]), [["tool_request", "proxy-call-1"], ["tool_result", "proxy-call-1"]]);
+  const result = proxy.events[1];
+  assert.equal(result.artifact_version, FAKE_VERSION.id, "the version rides on the event as a key");
+  assert.match(result.screenshot_digest, /^sha256:[a-f0-9]{64}$/);
+  assert.match(result.trace_digest, /^sha256:[a-f0-9]{64}$/);
+  const shot = await local.record.getBlob(result.screenshot_digest);
+  assert.equal(Buffer.from(shot.bytes).toString("base64"), click.screenshot.data, "the screenshot digest resolves to the screenshot");
+  const trace = JSON.parse(new TextDecoder().decode((await local.record.getBlob(result.trace_digest)).bytes));
+  assert.deepEqual([trace.tool, trace.input, trace.step], ["browser_click", { ref: "e1" }, click.step], "the trace digest resolves to the action trace");
   const pr = browserResults(proxy.events);
   assert.equal(pr.length, 1);
   assert.equal(pr[0].kind, "action");
   assert.equal(pr[0].artifact_version, FAKE_VERSION.id);
+  assert.equal(pr[0].screenshot_digest, result.screenshot_digest, "text and keys agree");
 
   const sdk = new w.SdkCrResults();
   sdk.reset();
   sdk.onToolUse("tu-1", "mcp__hypeproof__browser_observe", true);
-  sdk.onInspect("browser_observe", {}, obs);
-  const text = await sdk.onToolResult("tu-1", false);
-  const sr = readBrowserResultEvent({ kind: "tool_result", text });
-  assert.equal(sr?.kind, "observation");
-  assert.equal(sr?.tool, "browser_observe");
+  sdk.onInspect("browser_observe", {}, obs, local.sink);
+  const sr = await sdk.onToolResult("tu-1", false);
+  assert.equal(sr.refs.artifact_version, FAKE_VERSION.id);
+  assert.ok(await local.record.getBlob(sr.refs.screenshot_digest));
+  const sdkRecord = readBrowserResultEvent({ kind: "tool_result", text: sr.text, ...sr.refs });
+  assert.equal(sdkRecord?.kind, "observation");
+  assert.equal(sdkRecord?.tool, "browser_observe");
 
   const pick = recorder();
-  await w.recordElementCapture(pick.record, "pick-1", { context: CTX, text: "x", image: null });
+  await w.recordElementCapture(pick.record, "pick-1", { context: CTX, text: "x", image: null }, local.sink);
   const kr = browserResults(pick.events);
   assert.equal(kr.length, 1);
   assert.equal(kr[0].kind, "capture");
-  assert.equal(kr[0].screenshot_digest?.startsWith("sha256:"), true);
-  // The provider calls these for each path.
-  assert.match(providerSrc, /this\.crSdkResults\.onInspect\(name, input, r\.observation\);/);
+  const crop = await local.record.getBlob(pick.events[1].screenshot_digest);
+  assert.equal(crop.media_type, "image/png", "the element crop is stored as the PNG it is");
+  assert.equal(Buffer.from(crop.bytes).toString("base64"), CTX.crop.data);
+
+  // The events the recorder writes are valid hps-observation/1 events, references and all.
+  const stored = validBatch([...proxy.events, ...pick.events]);
+  assert.equal(stored.filter((e) => e.artifact_version === FAKE_VERSION.id).length, 2);
+  // The provider calls these for each path, with its sink, and the turn's end waits for them.
+  assert.match(providerSrc, /this\.crSdkResults\.onInspect\(name, input, r\.observation, this\.crBlobSink\);/);
   assert.match(providerSrc, /const crResult = this\.crSdkResults\.onToolResult\(a\.id, a\.isError\);/);
+  assert.match(providerSrc, /if \(crResult\) observationCaptures\.push\(crResult\.then\(\(r\) => recordObservation\('tool_result', r\.text, \{ \.\.\.r\.refs, tool_id: a\.id/);
   assert.match(providerSrc, /this\.crSdkResults\.onToolUse\(a\.id, a\.name, this\.isCurriculumRuntimeEnabled\(\)\)/);
-  assert.match(providerSrc, /void recordProxyCrResult\(p\.recordObservation, call\.id, /);
-  assert.match(providerSrc, /if \(element\) void recordElementCapture\(recordObservation, /);
+  assert.match(providerSrc, /const recording = recordProxyCrResult\(p\.recordObservation, call\.id, fixed\.call\.name, fixed\.call\.input \?\? \{\}, tr\.observation, this\.crBlobSink\);\s*if \(p\.trackObservation\) p\.trackObservation\(recording\);/);
+  assert.match(providerSrc, /trackObservation: \(q\) => observationCaptures\.push\(q\),/);
+  assert.match(providerSrc, /if \(element\) observationCaptures\.push\(recordElementCapture\(recordObservation, `pick-\$\{crypto\.randomUUID\(\)\}`, element, this\.crBlobSink\)\);/);
+  assert.match(providerSrc, /return await store\.exclusive\(\(\) => record\.putBlob\(blob\)\);/);
+});
+
+await test("CR-10 negative: bytes that were not stored are never named; a sink that answers another digest is not trusted", async () => {
+  const ex = observationOf(makeFakePage());
+  await ex.execute("browser_observe");
+  const click = (await ex.execute("browser_click", { ref: "e1" })).observation;
+  for (const [why, sink] of [
+    ["no sink", undefined],
+    ["sink full", async () => null],
+    ["sink throws", async () => { throw new Error("storage_busy"); }],
+    ["sink lies", async () => `sha256:${"f".repeat(64)}`],
+  ]) {
+    const r = recorder();
+    await w.recordProxyCrResult(r.record, "c", "browser_click", { ref: "e1" }, click, sink);
+    const e = r.events[1];
+    assert.equal(e.outcome, "success", `${why}: the result is still recorded`);
+    assert.equal(e.artifact_version, FAKE_VERSION.id, `${why}: still bound to its version`);
+    assert.equal("screenshot_digest" in e, false, `${why}: no screenshot digest without stored bytes`);
+    assert.equal("trace_digest" in e, false, `${why}: no trace digest without stored bytes`);
+    const text = browserResults(r.events)[0];
+    assert.deepEqual([text.screenshot_digest, text.trace_digest], [null, null], `${why}: the readable copy says the same`);
+    validBatch(r.events);
+  }
 });
 
 await test("CR-10: SDK results pair with their tool_results oldest first; browser_select asks, observe is allowed", async () => {
@@ -145,8 +210,8 @@ await test("CR-10: SDK results pair with their tool_results oldest first; browse
   sdk.onToolUse("tu-b", "mcp__hypeproof__browser_hover", true);
   sdk.onInspect("browser_observe", {}, first);
   sdk.onInspect("browser_hover", { ref: "e1" }, second);
-  const a = readBrowserResultEvent({ kind: "tool_result", text: await sdk.onToolResult("tu-a", false) });
-  const b = readBrowserResultEvent({ kind: "tool_result", text: await sdk.onToolResult("tu-b", false) });
+  const a = readBrowserResultEvent({ kind: "tool_result", text: (await sdk.onToolResult("tu-a", false)).text });
+  const b = readBrowserResultEvent({ kind: "tool_result", text: (await sdk.onToolResult("tu-b", false)).text });
   assert.deepEqual([a?.tool, b?.tool], ["browser_observe", "browser_hover"], "the first tool_result gets the first result");
   const { evaluateSdkToolUse } = await import("../src/sdkCoachHelpers.ts");
   const grant = [...MCP_CR_BROWSER_TOOLS];
@@ -170,9 +235,57 @@ await test("CR-10 negative: switch off, errors and non-browser tools record no b
   assert.equal(sdk.onToolResult("tu-err", true), undefined, "an error result is not a browser result");
 
   const bad = recorder();
-  await w.recordProxyCrResult(bad.record, "c", "browser_click", {}, { ...obs, artifact: null });
+  await w.recordProxyCrResult(bad.record, "c", "browser_click", {}, { ...obs, artifact: null }, localRecord().sink);
   assert.deepEqual(bad.events.map((e) => [e.kind, e.outcome ?? null]), [["tool_request", null], ["tool_result", "error"]]);
   assert.equal(browserResults(bad.events).length, 0, "no version: recorded as an error, never as a result");
+  assert.equal("artifact_version" in bad.events[1], false, "an error event names no version");
+});
+
+await test("CR-10 read-back: stored results come back newest first, labelled current, earlier or unknown by their page's version now", async () => {
+  const ex = observationOf(makeFakePage());
+  const obs = (await ex.execute("browser_observe")).observation;
+  const local = localRecord();
+  const V0 = FAKE_VERSION.id;
+  const V1 = `sha256:${"c".repeat(64)}`;
+  const r = recorder();
+  await w.recordProxyCrResult(r.record, "a", "browser_click", { ref: "e1" }, { ...obs, step: 2, records: [{ kind: "console", level: "error", message: "boom", step: 2, time: 1, documentGeneration: "L0" }] }, local.sink);
+  await new Promise((res) => setTimeout(res, 5));
+  await w.recordProxyCrResult(r.record, "b", "browser_observe", {}, { ...obs, artifact: { ...FAKE_VERSION, id: V1 } }, local.sink);
+  await w.recordProxyCrResult(r.record, "c", "browser_observe", {}, { ...obs, artifact: { ...FAKE_VERSION, id: V1, entry: "about.html" }, route: "/about.html" }, local.sink);
+  const events = validBatch(r.events);
+  assert.deepEqual(w.crResultEntries(events), ["index.html", "about.html"]);
+  const items = w.crResultHistory(events, (entry) => (entry === "index.html" ? V1 : null));
+  assert.equal(items.length, 3);
+  const byState = Object.fromEntries(items.map((i) => [i.version + i.description, i.state]));
+  const click = items.find((i) => i.description.startsWith("browser_click"));
+  assert.equal(click.state, "earlier", "a result on v0 says it belongs to the earlier version after v1");
+  assert.match(click.label, /^이전 버전 · sha256:aaaaaaa/);
+  assert.match(click.detail, /오류 1건: boom/, "the earlier result is still readable");
+  assert.ok(await local.record.getBlob(click.screenshot_digest), "its screenshot still resolves");
+  assert.equal(items.find((i) => i.version === V1 && i.description.includes("/index.html")).state, "current");
+  assert.equal(items.find((i) => i.description.includes("/about.html")).state, "unknown", "no current version known: never called earlier");
+  assert.ok(items[0].at >= items.at(-1).at, "newest first");
+  assert.ok(Object.keys(byState).length === 3);
+  // Planted: a reader that ignores the version and calls everything current is caught.
+  assert.notDeepEqual(items.map((i) => i.state), ["current", "current", "current"]);
+  // The command reads the record, not a copy, and re-checks the switch first.
+  assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
+  assert.match(providerSrc, /const events = recorder\?\.snapshot\(\)\.events \?\? \[\];/);
+  assert.match(providerSrc, /const items = crResultHistory\(events, \(entry\) => current\.get\(entry\) \?\? null\);/);
+  assert.match(providerSrc, /blob = await this\.crRecordHandle\(\)\.record\.getBlob\(picked\.item\.screenshot_digest\);/);
+});
+
+await test("CR-10: an assessment request leaves the reference keys out; the stored batch keeps them", async () => {
+  const ex = observationOf(makeFakePage());
+  const obs = (await ex.execute("browser_observe")).observation;
+  const r = recorder();
+  await w.recordProxyCrResult(r.record, "a", "browser_observe", {}, obs, localRecord().sink);
+  const batch = { format: "hps-observation/1", scope: "s", session: "s", program: "p", events: validBatch(r.events) };
+  const sent = w.assessmentBatch(batch);
+  assert.equal(sent.events.some((e) => "artifact_version" in e || "screenshot_digest" in e || "trace_digest" in e), false);
+  assert.equal(batch.events[1].artifact_version, FAKE_VERSION.id, "the record itself is not changed");
+  assert.deepEqual(sent.events.map((e) => e.text), batch.events.map((e) => e.text), "every quotable text is sent unchanged");
+  assert.match(providerSrc, /body:JSON\.stringify\(assessmentBatch\(snapshot\)\)/);
 });
 
 // ── CR-11 on the SDK host ───────────────────────────────────────────────────

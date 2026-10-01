@@ -537,6 +537,9 @@ export async function activate(context: vscode.ExtensionContext) {
     // about it. Gated by the CR switch in package.json AND re-checked inside
     // pickElement(), because a command can be executed without its menu (recon R3).
     vscode.commands.registerCommand("hypeproof-chat.pickElement", () => provider.pickElement()),
+    // CR-10 (cr-browser) — the stored browser results, labelled by artifact version. Same
+    // gate: the manifest hides it with the switch off and showBrowserResults() re-checks.
+    vscode.commands.registerCommand("hypeproof-chat.browserResults", () => provider.showBrowserResults()),
 
     // #384 — "drag a screenshot in" that survives VS Code. Dropping a file on
     // the editor makes VS Code open it as a tab (it intercepts the drop before

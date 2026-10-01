@@ -8,7 +8,9 @@
 //   - the picked element queued for the next turn: removed means nothing of it is sent,
 //     and what is sent equals what was previewed (CR-09);
 //   - every browser result, from either runtime and from a pick, written as a
-//     `hps-browser-result/1` tool_result on the turn's record (CR-10);
+//     `hps-browser-result/1` tool_result on the turn's record, carrying its artifact
+//     references as event keys, its screenshot and trace bytes stored first on the local
+//     record (CR-10); and the stored results read back, labelled by version;
 //   - which browser control a proxy turn drives, so the scope guard and the picked
 //     element's refs outlive the turn (CR-11, CR-09).
 // The provider keeps only the calls into these functions.
@@ -16,7 +18,17 @@
 import { isCurriculumRuntimeEnabled } from "./curriculumRuntime.ts";
 import { MCP_CR_BROWSER_TOOLS } from "./browserMcp.ts";
 import { elementContextText, type ElementContext } from "./elementPick.ts";
-import { browserResultRecord, browserResultEventText } from "./browserResult.ts";
+import {
+  browserResultParts,
+  browserResultEventText,
+  browserResultRefs,
+  labelByVersion,
+  readBrowserResultEvent,
+  type BrowserResultBlobs,
+  type BrowserResultRecord,
+} from "./browserResult.ts";
+import type { BlobMediaType } from "../../../worker/src/lib/measurement-core/local-record.ts";
+import { BROWSER_RESULT_REF_KEYS } from "../../../worker/src/lib/measurement-core/learning-events.ts";
 import type { Observation } from "./experimentBrowser.ts";
 import type { ElementPreview } from "./protocol.ts";
 
@@ -107,22 +119,61 @@ export function turnImages(images: readonly string[] | undefined, pageImage: str
 
 // ── CR-10: every browser result on the turn's record ────────────────────────
 
+/** The artifact references a browser result's `tool_result` event carries (BROWSER_RESULT_REF_KEYS). */
+export interface CrResultRefs {
+  artifact_version: string;
+  screenshot_digest?: string;
+  trace_digest?: string;
+}
+
 export type RecordFn = (
   kind: "tool_request" | "tool_result",
   value: string,
-  extra?: { tool_id?: string; outcome?: "success" | "error" },
+  extra?: { tool_id?: string; outcome?: "success" | "error" } & Partial<CrResultRefs>,
 ) => void;
+
+/**
+ * Stores bytes on the local record (`LocalRecord.putBlob`) and resolves to their digest,
+ * or to null when they were not stored. Never throws into a turn.
+ */
+export type BlobSink = (blob: { media_type: BlobMediaType; base64?: string; json?: unknown }) => Promise<string | null>;
+
+/** One browser result as its `tool_result` event: readable text plus the reference keys. */
+export interface CrResultEvent {
+  text: string;
+  refs: CrResultRefs;
+}
 
 const OBSERVE_TOOLS = new Set(["browser_observe", "browser_read", "browser_screenshot"]);
 
-/** The `tool_result` text that binds one browser result to its artifact version. */
-export async function crResultText(
+/**
+ * Store a result's screenshot and trace, then drop from the record every digest whose
+ * bytes did not land: an event never names bytes the record does not hold.
+ */
+async function storeResultBlobs(record: BrowserResultRecord, blobs: BrowserResultBlobs, sink: BlobSink | undefined): Promise<void> {
+  const put = async (want: string | null, blob: Parameters<BlobSink>[0] | null): Promise<string | null> => {
+    if (!want || !blob || !sink) return null;
+    try {
+      return (await sink(blob)) === want ? want : null;
+    } catch {
+      return null;
+    }
+  };
+  record.screenshot_digest = await put(record.screenshot_digest, blobs.screenshot);
+  record.trace_digest = await put(record.trace_digest, { media_type: "application/json", json: blobs.trace });
+}
+
+/** The `tool_result` event that binds one browser result to its artifact version. */
+export async function crResultEvent(
   tool: string,
   input: Record<string, unknown>,
   observation: Observation,
+  sink?: BlobSink,
   kind: "observation" | "action" | "capture" = OBSERVE_TOOLS.has(tool.replace(/^mcp__hypeproof__/, "")) ? "observation" : "action",
-): Promise<string> {
-  return browserResultEventText(await browserResultRecord({ kind, tool, input, outcome: "success", observation }));
+): Promise<CrResultEvent> {
+  const { record, blobs } = await browserResultParts({ kind, tool, input, outcome: "success", observation });
+  await storeResultBlobs(record, blobs, sink);
+  return { text: browserResultEventText(record), refs: browserResultRefs(record) };
 }
 
 /** Proxy runtime: one CR tool call with an observation → a request and a result event. */
@@ -132,31 +183,27 @@ export async function recordProxyCrResult(
   name: string,
   input: Record<string, unknown>,
   observation: Observation,
+  sink?: BlobSink,
 ): Promise<void> {
   const toolId = `proxy-${callId}`;
   record("tool_request", `${name}(${JSON.stringify(input ?? {}).slice(0, 200)})`, { tool_id: toolId });
   try {
-    record("tool_result", await crResultText(name, input, observation), { tool_id: toolId, outcome: "success" });
+    const r = await crResultEvent(name, input, observation, sink);
+    record("tool_result", r.text, { ...r.refs, tool_id: toolId, outcome: "success" });
   } catch {
     record("tool_result", "브라우저 결과를 산출물 버전에 묶지 못했습니다.", { tool_id: toolId, outcome: "error" });
   }
 }
 
 /** A pick sent with a turn: a capture result bound to its version. */
-export async function recordElementCapture(record: RecordFn, toolId: string, element: QueuedElement): Promise<void> {
+export async function recordElementCapture(record: RecordFn, toolId: string, element: QueuedElement, sink?: BlobSink): Promise<void> {
   const ctx = element.context;
   record("tool_request", `pick_element(${ctx.ref})`, { tool_id: toolId });
   try {
-    const text = browserResultEventText(
-      await browserResultRecord({
-        kind: "capture",
-        tool: "pick_element",
-        input: { ref: ctx.ref },
-        outcome: "success",
-        observation: { ...ctx, step: null, records: [], screenshot: ctx.crop ? { data: ctx.crop.data } : null },
-      }),
-    );
-    record("tool_result", text, { tool_id: toolId, outcome: "success" });
+    const observation = { ...ctx, step: null, records: [], screenshot: ctx.crop ? { data: ctx.crop.data, mimeType: ctx.crop.mimeType } : null };
+    const { record: r, blobs } = await browserResultParts({ kind: "capture", tool: "pick_element", input: { ref: ctx.ref }, outcome: "success", observation });
+    await storeResultBlobs(r, blobs, sink);
+    record("tool_result", browserResultEventText(r), { ...browserResultRefs(r), tool_id: toolId, outcome: "success" });
   } catch {
     record("tool_result", "요소 캡처를 산출물 버전에 묶지 못했습니다.", { tool_id: toolId, outcome: "error" });
   }
@@ -168,7 +215,7 @@ export async function recordElementCapture(record: RecordFn, toolId: string, ele
  * tool_result activity (browser tools run one at a time).
  */
 export class SdkCrResults {
-  private pending: Array<Promise<string>> = [];
+  private pending: Array<Promise<CrResultEvent>> = [];
   private readonly ids = new Set<string>();
 
   /** A new turn: nothing carried over. */
@@ -178,9 +225,9 @@ export class SdkCrResults {
   }
 
   /** The MCP handler produced a CR result with an observation. */
-  onInspect(name: string, input: Record<string, unknown>, observation: Observation | undefined): void {
+  onInspect(name: string, input: Record<string, unknown>, observation: Observation | undefined, sink?: BlobSink): void {
     if (!observation) return;
-    const p = crResultText(name, input, observation);
+    const p = crResultEvent(name, input, observation, sink);
     p.catch(() => {});
     this.pending.push(p);
   }
@@ -194,12 +241,78 @@ export class SdkCrResults {
     this.ids.add(id);
   }
 
-  /** The browser-result text for this tool_result, when it is one of ours; else undefined. */
-  onToolResult(id: string, isError: boolean): Promise<string> | undefined {
+  /** The browser-result event for this tool_result, when it is one of ours; else undefined. */
+  onToolResult(id: string, isError: boolean): Promise<CrResultEvent> | undefined {
     if (isError || !this.ids.has(id)) return undefined;
     this.ids.delete(id);
     return this.pending.shift();
   }
+}
+
+// ── CR-10: the stored results, read back and labelled by version ────────────
+
+export interface CrResultItem {
+  /** e.g. "이전 버전 · sha256:1a2b3c4d" — what the list shows first. */
+  label: string;
+  description: string;
+  detail: string;
+  version: string;
+  state: "current" | "earlier" | "unknown";
+  /** Stored screenshot bytes the result names, or null. */
+  screenshot_digest: string | null;
+  at: number;
+}
+
+const STATE_LABEL = { current: "현재 버전", earlier: "이전 버전", unknown: "버전 확인 안 됨" } as const;
+
+/**
+ * Every browser result on a stored batch, newest first, each labelled with the version it
+ * was taken against compared with the version its page is at now (`currentByEntry`; null
+ * when the preview is off or the page is gone). Reads only what the record holds.
+ */
+export function crResultHistory(
+  events: ReadonlyArray<{ kind?: unknown; text?: unknown; at?: unknown; artifact_version?: unknown; screenshot_digest?: unknown; trace_digest?: unknown }>,
+  currentByEntry: (entry: string) => string | null,
+): CrResultItem[] {
+  const records = events.map((e) => readBrowserResultEvent(e)).filter((r): r is BrowserResultRecord => r !== null);
+  return labelByVersion(records, currentByEntry)
+    .sort((a, b) => b.record.at - a.record.at)
+    .map(({ record: r, version, label }) => {
+      // The same failure rule the agent reports by (failuresOf, CR-08).
+      const errors = r.records.filter((x) => x.kind === "exception" || x.kind === "network" || x.level === "error" || x.level === "assert");
+      return {
+        label: `${STATE_LABEL[label]} · ${version.slice(0, 15)}`,
+        description: `${r.tool.replace(/^mcp__hypeproof__/, "")} · ${r.route || r.url}${r.step === null ? "" : ` · ${r.step}단계`}`,
+        detail: errors.length ? `오류 ${errors.length}건: ${errors[0]!.message.slice(0, 120)}` : "기록된 오류 없음",
+        version,
+        state: label,
+        screenshot_digest: r.screenshot_digest,
+        at: r.at,
+      };
+    });
+}
+
+/** The distinct entry pages the stored results were taken on (to look up their current version). */
+export function crResultEntries(events: ReadonlyArray<{ kind?: unknown; text?: unknown; artifact_version?: unknown }>): string[] {
+  return [...new Set(events.map((e) => readBrowserResultEvent(e)?.artifact_entry).filter((e): e is string => !!e))];
+}
+
+/**
+ * The batch an observation assessment sends to the Service: the CR-10 reference keys
+ * left out. They say which stored bytes a result names, which an assessment never reads,
+ * and a Service deployed before decision 8 would refuse the whole batch over them
+ * (`invalid_event`), because the App and the Service ship independently.
+ */
+export function assessmentBatch<E extends object, B extends { events: readonly E[] }>(batch: B): B {
+  return {
+    ...batch,
+    events: batch.events.map((e) => {
+      if (!BROWSER_RESULT_REF_KEYS.some((k) => k in e)) return e;
+      const copy = { ...e } as Record<string, unknown>;
+      for (const k of BROWSER_RESULT_REF_KEYS) delete copy[k];
+      return copy as unknown as E;
+    }),
+  };
 }
 
 /**

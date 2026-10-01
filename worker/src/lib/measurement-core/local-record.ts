@@ -52,6 +52,40 @@ export async function digestOf(value: unknown): Promise<string> {
   return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
+// ── Content-addressed bytes (CR-10) ───────────────────────────────────────────
+// The bytes an observation event names by digest (a browser result's screenshot and
+// action trace), kept on this record next to the events instead of in a store of their
+// own (SX-48). Keyed by digest, so the same bytes are stored once and a stored digest
+// always resolves to exactly those bytes.
+export const BLOB_MEDIA_TYPES = ["image/jpeg", "image/png", "application/json"] as const;
+export type BlobMediaType = (typeof BLOB_MEDIA_TYPES)[number];
+/** Provisional, like DEFAULT_LOCAL_MAX_BYTES (MC-35): one screenshot or trace, decoded. */
+export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const blobKey = (digest: string) => `blobs/${digest.slice("sha256:".length)}`;
+
+interface BlobRecord {
+  format: typeof LOCAL_RECORD_FORMAT;
+  kind: "blob";
+  digest: string;
+  media_type: BlobMediaType;
+  bytes: number;
+  /** base64 of exactly the bytes `digest` names. */
+  data: string;
+}
+
+const fromBase64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+function toBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+async function sha256Of(bytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return `sha256:${[...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 // ── Exclusions before storage (MC-30) ─────────────────────────────────────────
 // Known formats only. This is not anonymisation; Jay still reviews before submitting.
 const SECRET_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
@@ -572,6 +606,46 @@ export class LocalRecord {
     }
     await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
     return { task, stored, duplicates, refused_deleted: refusedDeleted, exclusions, missing };
+  }
+
+  // ── Content-addressed bytes (CR-10) ─────────────────────────────────────────
+  /**
+   * Store bytes an event names by digest and return that digest. JSON is stored as the
+   * canonical JSON of its MC-30-redacted value, so no known secret format reaches storage
+   * through it, and its digest equals `digestOf(redactDeep(json))`. Images are stored as
+   * given. Storing the same bytes again is a no-op that returns the same digest.
+   */
+  async putBlob(input: { media_type: BlobMediaType; base64?: string; json?: unknown }): Promise<string> {
+    check(isObj(input) && (BLOB_MEDIA_TYPES as readonly string[]).includes(String(input.media_type)), "invalid_blob");
+    let bytes: Uint8Array;
+    if (input.media_type === "application/json") {
+      check(input.json !== undefined && input.base64 === undefined, "invalid_blob");
+      bytes = new TextEncoder().encode(canonicalJson(redactDeep(input.json)));
+    } else {
+      check(typeof input.base64 === "string" && input.json === undefined && BASE64.test(input.base64), "invalid_blob");
+      bytes = fromBase64(input.base64);
+    }
+    check(bytes.length > 0, "invalid_blob");
+    check(bytes.length <= MAX_BLOB_BYTES, "blob_too_large");
+    const digest = await sha256Of(bytes);
+    const record: BlobRecord = { format: LOCAL_RECORD_FORMAT, kind: "blob", digest, media_type: input.media_type, bytes: bytes.length, data: toBase64(bytes) };
+    await this.#write(blobKey(digest), record, true);
+    // Read back before handing the digest out: a port that loses or alters the bytes (or
+    // a redaction pattern that happened to match inside the base64) must not leave a
+    // digest on an event that resolves to nothing.
+    check((await this.getBlob(digest)) !== null, "storage_failure");
+    return digest;
+  }
+
+  /** The bytes a digest names, checked against it; null when they are not stored. */
+  async getBlob(digest: string): Promise<{ media_type: BlobMediaType; bytes: Uint8Array } | null> {
+    check(typeof digest === "string" && DIGEST.test(digest), "invalid_digest");
+    const record = await this.#read<BlobRecord>(blobKey(digest));
+    if (!record) return null;
+    check(record.kind === "blob" && record.digest === digest && typeof record.data === "string" && BASE64.test(record.data), "corrupt_record");
+    const bytes = fromBase64(record.data);
+    check((await sha256Of(bytes)) === digest, "corrupt_record");
+    return { media_type: record.media_type, bytes };
   }
 
   /** A wrong attribution is corrected by the person, with a reason, keeping the earlier assignment (MC-08). */
