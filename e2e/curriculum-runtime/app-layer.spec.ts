@@ -231,7 +231,11 @@ function storedBlobs(userDataDir: string): number {
   if (!fs.existsSync(storage)) return 0;
   const recordDir = fs.readdirSync(storage).map((d) => path.join(storage, d, "local-review-v1")).find((d) => fs.existsSync(d));
   const files = recordDir ? fs.readdirSync(recordDir).filter((f) => /^[a-f0-9]{64}\.json$/.test(f)) : [];
-  return files.map((f) => JSON.parse(fs.readFileSync(path.join(recordDir!, f), "utf8")).key as string).filter((k) => k.startsWith("blobs/")).length;
+  // The App writes and deletes while this reads: a file gone between the listing and the read is skipped.
+  const keyOf = (f: string): string => {
+    try { return JSON.parse(fs.readFileSync(path.join(recordDir!, f), "utf8")).key as string; } catch { return ""; }
+  };
+  return files.map(keyOf).filter((k) => k.startsWith("blobs/")).length;
 }
 
 test("CR-T02 exception in-app: the delete command for stored screens across the switch (MC-27)", async () => {

@@ -314,6 +314,44 @@ In-app (`app-layer.spec.ts`), scratch copy of 0.1.51 with `f8b3a15a`'s extension
 
 Gates at `f8b3a15a` (exit codes, run after committing): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 · `webview-ui` tsc 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
 
+## Finish review round 3 (2026-10-01)
+
+Fixes for the review of `75d7c726`, commit `07da30f3` (branch SHA, pre-squash); the in-app instrument fix and this section in the commit after it.
+
+- **CR-08: an error between requests is a failure.** `PageEventLog.records()` marks "이전 요청" only on records captured during an earlier request's agent step. A record captured outside any step (the student clicking between requests, the CR-09 "이 버튼이 왜 안 돼?" case) keeps step `null` and stays in `failuresOf`. Smoke: request 1 observe + hover, the student raises an error, request 2 observes: the model reads the error as a failure, not "이전 요청"; control on one page: request 1's step error is still "이전 요청".
+- **CR-10 record keeps the mark.** A stored result's records carry `earlier_request: true` (additive, decision 8), and `crResultHistory` counts errors with `failuresOf`, so the list and the agent agree.
+- **Stored screens belong to who stored them.** The bytes directory is one per OS account, shared by every student on a classroom PC. Each stored blob now also has an owner marker `blob-owners/<owner>/<digest>`; the owner is a digest of the signed-in account, or of the cohort-local user within its cohort (`crBytesOwner`), never the identity. `blobCount` and `deleteBlobs` take the owner: another student's count is 0 and their delete leaves these bytes; bytes two owners stored stay until both delete. Signed out, nothing is stored. Eviction removes the evicted bytes' owner markers.
+- **Showing the delete command costs no disk I/O.** The context key is read from `globalState` (`hypeproof-chat.crBytesOwners`), refreshed at start-up, on every profile resolution and token change, after a store and after a delete. No local-record directory is created for a seat that never stored anything. The record is counted (`blobCount`, keys only) when the student opens the command or the results list; a corrupt review record no longer hides the bytes, and a count that fails still offers the delete ("개수 확인 안 됨").
+- **CR-02 / CR-T02 canon.** Both rows now name the delete command as their one listed exception (MC-27, decision 6), and `CR_SURFACES.switchOffWhileStored` inventories it; `cr-switch.smoke` checks the enablement and every menu entry are exactly the bytes-stored key. This edits an acceptance criterion and needs Jay's sign-off; it also reopens `cr-recon`'s completion (it pins the requirements document), so `align.py check --doc curriculum-runtime` exits 1 with `BROKEN cr-recon` until the record-only PR re-records it with `--replace`.
+- **Evidence doc.** The per-row table and the F1 line above now state the final layer and what REQ-D3/D6 did not exercise; the testing-doc status line no longer says no row ran in the app.
+
+Planted defects, one at a time (scratch runner `fix-r3/mutate.py`, restored after each; unmutated control: all four suites green):
+
+| Planted defect | Result |
+|---|---|
+| between-request record marked earlier (the round-2 rule) | experiment-browser RED |
+| `earlier_request` not stored | cr-host RED |
+| history counts errors with its own filter | cr-host RED |
+| owner-scoped delete ignores the owner | cr-browser-refs RED · cr-host RED |
+| owner-scoped count ignores the owner | cr-browser-refs RED · cr-host RED |
+| `putBlob` writes no owner marker | cr-browser-refs RED · cr-host RED |
+| eviction leaves owner markers | cr-browser-refs RED |
+| owner ignores the cohort | cr-host RED |
+| context refresh reads the record | cr-host RED · cr-switch RED |
+| sink stores bytes when signed out | cr-host RED |
+| delete command enabled by the CR switch | cr-switch RED · cr-host RED |
+| delete command dropped from the inventory | cr-switch RED |
+| no context refresh on sign-in | cr-host RED |
+
+In-app (`app-layer.spec.ts`, now 3 tests), scratch copy of 0.1.51 with `07da30f3`'s extension and webview injected (`dist/extension.js` and `package.json` hashes equal to the build), `GATE=idle … e2e-quiet.sh`:
+
+- First 3 runs: 1 of 3 `3 passed`; the other two failed in the new test's instrument (`storedBlobs` read a record file the App removed between listing and reading, ENOENT). The reader now skips such a file.
+- Then **3 of 3 runs `3 passed`** (13:44–13:47), no message lost. Each run, the delete exception: hidden before anything is stored; 10–12 `blobs/` entries after the clean flow and the command shown (switch on); after a relaunch with the switch off on the same user data dir, the command shown while results and pick are hidden; the dialog reads "내가 저장한 실험 브라우저 화면과 동작 기록 12개를 지울까요? 되돌릴 수 없어요."; after "지우기", 0 entries and the command hidden.
+- Negative: the delete command's enablement and palette entry planted as `crBrowserBytesStored && curriculumRuntimeEnabled`: **RED** in the exception test (bytes still 12 after the switch-off relaunch: nothing could delete them). The app copy was re-injected with the real build afterwards.
+- The message-loss failure of round 2 did not recur in these 6 runs; its cause is still not determined.
+
+Gates at `07da30f3` (exit codes, run after committing): `packages/measurement` 0 · `worker` test 0 · typecheck 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `validate-profiles` 0 · cohort-harness 0 · `chalk` test 0 · typecheck 0 · extension typecheck 0 · extension `npm test` 0 · `webview-ui` tsc 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` **1** (`BROKEN cr-recon`, the expected reopening above; no other finding).
+
 ## NOT RUN
 
 - The timings CR-T55 and CR-T56 in the app (now `cr-e2e`, decision 9).
