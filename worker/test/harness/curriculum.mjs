@@ -94,7 +94,9 @@ export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGI
   await setRoster(env.HPS_KV, cohort, ["cr-a", "cr-b", "cr-c"]);
   await setRoster(env.HPS_KV, otherCohort, ["hp-a"]);
   const student = async (u = "cr-a", p = profile.id, c = cohort) => (await issue({ u, c, p }, 2, TEST_SECRET)).token;
-  const issuer = async (c = cohort, p = profile.id) => (await issueIssuer({ issuer: "director-a", scopes: [{ cohort: c, profiles: [p] }] }, 2, TEST_SECRET)).token;
+  /** A director token with its jti; `p` may list several profiles of the one cohort (cr-memory CR-T02's mixed scope). */
+  const issuerIssued = async (c = cohort, p = profile.id) => issueIssuer({ issuer: "director-a", scopes: [{ cohort: c, profiles: Array.isArray(p) ? p : [p] }] }, 2, TEST_SECRET);
+  const issuer = async (c = cohort, p = profile.id) => (await issuerIssued(c, p)).token;
 
   async function raw(url, { method = "GET", token, body, headers = {} } = {}) {
     const init = { method, headers: { ...(token ? { authorization: "Bearer " + token } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers } };
@@ -136,5 +138,5 @@ export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGI
     if (original.other === undefined) delete other.curriculum_runtime;
     else other.curriculum_runtime = original.other;
   };
-  return { app, env, db, r2, admin, profile, other, cohort, otherCohort, student, issuer, api, raw, open, fileSet, upload, setSwitch, close: () => { restore(); db?.close(); } };
+  return { app, env, db, r2, admin, profile, other, cohort, otherCohort, student, issuer, issuerIssued, api, raw, open, fileSet, upload, setSwitch, close: () => { restore(); db?.close(); } };
 }

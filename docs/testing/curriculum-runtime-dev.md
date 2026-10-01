@@ -168,3 +168,48 @@ It publishes the kiosk fixture from the panel, opens three participant visits th
 | 10 | Restarts the Service with `off` and reloads the window | "실험 증거 보기" is not in the palette; the events address of the link answers like an unknown address |
 
 **Where the data is.** On the Service, in the same measurement-core record as `cr-publish`'s sessions (`curriculum/<cohort>/<project>/` on `HPS_TRACES`): participant events under `observations/published/<experiment>/<session>/e<seq>`, the student's notes under `observations/notes/<experiment>/<experiment>/note-…`, drafts under `drafts/<experiment>/<draft>@<revision>`, and tombstones of deleted sessions and experiments under `deleted/`. The participant pseudonym is on the session key. D1: `cr_link_rates` (one rate window per link; no events), `cr_cohort_controls` (the admin's controls), `cr_experiment_records` (one last-record time per experiment, for decision 6's retention clock; no evidence), and the Experiment row's `data_deleted_at` once its data was deleted. In the App: nothing beyond `cr-publish`'s remembered Project. With the in-memory fixtures, all of it is gone when the process ends. With `scripts/dev-stack.sh`, apply `migrations/0033-curriculum-runtime-evidence.sql` to the local D1 after 0032. These by-hand rows were written from the code and the executed runs above, not executed on a real phone.
+
+## `cr-memory` — Venture Memory (#1395)
+
+**Flag:** the same `curriculum_runtime: { enabled: true }` as `cr-publish`. Nothing else. With `scripts/dev-stack.sh`, apply `migrations/0034-curriculum-runtime-memory.sql` to the local D1 after 0032 and 0033.
+
+**Fastest check (background, no app).**
+
+```bash
+cd worker && node --experimental-strip-types --experimental-sqlite --no-warnings test/cr-memory.test.mjs   # Service, SQLite
+cd worker && npm run test:cr-memory:d1                                                                    # the same on local workerd D1 and R2
+cd extensions/hypeproof-chat && node --experimental-strip-types test/cr-memory.smoke.mjs                    # App session, panel render
+```
+
+**In the app (background).** The same prepared copy as `cr-browser`, with this branch's extension and webview injected:
+
+```bash
+GATE=idle HPS_APP_PATH="<app copy>" bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts memory-app
+```
+
+It publishes the kiosk fixture, records a decision in the panel, closes the app, deletes the workspace's stored state (the chat history and the remembered Project with it), reopens and compares; it writes `e2e/test-results/cr-app/memory-result.json`.
+
+**By hand.** After `cr-evidence`'s steps 1–8 (a published kiosk, a note, an accepted draft):
+
+| Step | What the student does | Expected (in student terms) |
+|---|---|---|
+| 1 | Runs "HypeProof: 프로젝트 기억 보기" | A "프로젝트 기억" box: the project title, "아직 문제를 적지 않았어요.", the hypothesis with "아직 확인 중", the experiment "1주차 · …", and "어디까지 확인했나?" with "확인한 것 N개 · 해석 N개 · 가정 N개" |
+| 2 | Opens "결정 기록하기", writes "옵션 선택을 한 단계로 줄인다", ticks one sentence under 근거 and slides 2 and 3, saves | "결정을 기록했어요."; under 결정: "팀 결정: 옵션 선택을 한 단계로 줄인다 · 슬라이드 2, 3". A decision saved with no 근거 ticked reads "근거가 연결되지 않았어요" and is still shown |
+| 3 | Publishes v1 of the kiosk, then picks v0 and v1 under 버전 and presses "비교하기" | The files that changed ("index.html · 바뀜"); with no decision linked to v1: "이 버전을 만든 결정이 기록되지 않았어요." |
+| 4 | Closes the app, clears the chat ("대화 지우기"), reopens and runs the command again | The same hypotheses, experiments, decisions and versions as before |
+| 5 | Restarts the Service with `off` and reloads the window | "프로젝트 기억 보기" is not in the palette; every memory address answers like an unknown address |
+
+Writes with no panel yet (cr-skills and cr-review call them; by hand with the student token `T` and the Service `S=http://127.0.0.1:8787/v1/curriculum`):
+
+```bash
+curl -s -X POST "$S/projects/<prj>/hypotheses/<hyp>/revisions" -H "authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"revision":1,"statement":"옵션이 한 단계면 처음 쓰는 사람도 혼자 주문할 수 있다","status":"revised","decision_id":"<dec>"}'
+curl -s -X POST "$S/projects/<prj>/stakeholders" -H "authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"label":"학교 매점 손님","roles":[{"role":"user","evidence_refs":["ev:<exp>/<draft>/<item>"],"basis":"observed"},{"role":"payer","evidence_refs":[]}]}'
+curl -s -X POST "$S/experiments/<exp>/drafts/<draft>/review" -H "authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"revision":<n>,"actions":[{"item":"<assumption item>","action":"promote","source_refs":["session:<ps-…>"]}],"reason":"참가 세션에서 확인"}'
+```
+
+After the first: under 가설, "처음엔 "…"라고 믿었어요. "…"를 보고 "…"라고 믿게 됐어요. 그래서 "…"로 바꿨어요." A revision with no decision reads "왜 바뀌었는지는 기록되지 않았어요." After the second: "누구의 일인가 · 학교 매점 손님 · 쓰는 사람, 돈 내는 사람 (가정) · 쓰는 사람이 돈도 내요". After the third: the assumption moves to 확인한 것 with "처음엔 가정이었는데 나중에 확인했어요", and its earlier revision opens under it. The promotion has no button in the panel yet; a `note:` reference to a record marked 연습 or 본인이 말한 것 is refused (`promotion_source_not_real`). Under "지금까지", every entry opens to the record it names (the hypothesis revision, the experiment, the version's files, the evidence item's revisions, the decision with what it rests on, the slide revision). A director's issuer token reads the same box's data at `GET $S/projects/<prj>/memory` and lists the teams at `GET $S/director/projects`.
+
+**Where the data is.** D1: the Hypothesis and Experiment rows of `cr-publish`, extended in place (`revisions`, `stakeholder_id` in their `doc`), and migration 0034's `cr_decisions`, `cr_stakeholders`, `cr_metrics` and `cr_deck_slides` (one row per slide revision). Evidence items are NOT copied: they are the items of the drafts in the measurement-core record (`drafts/<experiment>/<draft>@<revision>` on `HPS_TRACES`), named `ev:<experiment>/<draft>/<item>`. The register, timeline, diff, belief changes and metric values are computed on every read. In the App: nothing beyond `cr-publish`'s remembered Project. These by-hand rows were written from the code and the executed runs, not executed by hand.

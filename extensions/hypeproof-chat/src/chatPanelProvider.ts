@@ -37,6 +37,7 @@ import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
 import { PublishSession } from "./publishSession";
 import { EvidenceSession } from "./evidenceSession";
+import { MemorySession } from "./memorySession";
 import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
@@ -800,6 +801,58 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (pick !== "지우기") return this.postEvidenceState();
     const r = await this.evidenceSession.delete(exp, msg.sessionId ? String(msg.sessionId) : undefined);
     return this.postEvidenceState(r.ok ? { done: "지웠어요. 지운 기록의 영수증이 남았어요." } : { error: r.message });
+  }
+
+  // ── Venture Memory (cr-memory, #1395) ──────────────────────────────────────
+  /** The memory panel over the same Project the publish panel remembers; it reads the Service only, never chat history (CR-36). */
+  private readonly memorySession = new MemorySession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the memory panel state (null hides it with the switch off). */
+  private async postMemoryState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "memoryState", view: await this.memorySession.view(), ...extra });
+  }
+
+  /** CR-35/CR-36 — the "프로젝트 기억 보기" command: re-checks the served switch, then opens the panel. */
+  async ventureMemory(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 프로젝트 기억을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postMemoryState();
+  }
+
+  /** One memory action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleMemoryMessage(
+    msg: { type: "memoryOpen" } | { type: "memoryDiff"; from: string; to: string } | { type: "memoryDecision"; form: import("./memoryView").DecisionForm },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, error: "이 수업에서는 프로젝트 기억을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "memoryOpen") return this.postMemoryState();
+    if (msg.type === "memoryDiff") {
+      const r = await this.memorySession.compare(String(msg.from ?? ""), String(msg.to ?? ""));
+      return this.postMemoryState(r.ok ? {} : { error: r.message });
+    }
+    const f = msg.form ?? ({} as import("./memoryView").DecisionForm);
+    const r = await this.memorySession.decide({
+      statement: String(f.statement ?? ""),
+      evidence_refs: Array.isArray(f.evidence_refs) ? f.evidence_refs.map(String) : [],
+      assumption_refs: Array.isArray(f.assumption_refs) ? f.assumption_refs.map(String) : [],
+      affected_deck_slides: Array.isArray(f.affected_deck_slides) ? f.affected_deck_slides.map(Number) : [],
+      resulting_version_id: typeof f.resulting_version_id === "string" && f.resulting_version_id ? f.resulting_version_id : null,
+    });
+    return this.postMemoryState(r.ok ? { done: "결정을 기록했어요." } : { error: r.message });
   }
 
   /** A coach call of a verify tool (both runtimes): the same session, the same answer (CR-03). */
@@ -3122,6 +3175,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "evidenceDelete":
         // cr-evidence — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
         await this.handleEvidenceMessage(msg);
+        break;
+      case "memoryOpen":
+      case "memoryDiff":
+      case "memoryDecision":
+        // cr-memory — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleMemoryMessage(msg);
         break;
       case "clearHistory":
         void this.clearHistory();
