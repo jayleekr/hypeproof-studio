@@ -48,6 +48,9 @@ export const COMPONENTS = {
   // Region D (SX-17~24). Lives on props alone — it draws the `learningState.evidence` the
   // host sent, and does not recompute the gate.
   EvidenceDrawer: { from: "./src/EvidenceDrawer.tsx", exportName: "EvidenceDrawer" },
+  // cr-verify — "내 제품 테스트" (CR-12–CR-16, CR-81). Lives on props alone: it draws the
+  // VerifyView the host computed and never decides "검증됨" itself.
+  VerifyPanel: { from: "./src/VerifyPanel.tsx", exportName: "VerifyPanel" },
 };
 
 /**

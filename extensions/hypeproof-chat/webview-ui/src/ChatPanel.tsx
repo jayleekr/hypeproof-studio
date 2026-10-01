@@ -50,6 +50,8 @@ interface Props {
   /** CR-09 — the picked element queued for the next turn (Curriculum Runtime only). */
   elementPreview?: import("../../src/protocol").ElementPreview | null;
   onRemoveElement?: () => void;
+  /** cr-verify — the "내 제품 테스트" panel, drawn above the composer when the host shows it. */
+  verifyPanel?: import("react").ReactNode;
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
   /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
@@ -923,6 +925,8 @@ export function ChatPanel(props: Props) {
             </button>
           </div>
         )}
+
+        {props.verifyPanel}
 
         {/* #497 — the notice right after Stop. It is not an error, so it is announced as
             a quiet inline status line rather than an error banner. It goes away on the

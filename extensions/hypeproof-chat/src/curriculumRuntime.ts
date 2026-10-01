@@ -35,6 +35,13 @@ export type CrBrowserToolName = (typeof CR_BROWSER_TOOL_NAMES)[number];
 export const isCrBrowserTool = (name: string): name is CrBrowserToolName =>
   (CR_BROWSER_TOOL_NAMES as readonly string[]).includes(name);
 
+/** The AI Verify tool names shared by both coach runtimes (cr-verify; CR-12–CR-16). */
+export const CR_VERIFY_TOOL_NAMES = ["verify_criterion", "verify_propose_criteria"] as const;
+export type CrVerifyToolName = (typeof CR_VERIFY_TOOL_NAMES)[number];
+
+export const isCrVerifyTool = (name: string): name is CrVerifyToolName =>
+  (CR_VERIFY_TOOL_NAMES as readonly string[]).includes(name);
+
 /** Workshop tiers; mirrors WORKSHOP_TIERS in sdkCoachHelpers.ts and curriculumRuntimeAllowed in the Worker. */
 const CR_TIERS = new Set(["search-webapp", "website"]);
 
@@ -76,10 +83,12 @@ export interface CrSurfaceInventory {
 }
 
 export const CR_SURFACES: CrSurfaceInventory = {
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"],
-  mcpTools: CR_BROWSER_TOOL_NAMES.map((n) => `mcp__hypeproof__${n}`),
-  proxyTools: [...CR_BROWSER_TOOL_NAMES],
-  webviewMessages: ["removeElementContext"],
+  // cr-verify adds "Test my product" (CR-12).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct"],
+  mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
+  proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix"],
+  // cr-verify adds no Worker route: the report is a view over the seat's local record.
   workerRoutes: [],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };

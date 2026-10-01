@@ -364,6 +364,11 @@ export type WebviewMessage = (
   | { type: "ready" }
   // CR-09 — the student removes the picked element before sending (CR switch only).
   | { type: "removeElementContext" }
+  // cr-verify — "Test my product" (CR-12–CR-16; CR switch only, re-checked by the host).
+  | { type: "verifyOpen" }
+  | { type: "verifyStart"; criteria: Array<{ text: string; proposed_by: "student" | "ai"; confirmed: boolean; adopted_from?: string }> }
+  | { type: "verifyRetest" }
+  | { type: "verifyFix"; criterionId: string; text: string }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -506,6 +511,10 @@ export type HostMessage = (
   | { type: "pageAttached"; label: string }
   // CR-09 — the picked element queued for the next turn (null = none): exactly what goes.
   | { type: "elementAttached"; element: ElementPreview | null }
+  // cr-verify — the "Test my product" panel (null = hidden). `sendText`: the student's own
+  // sentence the panel sends next through the normal send path (the coach context rides
+  // with it, model-only). `error`: why the last action was refused.
+  | { type: "verifyState"; view: import("./verifyView").VerifyView | null; sendText?: string; error?: string }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again
