@@ -3139,6 +3139,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/cr-evidence.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-app.spec.ts"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-runtime.real.mjs"
         }
       ]
     },

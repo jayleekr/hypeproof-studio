@@ -16,7 +16,9 @@
 // and HPS_TEST_ORIGIN = http://{project}.test.invalid:<port>, so the App can publish a test
 // version and a request whose Host is a test origin reaches the published runtime.
 //
-// Control routes (the spec only): GET /__cr/state · POST /__cr/reset.
+// Control routes (the spec only): GET /__cr/state · POST /__cr/reset · POST /__cr/plant-dangling
+// (cr-evidence: removes one participant session key behind the record's back, with no tombstone,
+// so a stored draft's reference stops resolving; publish mode only).
 import "../../worker/test/harness/loader.mjs";
 import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
@@ -249,6 +251,13 @@ const server = createServer(async (req, res) => {
     const parts = [];
     for await (const p of req) parts.push(p);
     const body = Buffer.concat(parts);
+    if (req.url === "/__cr/plant-dangling" && modeArg === "publish") {
+      const { project, session } = JSON.parse(body.toString("utf8"));
+      const key = `curriculum/${encodeURIComponent(cohort)}/${encodeURIComponent(project)}/sessions/published/${encodeURIComponent(session)}`;
+      const had = (await env.HPS_TRACES.get(key)) !== null;
+      await env.HPS_TRACES.delete(key);
+      return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ removed: had }));
+    }
     // A test origin (cr-publish: `*.test.invalid`, or an ngrok host given as HPS_TEST_ORIGIN for a
     // phone) keeps its own Host so the Service dispatches it as one; everything else is this Service.
     const h = req.headers.host ?? "";

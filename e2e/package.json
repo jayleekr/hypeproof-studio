@@ -22,6 +22,7 @@
     "test:trial-ux": "node trial-ux/run.mjs",
     "test:cr-browser": "node --experimental-strip-types curriculum-runtime/experiment-browser.real.mjs",
     "test:cr-publish": "node --experimental-strip-types --experimental-sqlite curriculum-runtime/publish-runtime.real.mjs",
+    "test:cr-evidence": "node --experimental-strip-types --experimental-sqlite curriculum-runtime/evidence-runtime.real.mjs",
     "test:budgets:browser": "node --experimental-strip-types --experimental-sqlite access-budgets/browser.mjs",
     "test:budgets:mac": "node --experimental-strip-types --experimental-sqlite access-budgets/mac.mjs",
     "test:budgets:sdk": "node --experimental-strip-types --experimental-sqlite access-budgets/sdk.mjs",

@@ -121,6 +121,10 @@ jobs:
       - name: Run Publish for User Test against local D1
         working-directory: worker
         run: npm run test:cr-publish:d1
+      # cr-evidence (#1394) — participant evidence, notes, drafts, deletion and controls on local workerd D1 and R2.
+      - name: Run Evidence capture against local D1 and R2
+        working-directory: worker
+        run: npm run test:cr-evidence:d1
 
   worker-typecheck:
     name: worker / typecheck
@@ -304,3 +308,7 @@ jobs:
       - name: Run the published runtime in real Chromium
         working-directory: e2e
         run: npm run test:cr-publish
+      # cr-evidence (#1394): participant events from the same runtime (CR-T23, CR-T62, CR-T67, CR-T19 events half).
+      - name: Run participant events in real Chromium
+        working-directory: e2e
+        run: npm run test:cr-evidence
