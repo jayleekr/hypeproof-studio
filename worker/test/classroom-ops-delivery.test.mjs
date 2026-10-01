@@ -1,7 +1,7 @@
 // Remote classroom operations R6 (#751) — Service layer of AT-31 with a sandbox adapter.
 // No real provider, account or recipient exists in this test, and none is configured by the change.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { localOps } from './harness/classroom-ops.mjs';
 import { nextDeliveryState, maskAddress } from '../src/lib/classroom-delivery.ts';
 import { CANDIDATE_CAPABILITY_V1 } from '../src/lib/measurement-core/index.ts';
@@ -26,7 +26,13 @@ try {
   await check('AT-31 recipients come only from the operator import: instructors cannot add one, a gallery-only person is refused, siblings are separate rows, addresses are masked', async () => {
     const body = { class_run_id: f.run, source_ref: 'customer-roster:2026-09', recipients: [{ student_id: 'student-a', recipient_ref: 'guardian-1', channel: 'email', address: 'guardian@example.test', viewer_check: { kind: 'phone_last4', value: '4821' } }, { student_id: 'student-b', recipient_ref: 'guardian-1', channel: 'email', address: 'guardian@example.test', viewer_check: { kind: 'phone_last4', value: '4821' } }] };
     assert.notEqual((await f.request('/admin/classroom/recipients', 'POST', body)).status, 201, 'an issuer Bearer is not the operator'); assert.equal((await f.request('/admin/classroom/recipients', 'POST', { ...body, recipients: [{ student_id: 'gallery-visitor', recipient_ref: 'x', channel: 'email', address: 'x@example.test' }] }, null, admin)).json.reason, 'recipient_invalid');
-    assert.equal((await f.request('/admin/classroom/recipients', 'POST', { ...body, recipients: [{ ...body.recipients[0], address: 'not-an-address' }] }, null, admin)).status, 400); assert.equal((await f.request('/admin/classroom/recipients', 'POST', body, null, admin)).status, 201);
+    assert.equal((await f.request('/admin/classroom/recipients', 'POST', { ...body, recipients: [{ ...body.recipients[0], address: 'not-an-address' }] }, null, admin)).status, 400);
+    // A valid random salt may contain the four-digit check by coincidence. Keep that case deterministic.
+    const randomUUID = crypto.randomUUID; let saltIndex = 0;
+    try {
+      crypto.randomUUID = () => `48210000-0000-4000-8000-${String(++saltIndex).padStart(12, '0')}`;
+      assert.equal((await f.request('/admin/classroom/recipients', 'POST', body, null, admin)).status, 201);
+    } finally { crypto.randomUUID = randomUUID; }
     const list = await f.request(B + '/recipients?template_revision=tmpl-1'); assert.equal(list.status, 200, list.raw); assert.ok(!list.raw.includes('guardian@example.test')); assert.deepEqual(list.json.will_send.map((r) => [r.student_id, r.address]), [['student-a', 'g***@example.test']]);
     assert.deepEqual(list.json.not_sending.map((r) => [r.student_id, r.reason]).sort(), [['student-b', 'no_approved_report'], ['student-c', 'no_approved_report']]); assert.equal(list.json.expected_messages, 1);
   });
@@ -63,7 +69,29 @@ try {
     assert.ok(page.raw.includes('기대 조건을 먼저 적음') && page.raw.includes('학생이 직접 쓴 말') && page.raw.includes('아직 충분히 보지 못함')); assert.ok(!/<script|onerror=|javascript:/i.test(page.raw)); assert.ok(!/\d+\s*점|\d+\s*%|\d+\s*(위|등)\b|상위|하위|평균 대비/.test(page.raw.replace(/<style>[\s\S]*?<\/style>/, '')), 'no numeric score, rank, percentage or peer comparison on the page (saying it is NOT a score is fine)');
     assert.ok(!page.raw.includes('example.test') && !page.raw.includes(f.cohort), 'no address and no internal ids beyond the learner handle');
     assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='report_link_viewed'").get().n, 2, 'each open is recorded'); assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='report_link_check_failed'").get().n, 1);
-    const dump = JSON.stringify([f.db.prepare('SELECT * FROM classroom_recipient_checks').all(), f.db.prepare('SELECT detail_json FROM ops_audit').all()]); assert.ok(!dump.includes('4821'), 'the check value is never stored or audited — only its salted HMAC'); assert.equal((await f.request('/v1/classroom/report-links/' + 'a'.repeat(64), 'GET', undefined, null)).status, 404);
+    // Verify structured persistence instead of searching UUIDs, hashes and timestamps for a short substring.
+    const checks = f.db.prepare('SELECT * FROM classroom_recipient_checks ORDER BY student_id').all();
+    assert.equal(checks.length, 2);
+    for (const [i, row] of checks.entries()) {
+      const salt = row.salt;
+      assert.match(salt, /^48210000-0000-4000-8000-\d{12}$/);
+      assert.deepEqual({ ...row }, {
+        class_run_id: f.run, student_id: seats[i].student_id, recipient_ref: 'guardian-1', kind: 'phone_last4', salt,
+        check_hash: createHmac('sha256', 'hps-viewer-check/1|' + f.env.HPS_SIGNING_SECRET).update(`${salt}|phone_last4|4821`).digest('hex'),
+        revision: 1, updated_at: row.updated_at,
+      }, 'the complete stored row contains only the salted HMAC and declared metadata');
+      assert.equal(typeof row.updated_at, 'number');
+    }
+    const linkId = f.db.prepare('SELECT id FROM classroom_report_links WHERE token_hash=?').get(sha(link.split('/').pop())).id;
+    const auditDetails = f.db.prepare("SELECT action,detail_json FROM ops_audit WHERE action IN ('report_link_viewed','report_link_check_failed','recipients_imported') ORDER BY rowid").all().map((r) => [r.action, JSON.parse(r.detail_json)]);
+    assert.deepEqual(auditDetails, [
+      ['recipients_imported', { count: 2, viewer_checks: 2, source_ref: 'customer-roster:2026-09' }],
+      ['recipients_imported', { count: 1, viewer_checks: 0, source_ref: 'customer-roster:2026-09b' }],
+      ['report_link_check_failed', { link_id: linkId, failed: 1 }],
+      ['report_link_viewed', { link_id: linkId, viewer_check: 'passed' }],
+      ['report_link_viewed', { link_id: linkId, viewer_check: 'passed' }],
+    ], 'import and viewer audit records contain no supplied check value');
+    assert.equal((await f.request('/v1/classroom/report-links/' + 'a'.repeat(64), 'GET', undefined, null)).status, 404);
     const key = f.db.prepare('SELECT d.delivery_key k FROM classroom_report_deliveries d JOIN classroom_report_links l ON l.id=d.link_id WHERE l.token_hash=?').get(sha(link.split('/').pop())).k; assert.equal((await f.request(B + `/deliveries/${key}/link`, 'DELETE')).status, 200); assert.equal((await f.request(link, 'GET', undefined, null)).status, 404);
     f.db.prepare('UPDATE classroom_report_links SET revoked_at=NULL,expires_at=1').run(); assert.equal((await f.request(link, 'GET', undefined, null)).status, 404); assert.ok(!f.db.prepare('SELECT group_concat(token_hash) h FROM classroom_report_links').get().h.includes(link.split('/').pop()));
   });
