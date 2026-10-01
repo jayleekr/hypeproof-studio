@@ -28,6 +28,8 @@ destructive 명령, 사용자 변경 되돌리기는 하지 않는다.
 새 작업 선택과 "할 일 없음" 보고 전에는 [요구사항 작업 탐색](WORK-DISCOVERY.ko.md)을
 따른다. 제품의 `config/requirement-work.json`을 정본 Harness의
 `scripts/work-discovery/discover.py --checkout <제품 경로>`로 검사한다.
+ready 항목의 순위와 완료 기록은 `hype-align` 스킬(`next`, `record`, `check`)로 하고,
+판정 엔진은 그대로 `discover.py`다.
 원장이 없거나 원문이 변경됐으면 요구사항 분해가 남은 작업이다.
 특정 DAG 완료·열린 PR 부재·change-impact 완료를 제품 전체 완료로 해석하지 않는다.
 ready, 다른 세션 작업, 리뷰 대기, 의존성, 사람/환경 대기, 재검토를 구분해 보고한다.
@@ -39,11 +41,15 @@ ready, 다른 세션 작업, 리뷰 대기, 의존성, 사람/환경 대기, 재
 ```
 
 - 이슈가 없으면 먼저 만든다.
+- Epic은 제품 방향과 상위 결과를 담는 부모 이슈다. 각 PR은 브랜치를 만들기 전에
+  해당 PR의 수직 결과와 인수 조건을 담은 같은 repo의 열린 실행 이슈를 별도로 만들고,
+  그 실행 이슈를 close target으로 사용한다. 도구는 상태와 연결을 검증하지만 구현과
+  이슈의 의미상 범위 일치는 작성자와 조정 에이전트가 확인한다.
 - 브랜치는 `fix/`, `feat/`, `docs/`, `chore/` 중 하나로 시작한다.
 - PR 본문에는 `Closes #<issue-number>` 또는 동등한 자동 close 문구를 넣는다.
 - Harness, Lab, Studio의 개발→PR 생성 요청은 `.claude/skills/hype-pr/SKILL.md`를 읽고 따른다.
   개발 시작에 기준 연결을 확인하고, 생성 전 `inspect` → Agent assessment → `prepare` →
-  `create --preparation ... --apply`를 사용한다. 직접 `gh pr create`로 누락 검토를 우회하지 않는다.
+  `create --issue <실행-이슈> --preparation ... --apply`를 사용한다. 직접 `gh pr create`로 누락 검토를 우회하지 않는다.
 - PR 생성 명령이 실제 diff로 risk를 계산한다. reviewer 요청은 기본 비활성이고,
   사용자가 해당 PR의 리뷰를 명시한 경우에만 `--request-reviewers`로 계산·요청한다.
   `plan`은 초기 참고용이다.
@@ -84,6 +90,7 @@ ready, 다른 세션 작업, 리뷰 대기, 의존성, 사람/환경 대기, 재
 - `.claude/skills/skill-creator/`
 - `.claude/skills/hype-pr/` (`.agents/skills/hype-pr/`에서도 발견 가능)
 - `.claude/skills/hype-deliver/`
+- `.claude/skills/hype-align/` (`.agents/skills/hype-align/`에서도 발견 가능)
 - `.claude/skills/hype-verify/`
 - `.claude/skills/hype-coordinate/`
 - `.claude/skills/hype-intent/`

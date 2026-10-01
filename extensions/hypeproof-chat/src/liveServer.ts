@@ -59,6 +59,11 @@ export class LiveServer {
     return this.server ? this.baseUrl : undefined;
   }
 
+  /** The root being served, or undefined when no server is up (CR-09/CR-10 source mapping and versions). */
+  currentRoot(): string | undefined {
+    return this.server ? this.root : undefined;
+  }
+
   /**
    * #751 — bring the preview back for the SAME root without touching any file.
    * A healthy server only gets a reload push (its port, and so every open

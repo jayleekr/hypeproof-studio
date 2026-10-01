@@ -125,6 +125,8 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private meta: ConnectionMeta | null = null;
   /** Bumped on every connect, disconnect and expiry. A callback that captured an older value belongs to a connection that is gone. */
   private generation = 0;
+  /** #751 U1b — the connection a learner's approval question was asked under ('' = none). Any connect, disconnect or expiry changes it. */
+  approvalScope(): string { const m = this.meta; return m ? `${this.generation}:${m.grant_id}:${m.class_run_id}:${m.seat_id}` : ""; }
   private runner: CommandRunner | null = null;
   private scope(): SnapshotScope | null {
     const m = this.meta; if (!m?.student || !m.run) return null; // a connection made before the binding contract cannot collect

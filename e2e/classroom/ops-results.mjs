@@ -54,7 +54,7 @@ try {
   const commandsNow = () => local.db.prepare('SELECT id,action FROM ops_commands ORDER BY created_at,rowid').all();
 
   browser = await chromium.launch(); const origin = 'http://127.0.0.1:' + chalkServer.address().port, page = await browser.newPage({ viewport: { width: 1440, height: 1200 } }); const errors = []; page.on('pageerror', (e) => errors.push(e.message));
-  const connect = async () => { await page.goto(origin + '/manage'); await page.locator('#token').fill(X); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill('student-'); await page.locator('#connect button').first().click(); await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#ops-check').click(); await page.locator('#ops-seats .ops-seat[data-seat="A6"]').waitFor(); };
+  const connect = async () => { await page.goto(origin + '/manage'); await page.locator('#token').fill(X); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill('student-'); await page.locator('#connect button').first().click(); await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await page.locator('#refresh').click(); await page.locator('#ops-seats .ops-seat[data-seat="A6"]').waitFor(); await page.locator('#ops-tools > summary').click(); };
   const box = (id) => page.locator(`#ops-seats .ops-seat[data-seat="${id}"]`).getByLabel('선택'), none = () => page.locator('#ops-select-none').click();
   const pick = async (list) => { await none(); for (const id of list) await box(id).check(); };
   const checked = async () => { const v = []; for (const s of seats) if (await box(s.seat_id).isChecked()) v.push(s.seat_id); return v; };
@@ -69,7 +69,7 @@ try {
   await connect(); assert.equal(await page.locator('#ops-ledger').isVisible(), false, 'no action, no result card'); ok('control: before any action there is no result card');
 
   // ── C1: whole class (전체 선택) → 진단. Offline, never-paired and old-app seats are named at once; delivery is not receipt. ──
-  await page.locator('#ops-select-all').click(); await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-ledger').waitFor();
+  await page.locator('#ops-pick-by > summary').click(); await page.locator('#ops-select-all').click(); /* G1: under ‘다른 조건으로 선택’ */ await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-ledger').waitFor();
   const C1 = 'command:' + commandsNow().at(-1).id; await card(C1).waitFor();
   assert.match(await sum(C1), /^적용 \(기기가 실행함\) 0 · 실패 1 · 미확인 0 · 미전달·만료·대상 변경 2 · 접수 3$/, await sum(C1));
   assert.match(await line(C1, 'A4'), /^A4 · student-d — \[실패\] 이 앱 버전은 지원하지 않음/); assert.match(await line(C1, 'A5'), /^A5 · student-e — \[미전달·만료·대상 변경\] 기기 연결 없음/); assert.match(await line(C1, 'A6'), /^A6 · student-f — \[미전달·만료·대상 변경\]/);
@@ -91,14 +91,16 @@ try {
   assert.match(await seen(C1), /확정 아님: 해결 여부는 학생의 다음 실행·관측 뒤 바뀔 수 있습니다/, 'every device has answered, yet a 미확인 is not called final');
   assert.match(await sum(C1), /^적용 \(기기가 실행함\) 2 · 실패 1 · 미확인 1 · 미전달·만료·대상 변경 2$/); assert.doesNotMatch(await sum(C1), /모두/);
   assert.match(await extra(C1), /해결 여부 \(기기 실행과 별개\): 해결 확인 1 · 문제 남음 1 · 실행됨·해결 확인 전 0 · 결과 미확인 1 · 실행 안 됨 3/, 'two devices executed, one cause is gone');
-  assert.match(await line(C1, 'A3'), /^A3 · student-c — \[미확인\] 결과 확인 불가 · 현장 확인 필요 → 결과 미확인/); assert.match(await line(C2, 'A3'), /^A3 · student-c — \[기기 수신 확인 전\]/, 'the same sync also assigned C2 to A3 (the Service\'s fact); C1\'s unknown on A3 did not spill into C2');
+  assert.match(await line(C1, 'A3'), /^A3 · student-c — \[미확인\] 결과 확인 불가 · 현장 확인 필요 → 결과 미확인/);
+  await until('C2 independently reflects A3 lease', async () => /^A3 · student-c — \[기기 수신 확인 전\]/.test(await line(C2, 'A3')));
+  assert.match(await line(C2, 'A3'), /^A3 · student-c — \[기기 수신 확인 전\]/, 'the same sync also assigned C2 to A3 (the Service\'s fact); C1\'s unknown on A3 did not spill into C2');
   assert.match(await line(C1, 'A2'), /\[적용 \(기기가 실행함\)\] 성공 — .* → 문제 남음 — 원인: 학생 PC에서 서버에 닿지 않음/); assert.doesNotMatch(await page.locator('#ops-bulk-result').innerText(), /A1:|A2:/, 'C1 did not write into C2\'s line');
   await shot('two-commands', 'C1 settled (executed ≠ resolved) while C2 is still 접수; newest first'); evidence.two_commands = { c1: await lines(C1), c2: await lines(C2), bulk_line: await page.locator('#ops-bulk-result').innerText() };
   ok('two successive commands: the earlier one keeps its card, settles later in its own card, and never writes into the newer one');
 
   // ── C3 from A1's detail (reset_runtime): the detail of ANOTHER student never shows it; execution first, resolution later ──
-  const openDetail = async (seat) => { await page.locator(`#ops-seats .ops-seat[data-seat="${seat}"]`).getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: seat + ' · ' }).waitFor(); };
-  await openDetail('A1'); await page.locator('#ops-actions button[data-act="reset_runtime"]').first().click(); await page.locator('#ops-actions .confirm button[data-act="reset_runtime"]').click();
+  const openDetail = async (seat) => { await page.locator(`#ops-seats .ops-seat[data-seat="${seat}"]`).locator('.seat-open').click(); await page.locator('#ops-detail-title').filter({ hasText: seat + ' · ' }).waitFor(); };
+  await openDetail('A1'); await page.locator('.detail-more > summary').click(); await page.locator('#ops-actions button[data-act="reset_runtime"]').first().click(); await page.locator('#ops-actions .confirm button[data-act="reset_runtime"]').click();
   await until('C3 card', async () => (await keys()).length === 3); const C3 = 'command:' + commandsNow().at(-1).id, c3id = C3.slice(8);
   assert.match(await page.locator('#ops-detail-status').innerText(), /A1:/);
   await openDetail('A2'); assert.equal(await page.locator('#ops-detail-status').innerText(), '', 'A2\'s detail starts empty — not A1\'s command'); await lease('A1', c3id); await report('A1', c3id, 'accepted'); await report('A1', c3id, 'succeeded', 'reset_ok');
@@ -185,7 +187,7 @@ try {
   const sent = commandsNow().length; await card(C1).locator('.ledger-again').click(); await card(C1).locator('.ledger-note').filter({ hasText: '다시 선택' }).waitFor();
   assert.deepEqual(await checked(), ['A3', 'A4', 'A5', 'A6'], 'unknown + failed + not delivered, from the latest record — not the two that executed'); assert.equal(commandsNow().length, sent, 're-selecting sent nothing');
   const moved = await local.configure([...seats.slice(0, 4), { seat_id: 'A5', student_id: 'student-g' }, seats[5]], 1); assert.equal(moved.status, 200, moved.raw);
-  await page.locator('#ops-check').click(); await page.waitForTimeout(600); await card(C1).locator('.ledger-again').click(); await card(C1).locator('.ledger-note').filter({ hasText: '좌석 주인이 바뀐 1명은 제외' }).waitFor();
+  await page.locator('#refresh').click(); await page.waitForTimeout(600); await card(C1).locator('.ledger-again').click(); await card(C1).locator('.ledger-note').filter({ hasText: '좌석 주인이 바뀐 1명은 제외' }).waitFor();
   assert.deepEqual(await checked(), ['A3', 'A4', 'A6']); assert.match(await line(C1, 'A5'), /^A5 · student-e — .* · 지금 이 좌석은 명단이 바뀌었습니다 \(이 결과는 왼쪽 학생의 것\)/, 'the result stays with the learner it was sent to');
   assert.equal(commandsNow().length, sent); evidence.reselect = { note: await card(C1).locator('.ledger-note').innerText(), a5: await line(C1, 'A5') };
   ok('failure-only re-selection: reads the record and the board first, ticks only failed/undelivered seats of the same learner, sends nothing');
@@ -211,7 +213,7 @@ try {
   assert.deepEqual(await keys(), [K4], 'dry run: no result card'); const dryLines = await page.locator('#ops-finish-items > p').allTextContents(); assert.equal(dryLines.length, 6, 'the preview names the whole roster');
   await page.locator('#ops-finish-dry').uncheck(); await page.locator('#ops-finish-go').click(); await until('whole-roster card', async () => batches().length === liveBefore + 1 && (await keys()).length === 2);
   const kw = batches().at(-1), KW = 'collect:' + kw; assert.deepEqual(await keys(), [KW, K4]);
-  assert.match(await card(KW).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) · 회수 .* · 명단 전체 6명$/);
+  assert.match(await card(KW).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) — 결과 확정 \d+ · 미확인 \d+ · 진행 중 \d+ \/ 6명 · 다음: /, 'G1: the first line is the action, final / unknown / still moving, and the next step'); assert.match(await card(KW).locator('.ledger-meta').innerText(), /^회수 .* · 명단 전체 6명 · 보낼 때의 대상 기준/);
   const wl = await lines(KW); assert.deepEqual(wl.map((l) => l.split(' — ')[0]), ['A1 · student-a', 'A2 · student-b', 'A3 · student-c', 'A4 · student-d', 'A5 · student-g', 'A6 · student-f'], 'every roster seat, the current holder of A5');
   assert.match(await line(KW, 'A4'), /\[미전달·만료·대상 변경\] 제외 · 동의 없음 · 회수하지 않음/); assert.match(await line(KW, 'A5'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/); assert.match(await line(KW, 'A6'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/);
   for (const id of ['A1', 'A2', 'A3']) assert.doesNotMatch(await line(KW, id), /\[적용|\[미전달/, id + ' was asked, nothing arrived yet');

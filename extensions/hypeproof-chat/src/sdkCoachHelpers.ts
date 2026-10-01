@@ -31,7 +31,10 @@ import {
   MCP_BROWSER_CLICK,
   MCP_BROWSER_TYPE,
   MCP_LIVE_PREVIEW_START,
+  MCP_CR_BROWSER_TOOLS,
+  MCP_BROWSER_SELECT,
 } from "./browserMcp.ts";
+import { isCurriculumRuntimeEnabled } from "./curriculumRuntime.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
 import { isDestructiveCommand } from "./shellPolicy.ts";
@@ -222,7 +225,10 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
  */
 export function permittedMcpToolsFor(profile: ResolvedProfile): string[] {
   if (profile.sdk_tools?.browser === true && !isMinorTier(profile)) {
-    return [...MCP_BROWSER_TOOLS];
+    // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
+    return isCurriculumRuntimeEnabled(profile)
+      ? [...MCP_BROWSER_TOOLS, ...MCP_CR_BROWSER_TOOLS]
+      : [...MCP_BROWSER_TOOLS];
   }
   return [];
 }
@@ -920,6 +926,9 @@ export function buildSdkGatewayEnv(
   fundingSource?: string;
   /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
   lessonBinding?: string;
+  /** #751 G2 — the lesson step on screen and the learner's help mode for this turn. Teaching pointers the Service re-checks; never grants. */
+  lessonStep?: string;
+  helpMode?: string;
     proxyUrl: string;
     token: string;
     /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
@@ -979,7 +988,7 @@ export function buildSdkGatewayEnv(
   // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
   // Owned headers never inherit an ambient course choice or correlation ID.
   const inheritedHeaders = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')
-    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding)\s*:/i.test(line)).join('\n').trim();
+    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding|lesson-step|help-mode)\s*:/i.test(line)).join('\n').trim();
   if (inheritedHeaders) env.ANTHROPIC_CUSTOM_HEADERS = inheritedHeaders;
   else delete env.ANTHROPIC_CUSTOM_HEADERS;
   delete env.CLAUDE_CODE_EFFORT_LEVEL;
@@ -987,6 +996,11 @@ export function buildSdkGatewayEnv(
   if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');custom.push(`x-hps-funding-source: ${args.fundingSource}`);}
   if (args.effort) custom.push(`x-hps-effort: ${args.effort}`);
   if (args.lessonBinding && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(args.lessonBinding)) custom.push(`x-hps-lesson-binding: ${args.lessonBinding}`);
+  // A help mode is meaningful only for a named step: the Service refuses one without it, so neither goes out alone.
+  if (args.lessonStep && /^[a-zA-Z0-9_-]{1,64}$/.test(args.lessonStep)) {
+    custom.push(`x-hps-lesson-step: ${args.lessonStep}`);
+    if (args.helpMode && /^[a-z_]{1,32}$/.test(args.helpMode)) custom.push(`x-hps-help-mode: ${args.helpMode}`);
+  }
   if (args.turnId && /^[a-zA-Z0-9_-]{1,128}$/.test(args.turnId)) custom.push(`x-hps-turn-id: ${args.turnId}`);
   if (args.workspace?.trim()) {
     custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
@@ -1032,6 +1046,9 @@ export function buildSdkQueryOptions(
   fundingSource?: string;
   /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
   lessonBinding?: string;
+  /** #751 G2 — the lesson step on screen and the learner's help mode for this turn. Teaching pointers the Service re-checks; never grants. */
+  lessonStep?: string;
+  helpMode?: string;
     proxyUrl: string;
     token: string;
     cwd?: string;
@@ -1088,6 +1105,8 @@ export function buildSdkQueryOptions(
       turnId: args.turnId,
       fundingSource: args.fundingSource,
       lessonBinding: args.lessonBinding,
+      lessonStep: args.lessonStep,
+      helpMode: args.helpMode,
       token: args.token,
       ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
@@ -1861,7 +1880,7 @@ export function isClassifiedSdkToolName(toolName: string): boolean {
   ) {
     return true;
   }
-  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName);
+  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName) || (MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName);
 }
 
 /** A tool action the coach wants to perform, surfaced to the host modal. */
@@ -1928,6 +1947,17 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
   // 추가됐는데 여기 매핑이 빠져서 "미지의 툴" 폴백(executeShell)으로 떨어졌다.
   // 그래서 클릭인데 **셸 모달**이 뜨고, 셸 분기는 payload.command 를 읽는데 클릭엔
   // 그게 없어서 문구가 통째로 비었다("코치가 명령을 실행하려고 해요:" 뒤가 공백).
+  // CR-06 — choosing an option acts inside the already-opened page like a click, so it
+  // takes the click's kind (auto-allowed by the default approval list).
+  if (action.toolName === MCP_BROWSER_SELECT) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    const value = firstString(action.input, ["value"]) ?? "";
+    return {
+      kind: "browserClick",
+      description: `선택 상자(${ref})에서 고르기: ${value.slice(0, 60)}`,
+      payload: { ref },
+    };
+  }
   if (action.toolName === MCP_BROWSER_CLICK) {
     const ref = firstString(action.input, ["ref"]) ?? "";
     return {
@@ -2266,6 +2296,11 @@ export function evaluateSdkToolUse(args: {
   }
   if (toolName === MCP_BROWSER_CLICK || toolName === MCP_BROWSER_TYPE) {
     return { decision: "ask" };
+  }
+  // CR-06 — observe/scroll/hover/reload look at or re-show the student's own preview
+  // (the origin scope, CR-11, is enforced by the executor); select acts like a click.
+  if ((MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName)) {
+    return toolName === MCP_BROWSER_SELECT ? { decision: "ask" } : { decision: "allow" };
   }
   if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {
     // Auto-allow once the browser capability is granted: a screenshot of the

@@ -115,6 +115,9 @@ export interface ChatConfig {
   // #1298 — human-readable connection label shown in the instructor band.
   // "내 Claude 구독" | "내 Codex 구독" (local runtime) or "서버" (proxy/worker path).
   instructorConnection?: string;
+  // #1298 — model choices for the instructor band dropdown. Set from localModelSelection
+  // when instructor mode is active; profile is null so cannot use profile.model_selection.
+  instructorModelChoices?: Array<{ id: string; alias: string; label: string }>;
 }
 
 /**
@@ -144,6 +147,8 @@ export interface LessonBindingView { key: string; seq: number; source: "token" |
 export interface ResolvedProfile {
   /** #751 U3 — which lesson binding the Service executes this seat under. Present only where bindings are enforced. The app sends `key` back as its expectation; it never selects a lesson with it. */
   lesson_binding?: LessonBindingView;
+  /** #751 G2 — present when this code is an instructor's learner-condition rehearsal of `version`. Data only: grants nothing. */
+  rehearsal?: { id: string; course_id: string; version: string; expires_at: number; judged: boolean };
   /** Server-verified identity; never an execution grant. */
   activity_id?: string;
   /** Presentation only; derived from authenticated Service access, never grants authority. */
@@ -242,6 +247,8 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
   browser_control?: { enabled: boolean; max_iterations?: number };
+  /** CR-02 — Curriculum Runtime switch (`curriculum_runtime.enabled`), off when absent. */
+  curriculum_runtime?: { enabled: boolean };
   /**
    * #306 — hardened native-browser session for minor cohorts. `mode: "safe"`
    * makes the host enable the locked-down `persist:hp-safe` integrated-browser
@@ -358,6 +365,8 @@ export type WebviewMessage = (
   | { type: 'observationCorrect'; scope: string; text: string }
   | StartRequest
   | { type: "ready" }
+  // CR-09 — the student removes the picked element before sending (CR switch only).
+  | { type: "removeElementContext" }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -393,6 +402,12 @@ export type WebviewMessage = (
   // with worker/src/routes/trace.ts TraceEvent union.
   // #751 F4 — explicit learner step action in the lesson panel (never inferred from chat volume).
   | { type: "lessonStep"; stepId: string; status: "in_progress" | "submitted" }
+  // #751 G2 — the step on screen and the help mode the learner picked for the NEXT turn; the host re-checks both against the lesson.
+  | { type: "lessonFocus"; stepId: string; helpMode: string | null }
+  // #751 G2 — a work-surface save (criterion_form → criterion, decision_form → decision) for one step of the current lesson.
+  | { type: "lessonWork"; stepId: string; kind: "criterion" | "decision"; text: string; reason?: string }
+  // #751 G2 — rehearsal only: what the panel DREW for each step, read back from the rendered DOM. The host adds App identity and sends it.
+  | { type: "rehearsalSend"; steps: import("./lessonFocus").RenderedStep[]; mission?: import("./lessonFocus").RenderedMission }
   // #751 U2 — the inbox of instructor notices/materials. `generation` is the connection the card list was drawn under: the
   // host answers a callback from an older one with nothing. Opening a card is kept on this device; it is not reported.
   | { type: "inboxRequest" }
@@ -400,6 +415,8 @@ export type WebviewMessage = (
   | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
   // #751 native help — every message names the learner-in-class key the view was drawn under; the host ignores a mismatch.
   | { type: "helpRequest" }
+  // #751 U1b — the learner opens the approval question for the current index.html (the host asks; nothing is approved or sent by this message).
+  | { type: "artifactApprove" }
   | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpCancel"; key: string }
@@ -453,6 +470,9 @@ export type HostMessage = (
   | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
   | { type: "config"; config: ChatConfig }
+  /** #751 G2 — the learner's saved work-surface entries for the lesson `sha256` (read from this device), and the rehearsal result. */
+  | { type: "lessonWorkState"; sha256: string; work: Record<string, import("./lessonFocus").StepWork> }
+  | { type: "rehearsalState"; state: "sending" | "sent" | "error"; verdict?: string; reasons?: string[]; message?: string }
   /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
   | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
   | { type: "helpState"; help: import("./classroomHelp").HelpView }
@@ -487,6 +507,8 @@ export type HostMessage = (
   // behaviour), so this is announced on the chat panel's inline status line instead
   // of a toast.
   | { type: "pageAttached"; label: string }
+  // CR-09 — the picked element queued for the next turn (null = none): exactly what goes.
+  | { type: "elementAttached"; element: ElementPreview | null }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again
@@ -545,4 +567,17 @@ export interface ActionRequest {
   destructive?: boolean;
   description: string;
   payload: unknown;
+}
+
+/** CR-09 — what the chat panel shows of a picked element before it is sent. */
+export interface ElementPreview {
+  ref: string;
+  tag: string;
+  text: string;
+  /** `file:line`, or "unmapped" when the source could not be located without guessing. */
+  source: string;
+  /** The exact text block the coach will receive. */
+  sentText: string;
+  /** The element crop as it will be sent, or null when the cohort sends no images. */
+  imageDataUrl: string | null;
 }

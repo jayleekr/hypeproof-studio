@@ -1,5 +1,28 @@
 # Studio behavioral requirements
 
+## Curriculum runtime proposal — 2026-09-29
+
+`REQ-STUDIO-CURRICULUM-RUNTIME`: Studio executes the AI for Good v5 loop
+(Problem → Hypothesis → Build → Test → Evidence → Decision → Product Change →
+Deck Change) with one HypeProof account. The embedded browser becomes an
+Experiment Browser the agent can observe and operate; "Test my product" verifies
+observable criteria against a specific artifact version; verified versions are
+published as immutable, revocable test links; participant events and notes become
+sourced evidence on the existing measurement-core store (SX-48, no second store);
+Venture Memory keeps hypotheses, experiments, decisions and versions; curriculum
+skills, a cached Weekly Review Pack and an evidence-aware HTML deck close the loop.
+Student apps call AI through capability names without provider keys; MU-02 stays,
+so there is no automatic cross-provider substitution. Source: HypeProof Studio
+Curriculum Runtime PRD v1.0 (2026-09-28), preserved at
+[design/curriculum-runtime-prd-v1.0-2026-09-28.md](design/curriculum-runtime-prd-v1.0-2026-09-28.md).
+[Intent INT-CR-00–09](intents/curriculum-runtime.md),
+[CR-01–84 requirements](requirements/curriculum-runtime.md),
+[CR-T01–T80 validation](testing/curriculum-runtime.md),
+[plan, DAG and gap matrix](plan/curriculum-runtime.md),
+[epic #1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
+Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.
+New behaviour ships behind a switch that is off by default (CR-02).
+
 ## Learning experience revision — 2026-09-18
 
 `REQ-STUDIO-LEARNING-EXPERIENCE`: the student's default screen shows the current
@@ -181,6 +204,8 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-G11 | Admin-tier mint delegation (#295) | `can_issue_issuers` 토큰을 든 운영 멤버는 본인 Bearer로 `/admin/issuers` 호출해 강사 issuer 발급 가능(비번 공유 X). 감사에 `minted_by` 기록. **신뢰 모델: Bearer minter ≠ full admin — 본인 scope 안에서만 위임(subset 강제)**: ① 자식 scope는 minter 자신의 scope의 부분집합(cohort 일치, profiles ⊆, max_hours ≤ minter 캡(minter 캡 부재=무제한), can_start_session은 minter가 보유한 scope에서만, max_session_hours ≤ minter 유효캡(기본 4h)) — 위반 시 403; ② `revoke_jti`는 `issuer_audit.minted_by === minter`인(본인이 발급한) 토큰만 대상 — 그 외 403; ③ `can_issue_issuers` 재부여 불가(403) — 권한 자가증식 차단. 새 admin-minter는 full admin(Basic/CF)만 생성하며, full admin은 ①②③ 제한 없음. minter revoke 시 발급권 즉시 소멸 | U |
 | REQ-G12 | Issuer mint-lineage query (#313) | `GET /admin/issuers?minted_by=<u>&limit=<n>` (admin Basic/CF **only** — `isIssuerAllowedEndpoint` 미등록이라 Bearer minter는 열람 불가) — `issuer_audit:` prefix 스캔으로 "minter X가 발급한 강사 issuer 목록"을 반환. 각 행은 `jti·instructor·minted_by·exp·expired·can_issue_issuers·cohorts·scopes` + jti별 실시간 revoke 교차조회(`revoked`). 멤버 퇴사/minter 토큰 유출 시 계보를 찾아 기존 `POST /admin/tokens/revoke`로 개별 revoke하기 위한 운영 도구. 오발동 파급이 커 일괄 cascade 엔드포인트는 의도적으로 미제공(runbook 4-step) | U |
 | REQ-G13 | Instructor surface is its own Worker — Chalk (plan task F) | `/console`·`/issuer` 페이지와 `GET /admin/cohorts/:id/state` 는 Service(`worker/`)가 아니라 **Chalk**(`chalk/`, `chalk.hypeproof-ai.xyz`, 태그 `c*`)가 서빙한다. Service 는 두 페이지를 302 로 Chalk 에 넘기고(`HPS_CHALK_ORIGIN`; Location 에 fragment 가 없어 `#t=` 토큰 링크 보존), 강사 **쓰기**(세션 open/close·roster append·토큰 mint)와 운영자 surface(admin Basic/CF Access)는 Service 에 남는다 — 채팅 게이트가 읽는 KV 키는 그것을 쓰는 아티팩트와 함께 배포돼야 하고, 서명은 Service 에서만 일어난다. Chalk 는 강사 쓰기를 Service 로 **forward** 한다(헤더 화이트리스트: Bearer + content-type; `cf-access-…` 는 절대 전달 안 함, Basic 거부). 토큰 검증은 `worker/src/lib/instructor-auth.ts` 하나를 re-export — 복제 금지. `c*` 태그 배포는 Service 버전(task C `/v1/health.version`)을 움직이지 않는다 | U (`chalk/test/instructor-auth-drift` — 두 워커 동일 판정 · `chalk/test/deploy-isolation` — c\* 트레인 격리 · `chalk/test/board-contract` — 읽기 계약 · `worker/test/route-order` — 리다이렉트) |
+
+Instructor-mode credential isolation (#1298): changing the saved issuer clears the previous issuer's authorization and brief before checking `whoami`. A network error, 500 or 429 for the new credential cannot inherit instructor mode; a later successful check may recover. Verified by `test/chalk-instructor-token-change.smoke.mjs`.
 
 ## H. Report problem (#64)
 
@@ -559,6 +584,8 @@ remove separately collected observation bundles in `test-results/`.
 |---|---|---|
 | REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |
 | REQ-STUDIO-LESSON-NAME | A frozen lesson may carry a fixed AI display name (`assistant.display_name`); the Service projects it onto `ux.coach` so the start page, chat header and message labels show it for seats delivered from that version. | REQ-F7 · [ADR-0005](adr/0005-lesson-assistant-identity.md) · `worker/test/authoring.test.mjs` (AE-07/08 checks), `chalk/test/authoring-ui.test.mjs`. Draft edits after freezing do not change delivered seats. Real-screen acceptance is the Codex feature A record. |
+| REQ-STUDIO-LESSON-STEP | The current step of the served lesson changes the NEXT turn (#751 G2, #1008 · EDU-02). The rail draws the step's help choices (`steps[].help`, lesson default pre-selected, labels only) and its work surface (`steps[].ui`: `criterion_form` / `decision_form`; any other valid kind is drawn as "not available in this Studio", never faked). Both runtimes send `x-hps-lesson-step` for the step on screen and `x-hps-help-mode` only for a mode that step offers, captured once at turn start (a running turn keeps its snapshot; a focus made under another lesson is not carried after a switch). The learner's saved criterion/decision travels, labelled as their own words, with the next turn of that step. Help is teaching strategy only: tool grants still come from the served profile. | U (`extensions/hypeproof-chat/test/lesson-focus.smoke.mjs`), Service (`worker/test/lesson-help-mode.test.mjs`, `worker/test/authoring-rehearsal.test.mjs`), browser (`e2e/classroom/authoring-g2.mjs`), actual Mac (`e2e/classroom/mac-curriculum.mjs`). A real model's teaching quality is NOT RUN. |
+| REQ-STUDIO-REHEARSAL | A learner code issued for an instructor's rehearsal (`rehearsal` claim, Service record) shows a rehearsal line in the rail; "리허설 결과 보내기" sends what the panel actually DREW per step plus the App identity. The Service judges it once against the candidate and its own records of requests made with that code; sending before any request is refused as "not executed", not judged. The report also carries the mission header as read back from the rendered DOM (week line, mission sentence, completion texts); a candidate with a mission passes only when it matches word for word (`mission_mismatch` / `mission_not_reported` otherwise), a candidate without one makes no mission claim (#751 G2 mission). | Same as above; contract in [chalk-authoring G2](requirements/chalk-authoring.md#g2-curriculum-runtime-20260922). |
 
 ## Native Studio trial (#744)
 

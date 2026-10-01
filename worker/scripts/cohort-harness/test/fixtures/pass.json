@@ -199,6 +199,12 @@
         "enabled": true,
         "show_counter": false
       }
+    },
+    "curriculum_runtime": {
+      "enabled": true
+    },
+    "observation": {
+      "format": "hps-observation/2"
     }
   }
 ]

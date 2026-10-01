@@ -1954,6 +1954,68 @@
       ]
     },
     {
+      "id": "ST-TEST-CHALK-REHEARSAL",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-TEST-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/authoring-rehearsal.test.mjs"
+        },
+        {
+          "path": "worker/test/authoring-mission.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/lesson-focus.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/authoring-g2.mjs"
+        },
+        {
+          "path": "e2e/classroom/authoring-mission.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-curriculum.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-REHEARSAL",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-DES-CHALK-AUTHORING",
+        "ST-TEST-CHALK-REHEARSAL"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/lesson-rehearsal.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-rehearsal-store.ts"
+        },
+        {
+          "path": "worker/src/routes/rehearsal-report.ts"
+        },
+        {
+          "path": "worker/migrations/0026-authoring-rehearsal.sql"
+        },
+        {
+          "path": "chalk/src/ui/authoring.html"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/lessonFocus.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/LessonStepPanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
       "owner": "jayleekr",
@@ -2002,6 +2064,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-report-sessions.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/g4-journey.mjs"
         }
       ]
     },
@@ -2399,6 +2467,9 @@
         },
         {
           "path": "e2e/classroom/mac-help-windows.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-report-input.ts"
         }
       ]
     },
@@ -2471,6 +2542,9 @@
       "sources": [
         {
           "path": "docs/testing/classroom-admin.md"
+        },
+        {
+          "path": "e2e/classroom/ops-g1-layout.mjs"
         }
       ]
     },
@@ -2855,6 +2929,96 @@
       ]
     },
     {
+      "id": "ST-INT-CR",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-SX",
+        "ST-INT-MEASUREMENT-CORE",
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CR",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CR",
+        "ST-REQ-SX",
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE",
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-REQ-VOICE-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Curriculum runtime proposal — 2026-09-29"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CR",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR"
+      ],
+      "sources": [
+        {
+          "path": "docs/plan/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/plan/curriculum-runtime-recon.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CR",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR",
+        "ST-DES-CR"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/curriculum-runtime.md"
+        },
+        {
+          "path": "worker/test/cr-traceability.test.mjs"
+        },
+        {
+          "path": "worker/test/cr-recon.test.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/cdp-probe.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-09-30-evidence.md"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-dev.md"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-MODULE-DISTRIBUTION",
       "stage": "requirement",
       "owner": "jayleekr",
@@ -3218,7 +3382,8 @@
       "sources": [
         { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
         { "path": "worker/test/chalk-instructor-brief.test.mjs" },
-        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" }
+        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" },
+        { "path": "extensions/hypeproof-chat/test/instructor-render.test.tsx" }
       ]
     },
     {

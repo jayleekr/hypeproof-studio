@@ -2,6 +2,7 @@
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
 import { coachDegradedNotice, DEFAULT_COACH_NAME, resolveCoachIdentity } from "./coachIdentity.ts";
+import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers.ts";
 
 export interface CoachStateForResolve {
   name: string;
@@ -438,6 +439,17 @@ export function browserToolLogLine(
       return { icon: "▶", label: "앞으로" };
     case "browser_dialog":
       return { icon: "💬", label: `대화상자 ${clip(input.action)}` };
+    // CR-68 — the chat-panel half of the automation indicator for the Experiment Browser tools.
+    case "browser_observe":
+      return { icon: "👀", label: "화면 살펴보는 중" };
+    case "browser_select":
+      return { icon: "🔽", label: `${clip(input.ref)}에서 "${clip(input.value)}" 고르기` };
+    case "browser_scroll":
+      return { icon: "↕️", label: input.ref ? `${clip(input.ref)}까지 스크롤` : "페이지 스크롤" };
+    case "browser_hover":
+      return { icon: "🖱️", label: `${clip(input.ref)} 위에 마우스 올리기` };
+    case "browser_reload":
+      return { icon: "🔄", label: "새로 고침" };
     default:
       return { icon: "🤖", label: name };
   }
@@ -832,4 +844,12 @@ export function reentryWorkspace(o: { candidateActivity?: string; record?: { ser
   if (!a) return undefined;
   if (o.record) return o.recordServiceMatches && o.record.serverId === a ? o.record.workspace : undefined;
   return o.openFolder && o.runningActivity === a ? o.openFolder : undefined;
+}
+
+
+/** Reads the instructor token slot only — never the student slot. Extracted for direct testing. */
+export async function resolveInstructorTokenFromSecrets(
+  secrets: { get(key: string): PromiseLike<string | undefined> }
+): Promise<string | undefined> {
+  return secrets.get(ISSUER_TOKEN_KEY);
 }

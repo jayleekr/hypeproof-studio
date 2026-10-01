@@ -7,6 +7,8 @@
 | `npm --prefix e2e run test:classroom-ops-roster` | built webview click → real `ClassroomOpsHost` (VS Code stubbed at the bundle edge) → real Service → real Chalk; 30 seats, reviewed input, finish → evaluation → review, real-send confirmation, reader's viewer check | a real Studio app, SDK, model, mailbox |
 | `npm --prefix e2e run test:classroom-ops-help` | Chalk /manage: roster on connect, help requests vs technical problems (open/answered/resolved/withdrawn/expired/other class), the Service's first action as the one primary, help entry under "2 수업 진행" keeping page state; share read failed/partial/next-page failure/older Service (never "no help" without proof); the open seat detail following live connection, cause and flag changes, nothing sent after revocation; unsent question/checkpoint drafts never crossing a disconnect or another instructor; open help read with `status=open` and both lists as a cursor window (older → moves on to the end, newest → back; one window per refresh; place kept across new rows, withdrawal and a failed page) | a real Studio app or learner |
 | `npm --prefix e2e run test:classroom-ops-results` | AT-41: per-action result cards for commands, record collection and distribution kept side by side (keyed by kind + server id, each observed on its own); flow-typed stages (distribution `accepted` ≠ command `accepted`, `leased`/`offered` ≠ receipt, device "sent" ≠ verified, verified ≠ whole lesson with the sealed extent and reason, executed ≠ resolved later without a click); a failed re-read stays stale, never zero; failure-only re-selection sends nothing; another student's detail never shows this command | a real Studio window (the Mac `AT41` scenario below) |
+| `npm --prefix e2e run test:classroom-ops-g1` | G1 operating screen: 24 synthetic seats in one comparable table — measured complete rows at 1280×720 (≥8) and 1024×640 (≥4), 14px+ text, no overflow; filter/search change the view only; the context primary opens a confirmation only; detail beside the list (1280) or a drawer (1024) with focus return; navigation drawer with an inert page; result card headline and folded evidence; wrap-up steps from the Service state | a real Studio window; the pictures for a person are `ui-review-capture-g1.mjs` on the synthetic preview |
+| `npm --prefix e2e run test:classroom-ops-g1-wrap` | G1 wrap-up steps: each step's state in words from the counts read for this run and finish batch — the reviewer's pending-only fixture (direct render, synthetic) and route-backed pending-only, mixed (missing evaluator, unconnected seat, evaluator refusal, partial approval, approval ≠ sent, accepted ≠ delivered), late answers of a previous batch dropped, finished (verified · drafted · approved · delivered), failed re-read → unknown, another run and all-excluded → nothing to do, a reviewer quarantine (before any send, and after delivery) counted apart from a failed draft with no step but delivery saying anything about sending | a real Studio window, model or mailbox |
 | `npm --prefix e2e run test:classroom-report` | the report page and its PDF in Chromium | a recipient's mail client or printer |
 
 All four run in PR CI (`.github/workflows/classroom-ops.yml`). The evaluator and mail provider are replaced at their
@@ -96,6 +98,19 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   appears, the app closes its server socket). `mac-preview-fault-negative.mjs` is the control: the same copy started without
   the variable (debug port 9442) ignores the same trigger. R7 issues the code on `/authoring` and types it into the app's
   start page — no dev token file change, no restart.
+- Curriculum → actual execution (#751 G2, #1012) on this Mac: `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-g2 node e2e/classroom/mac-devhost.mjs prepare`,
+  then `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-g2 node --experimental-strip-types --experimental-sqlite --no-warnings e2e/classroom/mac-curriculum.mjs`
+  (ports 18991/18992, debug 9591, about 10 minutes). A visible Chalk `/authoring` page authors two different curricula (help modes,
+  work surface, allowed features, audience), reviews the differences, freezes each as a candidate and issues a rehearsal code; a
+  real Studio window opens under that code, draws the candidate, sends one question and its rehearsal report; the teacher
+  confirms; `/manage` sends A then B to seat A1 (A3 selected but never connected, A2 connected and never selected) while a V1
+  question is still being answered; the real window's next turns are checked at the provider (lesson, help instruction, tool
+  names, the learner's saved criterion/decision), then a restart and the return to V1. `curriculum/result.json` has the rows;
+  it exits when done (nothing is left running). The browser counterpart that CI runs is `authoring-g2.mjs`.
+  Since the G2 mission correction the same run also sets DIFFERENT missions and completion conditions for A and B with the
+  visible controls and checks, at every step, the mission header the real window draws and the mission the Service put into
+  the provider request (`HPS_G2_RUN=<folder>` keeps a run's evidence apart from an earlier one). Browser counterpart:
+  `authoring-mission.mjs`.
 
 ## Instructor UI review preview (synthetic, for looking at the screens)
 

@@ -16,6 +16,9 @@ db.exec('PRAGMA foreign_keys=ON');
 const migration = readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8');
 db.exec(migration);
 db.exec(migration); // additive migration is safe to retry
+// #1012 · #751 G2 — rehearsal and confirmation tables (additive, retry-safe like 0002).
+const rehearsalMigration = readFileSync(new URL('../migrations/0026-authoring-rehearsal.sql',import.meta.url),'utf8');
+db.exec(rehearsalMigration); db.exec(rehearsalMigration);
 const env = createMockEnv();
 let failDatabase = false;
 let beforeWrite;

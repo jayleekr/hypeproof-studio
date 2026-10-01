@@ -27,6 +27,8 @@ import {
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
+import { looksLikeIssuerTokenUnverified } from "./chatPanelHelpers";
+import { localRuntimeConfig } from "./localRuntime";
 import {
   scheduleUpdateChecks,
   checkForUpdates,
@@ -168,6 +170,8 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, spool);
   providerRef = provider;
+  // CR-10 — show the delete command when an earlier session stored browser-result bytes.
+  void provider.refreshCrBytesContext();
   registerLocalReview(context, (webview, dist) => provider.renderHtml(webview, dist));
   const startPage = new StartPage(context, provider, async (profile, commit) => {
     return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
@@ -197,6 +201,10 @@ export async function activate(context: vscode.ExtensionContext) {
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
+  // #1298 — when the background refresh path sees a rejected issuer token, delete it and surface the student start page.
+  provider.onIssuerAutoRejected = () => {
+    void context.secrets.delete(ISSUER_TOKEN_KEY).then(() => startPage.show());
+  };
   // #751 native help: the learner's help requests to the instructor of their live class connection (ADM-03/05, AT-47).
   // Drafts and requests live one file family per record under globalStorageUri (shared by every window; globalState is one
   // object per window and loses records written in two windows at once). globalState is only read to move the old store.
@@ -413,7 +421,36 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand("hypeproof-chat.forgetIssuerToken", async () => {
       await context.secrets.delete(ISSUER_TOKEN_KEY);
+      await provider.refreshConfig();
       vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
+    }),
+
+    vscode.commands.registerCommand("hypeproof-chat.chalk.setInstructorToken", async () => {
+      const input = await vscode.window.showInputBox({
+        prompt: "강사 토큰을 입력하세요",
+        password: true,
+        placeHolder: "issuer 토큰",
+        ignoreFocusOut: true,
+      });
+      if (!input || input.trim().length === 0) return;
+      const trimmed = input.trim();
+      if (!looksLikeIssuerTokenUnverified(trimmed)) {
+        vscode.window.showErrorMessage("issuer 토큰 형식이 아닙니다. 발급받은 강사 토큰을 확인하세요.");
+        return;
+      }
+      await context.secrets.store(ISSUER_TOKEN_KEY, trimmed);
+      await provider.refreshConfig();
+      const whoamiStatus = provider.lastWhoamiStatus;
+      if (whoamiStatus === "rejected") {
+        await context.secrets.delete(ISSUER_TOKEN_KEY);
+        vscode.window.showErrorMessage("강사 토큰이 유효하지 않습니다. 서버가 인증을 거부했습니다.");
+        return;
+      }
+      if (whoamiStatus === "unreachable") {
+        vscode.window.showWarningMessage("서버에 연결하지 못했습니다. 토큰은 저장됐고, 연결되면 강사 모드가 열립니다.");
+        return;
+      }
+      vscode.window.showInformationMessage("강사 토큰이 저장됐습니다.");
     }),
 
     // #1297 (E4-2): 버튼과 AI가 같은 Chalk 도구 함수를 부른다(SUB-07).
@@ -584,6 +621,17 @@ export async function activate(context: vscode.ExtensionContext) {
       // Notification"), which broke every capture in the workshop.
     }),
 
+    // CR-09 (cr-browser) — pick an element in the Experiment Browser and ask the coach
+    // about it. Gated by the CR switch in package.json AND re-checked inside
+    // pickElement(), because a command can be executed without its menu (recon R3).
+    vscode.commands.registerCommand("hypeproof-chat.pickElement", () => provider.pickElement()),
+    // CR-10 (cr-browser) — the stored browser results, labelled by artifact version. Same
+    // gate: the manifest hides it with the switch off and showBrowserResults() re-checks.
+    vscode.commands.registerCommand("hypeproof-chat.browserResults", () => provider.showBrowserResults()),
+    // CR-10 — delete the stored browser-result bytes. Gated on "bytes are stored", NOT on
+    // the CR switch: what an earlier switch-on stored stays deletable after it goes off.
+    vscode.commands.registerCommand("hypeproof-chat.clearBrowserResultBytes", () => provider.clearStoredBrowserResults()),
+
     // #384 — "drag a screenshot in" that survives VS Code. Dropping a file on
     // the editor makes VS Code open it as a tab (it intercepts the drop before
     // the chat webview ever sees it). So we watch for an image tab opening and
@@ -664,7 +712,15 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // The start surface owns connection and explicit course entry.
-  void startPage.show();
+  // #1298 — if an issuer-shaped token is already stored, the user is likely an instructor; skip the
+  // student start page automatically. If whoami later returns rejected the token is deleted and the
+  // start page is shown once (handled in postConfig/refresh via instructorMode.handleAutoReadResult).
+  void (async () => {
+    const storedIssuer = await context.secrets.get(ISSUER_TOKEN_KEY);
+    if (!storedIssuer || !looksLikeIssuerTokenUnverified(storedIssuer)) {
+      startPage.show();
+    }
+  })();
 
   // E2E backdoor for REQ-E1/E2 manual-approve modal. Fires a synthetic
   // actionRequest after the panel mounts and writes the approve/deny result
@@ -1045,6 +1101,28 @@ async function applyTestBackdoors(
   // Pre-seed issuer token for mint-flow tests (G5/G6).
   if (issuerToken && issuerToken.length > 0) {
     await context.secrets.store(ISSUER_TOKEN_KEY, issuerToken);
+  }
+  // Dev-only issuer token auto-seed: only when localRuntimeConfig returns non-null (Dev app + dev
+  // setting on) and HPS_TEST_E2E is unset. Release builds and Dev app with runtime off both skip.
+  // localRuntimeConfig throws when Dev app has a remote proxyUrl or missing env — catch and skip.
+  // Token value is never logged.
+  const _devProxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+  let _devRuntimeActive = false;
+  try {
+    _devRuntimeActive = localRuntimeConfig(vscode.env.appName, _devProxyUrl) !== null;
+  } catch { console.log("[hypeproof-chat] dev issuer seed skipped"); }
+  if (_devRuntimeActive && !process.env.HPS_TEST_E2E) {
+    const devIssuerTokenFile = process.env.HPS_DEV_ISSUER_TOKEN_FILE;
+    if (devIssuerTokenFile) {
+      try {
+        if (fs.existsSync(devIssuerTokenFile)) {
+          const t = fs.readFileSync(devIssuerTokenFile, "utf8").trim();
+          if (t.length > 20) {
+            await context.secrets.store(ISSUER_TOKEN_KEY, t);
+          }
+        }
+      } catch { /* ignore — best effort */ }
+    }
   }
   return { testStateFileFound };
 }

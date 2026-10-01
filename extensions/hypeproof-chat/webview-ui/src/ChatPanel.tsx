@@ -3,6 +3,8 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { LessonStepPanel } from './LessonStepPanel';
+import type { StepWork } from '../../src/lessonFocus';
 import { InstructorInbox } from './InstructorInbox';
 import { HelpRequest } from './HelpRequest';
 import { acceptHelp } from '../../src/classroomHelp';
@@ -45,6 +47,9 @@ interface Props {
    */
   messages: ChatMessage[];
   pageNotice: string | null;           // #308 — inline notice for "페이지를 코치에게"
+  /** CR-09 — the picked element queued for the next turn (Curriculum Runtime only). */
+  elementPreview?: import("../../src/protocol").ElementPreview | null;
+  onRemoveElement?: () => void;
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
   /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
@@ -84,6 +89,8 @@ interface Props {
   onReportProblem: () => void;                          // #64
   onInstallUpdate: () => void;                          // #72
   onDismissUpdate: (version: string) => void;           // #72
+  // #1298 — when true, student-only surfaces (MissionHeader, HelpRequest, artifact approval) are hidden.
+  instructor?: boolean;
 }
 
 function extractRenderableHtml(text: string): string | null {
@@ -203,6 +210,13 @@ export function ChatPanel(props: Props) {
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
   // #751 F4 — local display state for the learner's step self-report; it is separate from task completion.
   const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
+  // #751 G2 — the learner's saved work-surface entries for the current lesson digest, and the rehearsal send result.
+  const [lessonWork, setLessonWork] = useState<{ sha256: string; work: Record<string, StepWork> } | null>(null);
+  const [rehearsalResult, setRehearsalResult] = useState<{ state: "sending" | "sent" | "error"; verdict?: string; reasons?: string[]; message?: string } | null>(null);
+  useEffect(() => onHostMessage((msg) => {
+    if (msg.type === "lessonWorkState") setLessonWork({ sha256: msg.sha256, work: msg.work });
+    if (msg.type === "rehearsalState") setRehearsalResult({ state: msg.state, verdict: msg.verdict, reasons: msg.reasons, message: msg.message });
+  }), []);
   /**
    * SX-14·15·17 — the learning state the host computed and sent. **It is not
    * recomputed here.** null means this connection does not use learning events (it is
@@ -537,7 +551,10 @@ export function ChatPanel(props: Props) {
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
   ) : null;
-  if (!config?.profile && !config?.activity) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  // #1298 — config null means postConfig not yet received; show loading regardless of instructor role.
+  // Once config arrives, an instructor may render without a profile or activity.
+  if (!config) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  if (!config.profile && !config.activity && !props.instructor) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <>
@@ -703,10 +720,8 @@ export function ChatPanel(props: Props) {
         </div>
       </header>
 
-      {/* Region A — Mission header. Replaces both the old `hps-activity-header` and the
-          `details.hps-lesson` summary (design §정보 구조, region A). The activity name
-          moved down to a small line inside the header. */}
-      <MissionHeader
+      {/* Region A — Mission header. Student-only surface; #1298 hides it for instructor mode. */}
+      {!props.instructor && <MissionHeader
         lesson={config?.profile?.lesson ?? null}
         currentStepId={currentStepId}
         onSelectStep={setCurrentStepId}
@@ -728,7 +743,7 @@ export function ChatPanel(props: Props) {
           name: config.activity.name,
           verified: !!config.activity.verified,
         } : null}
-      />
+      />}
       {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
 
@@ -751,6 +766,8 @@ export function ChatPanel(props: Props) {
               <p>확인 기준: {step.acceptance}</p>
               <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
             </details>
+            <LessonStepPanel lesson={lesson} step={step} rehearsal={config.profile.rehearsal} busy={streaming} post={postToHost}
+              work={lessonWork?.sha256 === lesson.sha256 ? lessonWork.work : {}} rehearsalState={rehearsalResult} />
             {/* #751 F4 — a learner self-report for the current step, separate from region D's task completion gate. */}
             <p className="hp-rail-step-report">
               <button type="button" className="hp-cta-quiet hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({ type: 'lessonStep', stepId: step.id, status: 'submitted' }); setLessonSteps(prev => ({ ...prev, [step.id]: 'submitted' })); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
@@ -763,7 +780,16 @@ export function ChatPanel(props: Props) {
           (SX-05), closed by default, no Primary (SX-04). Drawn with or without a lesson. */}
       <InstructorInbox inbox={inbox} post={postToHost} promptImport={{ onImport: importPrompt, onUndo: undoImport, disabled: frozen, draft, last: lastImport, note: importNote }} />
       {/* #751 native help — the learner's own request to the instructor of this class. Same rail, closed by default, no Primary. */}
-      <HelpRequest view={help} post={postToHost} />
+      {/* #1298 — hidden for instructor mode; instructor has no student help-request surface. */}
+      {!props.instructor && <HelpRequest view={help} post={postToHost} />}
+      {/* #751 U1b — the learner's approval of their page as the class result, next to help (drawn only for a learner in class).
+          Closed by default, no Primary; the button opens the host's question, which shows the exact version first. */}
+      {/* #1298 — hidden for instructor mode. */}
+      {!props.instructor && help && <details className="hp-inbox hp-rail-lesson" data-artifact-approval="">
+        <summary>수업 결과물 승인</summary>
+        <p className="hp-rail-lesson-note">작업 폴더의 index.html 지금 판을 수업 결과물로 승인하거나 승인을 취소합니다. 누르면 그 판의 지문을 먼저 보여 주고 고르게 합니다. 승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어가며, 이 버튼은 아무것도 보내지 않습니다. 고치면 새 판은 다시 승인해야 합니다.</p>
+        <button type="button" className="hp-cta-quiet" data-artifact-approve="" onClick={() => postToHost({ type: "artifactApprove" })}>지금 결과물 확인하고 승인·취소</button>
+      </details>}
 
       {/* Region D — the completion gate and the Evidence drawer (SX-14·17). Drawn only
           when the host sends `learningState`. On a connection that does not send it (a
@@ -874,6 +900,32 @@ export function ChatPanel(props: Props) {
         {props.pageNotice && (
           <div className="hps-page-notice" role="status" aria-live="polite">
             {props.pageNotice}
+          </div>
+        )}
+
+        {/* CR-09 — exactly what goes to the coach with the next message, removable before sending. */}
+        {props.elementPreview && (
+          <div className="hps-element-context" role="group" aria-label="코치에게 함께 보낼 화면 요소" data-testid="element-context">
+            {props.elementPreview.imageDataUrl && (
+              <img className="hps-element-crop" src={props.elementPreview.imageDataUrl} alt="고른 요소의 모습" />
+            )}
+            <div className="hps-element-meta">
+              <div>
+                <strong>함께 보낼 요소</strong> &lt;{props.elementPreview.tag}&gt;{" "}
+                {props.elementPreview.text && `“${props.elementPreview.text.slice(0, 40)}”`} · {props.elementPreview.ref}
+              </div>
+              <div className="hps-element-source">
+                {props.elementPreview.source === "unmapped" ? "소스 위치: 찾지 못함" : `소스 위치: ${props.elementPreview.source}`}
+                {!props.elementPreview.imageDataUrl && " · 이미지는 보내지 않아요"}
+              </div>
+              <details>
+                <summary>코치에게 보낼 내용 보기</summary>
+                <pre data-testid="element-context-sent">{props.elementPreview.sentText}</pre>
+              </details>
+            </div>
+            <button type="button" className="hps-element-remove" aria-label="이 요소 빼기" onClick={props.onRemoveElement}>
+              ✕
+            </button>
           </div>
         )}
 
