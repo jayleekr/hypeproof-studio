@@ -165,8 +165,9 @@ await test("CR-T11 after a restart: a fresh App with a remembered Project allows
   // What workspaceState holds from an earlier run of the App.
   let state = { [crBytesOwner(tok("cr-a"))]: { id: "prj-aaaaaaaaaaaaaaaa", origin: PUB } };
   const memory = new CrProjectMemory({ get: () => state, update: (v) => { state = v; } }, async () => stored);
+  let on = true;
   const session = new PublishSession({
-    switchOn: () => true,
+    switchOn: () => on,
     token: () => memory.refresh(),
     base: () => "https://api.test/v1/curriculum",
     fetchImpl: async () => { throw new Error("no request: the origin comes from what was remembered"); },
@@ -186,6 +187,10 @@ await test("CR-T11 after a restart: a fresh App with a remembered Project allows
   await memory.refresh(); // what the provider does at activation
   assert.deepEqual(session.publishedOrigins(), [PUB], "positive: allowed without opening the publish panel");
   assert.deepEqual(crAllowedOrigins(null, session.publishedOrigins()), [PUB]);
+  // The switch off for a lesson: a remembered origin is not allowed (CR-02, CR-11).
+  on = false;
+  assert.deepEqual(session.publishedOrigins(), [], "switch off: nothing, even with a remembered origin");
+  on = true;
   stored = tok("cr-b"); // another student signs in on the same Mac
   await memory.refresh(); // the provider follows secrets.onDidChange
   assert.deepEqual(session.publishedOrigins(), [], "the previous person's origin is dropped");

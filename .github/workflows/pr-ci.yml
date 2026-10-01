@@ -276,3 +276,31 @@ jobs:
       - name: Run extension smoke tests
         working-directory: extensions/hypeproof-chat
         run: npm test
+
+  cr-publish-browser:
+    # cr-publish (#1393): the published test runtime in real Chromium as a phone (CR-T18,
+    # CR-T19 incl. the service-worker and sibling-link cases, CR-T21 one visit, CR-T22, CR-T60,
+    # CR-T61). Synthetic: the real Service router over local SQLite and an in-memory R2.
+    name: cr-publish / real Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install worker deps
+        working-directory: worker
+        run: npm ci
+      - name: Install extension deps
+        working-directory: extensions/hypeproof-chat
+        run: npm ci --omit=optional
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm ci
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run the published runtime in real Chromium
+        working-directory: e2e
+        run: npm run test:cr-publish

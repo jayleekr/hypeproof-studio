@@ -19,6 +19,10 @@
 //           new tab after revocation get 410 and no product. Negative: the old behaviour
 //           (the test origin ignores `Service-Worker: script` and sends no Clear-Site-Data),
 //           planted on one origin, lets the worker keep serving the product and is caught.
+//   CR-T19  (sibling links) the 410 of one revoked link clears only the origin's HTTP cache:
+//           a live link of the same project keeps its open visit session and its repeated-use
+//           pseudonym. Negative: a 410 that also clears "storage", planted on another
+//           project's origin, wipes both and is caught.
 //   CR-T21  one visit (home → menu → home by a link → reload, one tab) is one session with
 //           one pseudonym, counted once. Negative: the pre-fix snippet, which adopts every
 //           entry load's candidate, is planted on another link and counts several.
@@ -60,6 +64,8 @@ let f = null;
 /** Hosts on which the pre-fix behaviour is planted (negative controls). */
 const plantedOldSw = new Set();
 const plantedOldSnippet = new Set();
+/** Hosts whose 410 also clears storage (the round-1 behaviour; negative control). */
+const plantedWipe = new Set();
 const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const c of req) chunks.push(c);
@@ -73,6 +79,7 @@ const server = createServer(async (req, res) => {
   );
   const out = Object.fromEntries(r.headers);
   if (plantedOldSw.has(host)) delete out["clear-site-data"];
+  if (plantedWipe.has(host) && r.status === 410) out["clear-site-data"] = '"cache", "storage"';
   let body = Buffer.from(await r.arrayBuffer());
   if (plantedOldSnippet.has(host) && /text\/html/.test(out["content-type"] ?? "")) body = Buffer.from(body.toString("utf8").replace(PARTICIPANT_SNIPPET, OLD_SNIPPET));
   res.writeHead(r.status, out);
@@ -156,7 +163,15 @@ const TWO_PAGES = {
 const visit = await publish(token, TWO_PAGES);
 const visitPlanted = await publish(token, TWO_PAGES);
 plantedOldSnippet.add(new URL(visitPlanted.url).hostname);
-const secureOrigins = [s, deviceDeclared, repeated, repeatedOther, plain, pwa, pwaPlanted, visit, visitPlanted].map((x) => new URL(x.url).origin).join(",");
+// One project, two experiments: the Week-2 test (repeated use, live) and the Week-1 one whose
+// link will end. Twice: the second project's 410 is planted to clear storage as well.
+const sibLive = await publish(token, TWO_PAGES, { repeated_use: true });
+const sibOld = await publish(token, TWO_PAGES, undefined, sibLive.project);
+const sibLivePlanted = await publish(token, TWO_PAGES, { repeated_use: true });
+const sibOldPlanted = await publish(token, TWO_PAGES, undefined, sibLivePlanted.project);
+plantedWipe.add(new URL(sibLivePlanted.url).hostname);
+if (new URL(sibOld.url).origin !== new URL(sibLive.url).origin || sibOld.experiment.id === sibLive.experiment.id) throw new Error("sibling links must be two experiments on one origin");
+const secureOrigins = [s, deviceDeclared, repeated, repeatedOther, plain, pwa, pwaPlanted, visit, visitPlanted, sibLive, sibLivePlanted].map((x) => new URL(x.url).origin).join(",");
 
 let browser;
 try {
@@ -329,6 +344,36 @@ try {
     const ok = /^sw-refused/.test(fixed.registration ?? "") && !fixed.controlledBefore && fixed.revoke === 200 && !served(fixed.reload) && !served(fixed.tab) && (fixed.reload.status === 410 || fixed.reload.status === null);
     const caught = old.registration === "sw-registered" && (served(old.reload) || served(old.tab));
     record("CR-T19 (service worker)", ok && caught ? "PASS" : "FAIL", { fixed, planted_old_behaviour: old, planted_caught: caught });
+  }
+
+  // ── CR-T19 sibling links: a revoked link never ends another link's visit or pseudonym ──
+  {
+    async function siblingRun(live, old) {
+      const ctx = await browser.newContext(phone);
+      const page = await ctx.newPage();
+      const read = () => page.evaluate(() => ({ ...window.hypeproof.test, kept: localStorage.getItem("hp:pseudonym:" + window.__hpTest.experiment) !== null }));
+      await page.goto(live.url, { waitUntil: "networkidle" });
+      const before = await read();
+      const rv = await f.api(`/v1/curriculum/links/${old.link.id}/revoke`, { method: "POST", token, body: {} });
+      let oldStatus;
+      try {
+        oldStatus = (await page.goto(old.url, { waitUntil: "load" }))?.status() ?? null;
+      } catch (e) {
+        oldStatus = /ERR_HTTP_RESPONSE_CODE_FAILURE/.test(e.message) ? 410 : e.message.split("\n")[0];
+      }
+      // Chromium commits its own error page for an empty 410; let it settle before going back.
+      await page.waitForURL(/^chrome-error:/, { timeout: 2000 }).catch(() => {});
+      await page.waitForLoadState("load").catch(() => {});
+      await page.goto(live.url, { waitUntil: "networkidle" });
+      const after = await read();
+      await ctx.close();
+      return { revoke: rv.status, oldStatus, before, after, sameSession: before.session_id === after.session_id, samePseudonym: before.pseudonym === after.pseudonym };
+    }
+    const fixed = await siblingRun(sibLive, sibOld);
+    const old = await siblingRun(sibLivePlanted, sibOldPlanted);
+    const ok = fixed.revoke === 200 && fixed.oldStatus === 410 && fixed.before.kept && fixed.after.kept && fixed.sameSession && fixed.samePseudonym;
+    const caught = old.oldStatus === 410 && (!old.sameSession || !old.samePseudonym || !old.after.kept);
+    record("CR-T19 (sibling links)", ok && caught ? "PASS" : "FAIL", { fixed, planted_storage_wipe: old, planted_caught: caught });
   }
 
   // ── CR-T21: one visit is one session ──

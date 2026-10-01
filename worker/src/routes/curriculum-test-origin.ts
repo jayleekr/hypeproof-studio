@@ -11,7 +11,9 @@
 // cache can keep serving it. No service worker can be installed on a test origin: a request
 // carrying `Service-Worker: script` is answered as an absent file, so a student page that
 // registers one (an offline PWA) cannot keep serving the product from its own cache after
-// the link ends; a 410 also asks the browser to clear the origin's cache and storage. A link
+// the link ends; a 410 also asks the browser to clear the origin's HTTP cache, and only that:
+// every link of a project shares its origin, so clearing storage would end the visit sessions
+// and repeated-use pseudonyms of the project's other, still-live links (CR-65, CR-73). A link
 // serves only its experiment's pinned version (the variant's when it names one), never the
 // project's newest (CR-22). Camera and microphone are denied by Permissions-Policy unless the
 // experiment declares them, and then only the participant's own browser prompt can grant them
@@ -85,8 +87,13 @@ export function pageHeaders(devices: readonly string[]): Record<string, string> 
   };
 }
 
-/** A link that ended. Clear-Site-Data drops anything the page kept on its origin (CR-19 "including from a cache"). */
-const gone = () => new Response(null, { status: 410, headers: { ...baseHeaders(), "clear-site-data": '"cache", "storage"' } });
+/**
+ * A link that ended. `Clear-Site-Data: "cache"` drops the origin's HTTP cache (CR-19 "including
+ * from a cache"; no service worker can exist here, see `serve`). Never `"storage"`: the origin is
+ * the project's, shared by all its links, so it would wipe a live sibling link's open session and
+ * its repeated-use pseudonym, and the student app's own saved state.
+ */
+const gone = () => new Response(null, { status: 410, headers: { ...baseHeaders(), "clear-site-data": '"cache"' } });
 /** What a test origin answers for anything it does not serve: an unknown path, link or file. */
 export const absent = () => new Response(null, { status: 404, headers: baseHeaders() });
 
@@ -185,7 +192,10 @@ async function openSession(c: Ctx, linkId: string): Promise<Response> {
   try {
     opened = await openParticipantSession(record, { link, experiment, sessionId: claims.session, at: now });
   } catch (e) {
-    await releaseSession(c.env.HPS_DB, link.id);
+    // Hand the reservation back only when the session key is really absent: a failure after a
+    // successful write (the read-back, say) must not leave a recorded session uncounted.
+    const written = await record.taskForSession(PUBLISHED_HOST, claims.session).catch(() => null);
+    if (written === null) await releaseSession(c.env.HPS_DB, link.id);
     throw e;
   }
   if (!opened.ok || !opened.created) await releaseSession(c.env.HPS_DB, link.id);

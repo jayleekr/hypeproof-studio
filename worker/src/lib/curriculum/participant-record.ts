@@ -71,7 +71,12 @@ export function participantRecord(bucket: R2Like, cohortId: string, projectId: s
   return new LocalRecord(r2RecordPort(bucket, participantPrefix(cohortId, projectId)));
 }
 
-/** The record task of an experiment; created once, when the student starts the test. */
+/**
+ * The record task of an experiment; created once, when the student starts the test, before
+ * any D1 row of it is written (POST /experiments). Constant cost: one read when it exists,
+ * else a read and a conditional put. The review quota is not scanned (it would read every
+ * session key of the project); the route bounds tasks by `PUBLISH_LIMITS.maxExperimentsPerProject`.
+ */
 export async function ensureExperimentTask(record: LocalRecord, experiment: Pick<Experiment, "id" | "project_id" | "question">, at: number): Promise<void> {
   try {
     await record.getTask(experiment.id);
@@ -80,7 +85,7 @@ export async function ensureExperimentTask(record: LocalRecord, experiment: Pick
     if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
   }
   try {
-    await record.createTask({ id: experiment.id, project: experiment.project_id, at, purpose: { text: experiment.question, source: "user" } });
+    await record.createTask({ id: experiment.id, project: experiment.project_id, at, purpose: { text: experiment.question, source: "user" } }, { quota: "none" });
   } catch (e) {
     if (!(e instanceof Error) || e.message !== "task_exists") throw e;
   }

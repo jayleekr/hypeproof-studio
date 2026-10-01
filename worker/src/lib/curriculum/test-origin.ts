@@ -49,6 +49,8 @@ export function parseTestOrigin(template: string | undefined | null, environment
 
 /** A project id is used as the DNS label of its origin (`prj-<hex>`, lowercased). */
 export const projectLabel = (projectId: string): string => projectId.toLowerCase();
+/** The only label shape `projectLabel` produces (`newVentureId("prj")`). */
+const PROJECT_LABEL = /^prj-[0-9a-f]{16}$/;
 
 export function originFor(config: TestOriginConfig, projectId: string): string {
   const host = config.mode === "dedicated" ? `${projectLabel(projectId)}${config.suffix}` : config.suffix;
@@ -56,7 +58,10 @@ export function originFor(config: TestOriginConfig, projectId: string): string {
 }
 
 /**
- * Is this request for a test origin? `dedicated`: any host of the pattern, every path.
+ * Is this request for a test origin? `dedicated`: a host of the pattern whose label is a
+ * project label, every path. Any other label is not a test origin, so a template whose suffix
+ * also covers the Service's own host (`https://{project}.hypeproof-ai.xyz` would cover
+ * `api.hypeproof-ai.xyz`) can never take the API's requests.
  * `shared`: the configured host, only under `/l/`, so the dev Service keeps answering its
  * own routes on other paths.
  */
@@ -67,7 +72,7 @@ export function matchTestOrigin(config: TestOriginConfig, url: URL): { project_l
   if (config.mode === "dedicated") {
     if (!host.endsWith(config.suffix.toLowerCase())) return null;
     const label = host.slice(0, host.length - config.suffix.length);
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(label)) return null;
+    if (!PROJECT_LABEL.test(label)) return null;
     return { project_label: label };
   }
   if (host !== config.suffix.toLowerCase()) return null;

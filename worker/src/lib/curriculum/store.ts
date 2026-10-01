@@ -118,6 +118,11 @@ export async function createHypothesis(db: DB, input: { project_id: string; stat
   return h;
 }
 
+/** Undo a hypothesis stored by a start that then failed (POST /experiments), so a retry leaves no duplicate. */
+export async function deleteHypothesis(db: DB, id: string): Promise<void> {
+  await db.prepare("DELETE FROM cr_hypotheses WHERE id = ?").bind(id).run();
+}
+
 export async function getHypothesis(db: DB, id: string): Promise<Hypothesis | null> {
   return parse<Hypothesis>(await db.prepare("SELECT doc FROM cr_hypotheses WHERE id = ?").bind(id).first());
 }
@@ -171,7 +176,17 @@ export async function experimentsOf(db: DB, projectId: string): Promise<Experime
   return (rows.results ?? []).map((r) => parse<Experiment>(r)).filter((e): e is Experiment => !!e);
 }
 
+export async function countExperiments(db: DB, projectId: string): Promise<number> {
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM cr_experiments WHERE project_id = ?").bind(projectId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
 // ── TestLink (CR-18, CR-19, CR-73) ───────────────────────────────────────────
+
+export async function countLinks(db: DB, experimentId: string): Promise<number> {
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM cr_test_links WHERE experiment_id = ?").bind(experimentId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
 
 export async function createLink(db: DB, input: { project_id: string; experiment_id: string; channel?: string; variant_id?: string; expires_at: number; now: number }): Promise<TestLink> {
   const link: TestLink = {
@@ -231,7 +246,12 @@ export async function releaseSession(db: DB, linkId: string): Promise<void> {
 
 /**
  * Sessions opened per channel for one experiment, from the per-link counters: one indexed
- * query, never a read of the sessions themselves (CR-73). A link without a label counts as
+ * query, never a read of the sessions themselves (CR-73). The counter is the bound on session
+ * keys and an index over them, not a second store of evidence (SX-48): the session keys in the
+ * record stay the evidence (`sessionsByChannel` reads them). It can only run ahead of the
+ * record by an open whose key write failed after its reservation was kept; it never runs
+ * behind. Deleting session keys (the 30-day retention and the delete action, cr-evidence)
+ * must recompute the link's counter in the same operation. A link without a label counts as
  * "unlabelled". Every published session is opened through a link, so none is "unknown" here;
  * `unknown` stays in the shape for sessions recorded without a link (participant-record.ts
  * `sessionsByChannel`, the record-side reading).

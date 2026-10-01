@@ -616,9 +616,14 @@ export class LocalRecord {
   }
 
   // ── Tasks and sessions (MC-07/08) ───────────────────────────────────────────
-  async createTask(input: Parameters<typeof createTask>[0]): Promise<Task> {
+  /**
+   * `quota: "none"` is for a caller that bounds its own tasks (cr-publish: one fixed-size task
+   * per experiment, experiments capped per project), so creating one costs the same however
+   * many session keys the record holds; the default checks the review quota (MC-35).
+   */
+  async createTask(input: Parameters<typeof createTask>[0], options: { quota?: "review" | "none" } = {}): Promise<Task> {
     const task = createTask(input);
-    check(await this.#write(`tasks/${task.id}`, task, true), "task_exists");
+    check(await this.#write(`tasks/${task.id}`, task, true, options.quota ?? "review"), "task_exists");
     return task;
   }
 

@@ -55,7 +55,7 @@ export function publishTiming(startedAt: number, endedAt: number, phases: Record
 type Client = { base: string; token: string; fetchImpl?: typeof fetch };
 
 type ProjectState = {
-  project: { id: string; title: string };
+  project: { id: string; title: string; members?: string[] };
   test_origin: string | null;
   versions: Array<{ id: string; entry_html?: string; files?: Array<{ path: string; sha256: string; bytes: number }> }>;
   hypotheses: Array<{ id: string; statement: string }>;
@@ -132,10 +132,22 @@ export class PublishSession {
     const remembered = this.ports.projectId();
     if (remembered) {
       const r = await this.state(client, remembered);
-      if (r.ok) return { ok: true, state: r.body };
+      if (r.ok) {
+        // A solo Project made before the director set up the team gives way to the team's
+        // (decision 7), so the team's experiments and evidence stay in one Project. Only a
+        // definite list can move it; any failure keeps the remembered one.
+        if ((r.body.project.members?.length ?? 1) > 1) return { ok: true, state: r.body };
+        const list = await curriculumRequest<{ projects: Array<{ id: string; members?: string[] }> }>(client, "GET", "/projects");
+        const team = list.ok && Array.isArray(list.body.projects) ? [...list.body.projects].reverse().find((p) => p.id !== remembered && (p.members?.length ?? 0) > 1) : undefined;
+        if (!team) return { ok: true, state: r.body };
+        const t = await this.state(client, team.id);
+        if (!t.ok) return { ok: true, state: r.body };
+        await this.ports.setProjectId(team.id);
+        return { ok: true, state: t.body };
+      }
       if (r.status !== 404) return { ok: false, message: r.message };
     }
-    const list = await curriculumRequest<{ projects: Array<{ id: string; created_at?: number }> }>(client, "GET", "/projects");
+    const list = await curriculumRequest<{ projects: Array<{ id: string; created_at?: number; members?: string[] }> }>(client, "GET", "/projects");
     if (!list.ok) return { ok: false, message: list.message };
     const projects = Array.isArray(list.body.projects) ? list.body.projects : [];
     const pick = projects.find((p) => p.id === remembered) ?? projects[projects.length - 1];

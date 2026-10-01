@@ -304,7 +304,11 @@ await test("CR-T19: live links serve; revoked and expired links answer 410 with 
   try {
     const s = await started(f);
     const asset = new URL(`/l/${s.link.id}/app.js`, s.url).href;
-    assert.equal((await openEntry(f, s.url)).status, 200, "positive: before revocation the link serves");
+    const liveEntry = await openEntry(f, s.url);
+    assert.equal(liveEntry.status, 200, "positive: before revocation the link serves");
+    // A participant write path with a still-valid session token, taken while the link was live
+    // (the session open is the only participant write until cr-evidence adds events).
+    const heldToken = hpTest(liveEntry.text).session_token;
     const assetBefore = await f.open(asset);
     assert.deepEqual([assetBefore.status, assetBefore.headers.get("cache-control")], [200, "no-store"]);
     // No service worker can install on a test origin: the fetch a registration makes for its
@@ -321,10 +325,16 @@ await test("CR-T19: live links serve; revoked and expired links answer 410 with 
     assert.deepEqual([rv.status, rv.json.link.state], [200, "revoked"]);
     for (const url of [s.url, new URL(`/l/${s.link.id}/index.html`, s.url).href, asset]) {
       const r = await f.open(url);
-      assert.deepEqual([r.status, r.bytes.length, r.headers.get("cache-control"), r.headers.get("clear-site-data")], [410, 0, "no-store", '"cache", "storage"'], url);
+      // Only the HTTP cache is cleared: the origin is the project's, shared by its other links.
+      assert.deepEqual([r.status, r.bytes.length, r.headers.get("cache-control"), r.headers.get("clear-site-data")], [410, 0, "no-store", '"cache"'], url);
     }
-    // A revoked link opens no session either.
+    // A revoked link opens no session either, also with a token that is still valid and was
+    // issued while it was live: 410, nothing written, nothing counted.
+    const keysBefore = f.r2.map.size;
     assert.equal((await openSessionOf(f, s.url, "hpsts1.x.y")).status, 410);
+    assert.equal((await openSessionOf(f, s.url, heldToken)).status, 410, "a still-valid session token after revocation is refused");
+    assert.equal(f.r2.map.size, keysBefore, "nothing written");
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.unlabelled, 0, "nothing counted");
     // Expiry: a link whose time has passed answers the same 410.
     const e = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 150 } });
     assert.equal(e.status, 201, e.text);
@@ -665,6 +675,12 @@ await test("test origin: unset means no link; production refuses a shared or htt
   const prod = parseTestOrigin("https://{project}.try.hypeproof-ai.xyz", "production");
   assert.equal(originFor(prod.config, "prj-0123456789abcdef"), "https://prj-0123456789abcdef.try.hypeproof-ai.xyz");
   assert.equal(matchTestOrigin(prod.config, new URL("https://api.hypeproof-ai.xyz/v1/profile")), null, "the API host is not a test origin");
+  // A template whose suffix also covers the Service's host still never takes the API's requests:
+  // only a project label is a test origin.
+  const wide = parseTestOrigin("https://{project}.hypeproof-ai.xyz", "production");
+  assert.equal(matchTestOrigin(wide.config, new URL("https://api.hypeproof-ai.xyz/v1/chat/completions")), null, "api is not a project label");
+  assert.equal(matchTestOrigin(wide.config, new URL("https://www.hypeproof-ai.xyz/")), null);
+  assert.deepEqual(matchTestOrigin(wide.config, new URL("https://prj-0123456789abcdef.hypeproof-ai.xyz/l/x/")), { project_label: "prj-0123456789abcdef" }, "control: a project label matches");
   const dev = parseTestOrigin("https://abc.ngrok-free.app", "development");
   assert.equal(matchTestOrigin(dev.config, new URL("https://abc.ngrok-free.app/v1/profile")), null, "shared dev origin: only /l/ paths");
   assert.ok(matchTestOrigin(dev.config, new URL("https://abc.ngrok-free.app/l/x/")));
@@ -673,9 +689,14 @@ await test("test origin: unset means no link; production refuses a shared or htt
     const t = await f.student();
     const p = await f.api("/v1/curriculum/projects", { method: "POST", token: t, body: { title: "t" } });
     const up = await f.upload(p.json.project.id, V0, t);
-    const e = await f.api("/v1/curriculum/experiments", { method: "POST", token: t, body: { project_id: p.json.project.id, product_version_id: up.id, week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis: "h" } });
-    const l = await f.api(`/v1/curriculum/experiments/${e.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 60_000 } });
-    assert.deepEqual([l.status, l.json.error.code, l.json.error.problem], [503, "test_origin_unavailable", "not_configured"]);
+    // No test origin: the start is refused before anything is written, however often it is retried.
+    for (let i = 0; i < 3; i++) {
+      const e = await f.api("/v1/curriculum/experiments", { method: "POST", token: t, body: { project_id: p.json.project.id, product_version_id: up.id, week: 1, question: "q", method: "m", success_criteria: ["c"], hypothesis: "h" } });
+      assert.deepEqual([e.status, e.json.error.code, e.json.error.problem], [503, "test_origin_unavailable", "not_configured"]);
+    }
+    const st = (await f.api(`/v1/curriculum/projects/${p.json.project.id}`, { token: t })).json;
+    assert.deepEqual([st.experiments.length, st.hypotheses.length, st.links.length], [0, 0, 0], "no running experiment without a link, no duplicate hypothesis");
+    assert.equal([...f.r2.map.keys()].filter((k) => k.includes("/tasks/")).length, 0, "no record task either");
   } finally {
     f.close();
   }
@@ -684,6 +705,12 @@ await test("test origin: unset means no link; production refuses a shared or htt
     const s = await started(g);
     const onOrigin = await g.open(new URL("/v1/profile", s.url).href, { token: s.token });
     assert.deepEqual([onOrigin.status, onOrigin.bytes.length], [404, 0], "no API route answers on a test origin");
+    // The origin unset after a test started: a new link says so instead of inventing a host.
+    const saved = g.env.HPS_TEST_ORIGIN;
+    delete g.env.HPS_TEST_ORIGIN;
+    const l = await g.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 60_000 } });
+    assert.deepEqual([l.status, l.json.error.code, l.json.error.problem], [503, "test_origin_unavailable", "not_configured"]);
+    g.env.HPS_TEST_ORIGIN = saved;
   } finally {
     g.close();
   }
@@ -894,6 +921,9 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     assert.ok(taskKey, "the experiment's record task exists");
     const taskBytes = () => f.r2.map.get(taskKey).byteLength;
     const before = taskBytes();
+    const startBody = (question) => ({ project_id: s.project.id, product_version_id: s.version, week: 2, question, method: "task_test", success_criteria: ["5명 중 3명 완료"], hypothesis: "처음 쓰는 사람도 혼자 주문할 수 있다" });
+    const startCost = (question) => r2Calls(f, async () => assert.equal((await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: startBody(question) })).status, 201));
+    const startEarly = await startCost("1주차 다시");
     const first = await r2Calls(f, () => openVisit(f, s.url));
     for (let i = 0; i < 498; i++) await openVisit(f, s.url);
     const last = await r2Calls(f, () => openVisit(f, s.url));
@@ -901,6 +931,13 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     assert.ok(first.get + first.put + first.list <= 8, `a small constant: ${JSON.stringify(first)}`);
     assert.equal(first.list, 0, "no listing on the open path");
     assert.equal(taskBytes(), before, "the task document is not rewritten per open");
+    // Starting the next test (the Week-2 experiment) costs the same after 500 sessions.
+    const startLate = await startCost("2주차");
+    assert.deepEqual(startLate, startEarly, `R2 calls per start: before ${JSON.stringify(startEarly)}, after 500 sessions ${JSON.stringify(startLate)}`);
+    assert.equal(startLate.list, 0, "no listing on the start path");
+    // Negative control: the pre-fix task creation (the review-quota scan) grows with N.
+    const scanned = await r2Calls(f, () => participantRecord(f.r2, f.cohort, s.project.id).createTask({ id: "exp-00000000000000aa", project: s.project.id, at: Date.now(), purpose: { text: "q", source: "user" } }));
+    assert.ok(scanned.get > 500 && scanned.list > 0, `the planted quota-scanned start must be caught: ${JSON.stringify(scanned)}`);
     const channels = await r2Calls(f, () => f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token }));
     assert.deepEqual(channels, { get: 0, put: 0, list: 0, delete: 0 }, "the per-channel counts read no session");
     assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.channels["학교 게시판"], 500);
@@ -913,6 +950,88 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     else await f.env.HPS_DB.prepare("UPDATE cr_test_links SET sessions_opened = ? WHERE id = ?").bind(PUBLISH_LIMITS.maxSessionsPerLink, s.link.id).run();
     const full = await openVisit(f, s.url);
     assert.deepEqual([full.status, full.opened.status], [200, 429]);
+  } finally {
+    f.close();
+  }
+});
+
+// ── Starting a test is atomic and idempotent ─────────────────────────────────
+
+await test("start: a storage failure while starting leaves no experiment and no hypothesis; a retried start reuses its hypothesis and experiment; a new run after a link is a new experiment; bounds on experiments and links", async () => {
+  const f = await fixture();
+  try {
+    const t = await f.student();
+    const p = (await f.api("/v1/curriculum/projects", { method: "POST", token: t, body: { title: "키오스크" } })).json.project;
+    const up = await f.upload(p.id, V0, t);
+    const body = { project_id: p.id, product_version_id: up.id, week: 1, question: "도움 없이 주문을 마칠 수 있나?", method: "task_test", success_criteria: ["5명 중 3명 완료"], hypothesis: "처음 쓰는 사람도 혼자 주문할 수 있다" };
+    const start = (b = body) => f.api("/v1/curriculum/experiments", { method: "POST", token: t, body: b });
+    const state = async () => (await f.api(`/v1/curriculum/projects/${p.id}`, { token: t })).json;
+    // R2 fails once during the start.
+    const put = f.r2.put;
+    let failOnce = true;
+    f.r2.put = async (...a) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error("r2 unavailable");
+      }
+      return put.apply(f.r2, a);
+    };
+    const broken = await start();
+    f.r2.put = put;
+    assert.equal(broken.status, 500, broken.text);
+    let st = await state();
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [0, 0], "a failed start writes no D1 row");
+    // The retry starts it once; a second retry (no link yet) answers the same experiment.
+    const a = await start();
+    assert.equal(a.status, 201, a.text);
+    const b = await start();
+    assert.deepEqual([b.status, b.json.experiment.id, b.json.reused], [200, a.json.experiment.id, true]);
+    st = await state();
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [1, 1], "no duplicate experiment or hypothesis");
+    // D1 fails on the experiment row: the hypothesis this start stored is taken back.
+    const realDb = f.env.HPS_DB;
+    let failInsert = true;
+    f.env.HPS_DB = new Proxy(realDb, {
+      get(t, k) {
+        if (k === "prepare") return (sql) => {
+          if (failInsert && sql.startsWith("INSERT INTO cr_experiments")) {
+            failInsert = false;
+            throw new Error("d1 unavailable");
+          }
+          return t.prepare(sql);
+        };
+        const v = t[k];
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    const d1Broken = await start({ ...body, question: "D1 실패", hypothesis: "메뉴 이름만 보고 고를 수 있다" });
+    f.env.HPS_DB = realDb;
+    assert.equal(d1Broken.status, 500);
+    st = await state();
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [1, 1], "the hypothesis of the failed start is removed");
+    // Its sessions open (the record task exists).
+    const l = await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } });
+    const v = await openVisit(f, l.json.share_url);
+    assert.deepEqual([v.status, v.opened.status], [200, 204]);
+    // Control: once a link exists the same fields are a new run (a new experiment), on the same open hypothesis.
+    const c = await start();
+    assert.equal(c.status, 201);
+    assert.notEqual(c.json.experiment.id, a.json.experiment.id);
+    assert.equal(c.json.experiment.hypothesis_id, a.json.experiment.hypothesis_id);
+    // Control: a different question is another experiment, not a reuse.
+    const d = await start({ ...body, question: "메뉴를 찾을 수 있나?" });
+    assert.deepEqual([d.status, d.json.reused], [201, undefined]);
+    st = await state();
+    assert.deepEqual([st.experiments.length, st.hypotheses.length], [3, 1]);
+    // Bounds: links per experiment and experiments per project.
+    for (let i = 1; i < PUBLISH_LIMITS.maxLinksPerExperiment; i++) assert.equal((await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } })).status, 201);
+    const over = await f.api(`/v1/curriculum/experiments/${a.json.experiment.id}/links`, { method: "POST", token: t, body: { expires_at: Date.now() + 3600_000 } });
+    assert.deepEqual([over.status, over.json.error.code], [409, "link_limit"]);
+    const fill = f.db ? (n) => f.db.prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', 1, 0, 0)").run(`exp-${n.toString(16).padStart(16, "0")}`, p.id, a.json.experiment.hypothesis_id, up.id)
+      : (n) => f.env.HPS_DB.prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', 1, 0, 0)").bind(`exp-${n.toString(16).padStart(16, "0")}`, p.id, a.json.experiment.hypothesis_id, up.id).run();
+    for (let i = 3; i < PUBLISH_LIMITS.maxExperimentsPerProject; i++) await fill(i);
+    const full = await start({ ...body, question: "하나 더" });
+    assert.deepEqual([full.status, full.json.error.code], [409, "experiment_limit"]);
   } finally {
     f.close();
   }
@@ -947,6 +1066,29 @@ await test("guards: a revoked student token or one whose student is off the rost
     const offProfile = await f.issuer(f.cohort, f.other.id);
     assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/members`, { method: "PUT", token: offProfile, body: { members: ["cr-a", "cr-b"] } })).status, 404);
     assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a", "cr-b"] } })).status, 200, "control: the scoped director can");
+    // A same-named student of another cohort is not a member (user ids are per-cohort roster strings).
+    await setRoster(f.env.HPS_KV, f.otherCohort, ["hp-a", "cr-a"]);
+    const sameName = await f.student("cr-a", f.other.id, f.otherCohort);
+    assert.equal((await f.api("/v1/curriculum/projects", { token: sameName })).status, 200, "control: the other cohort's cr-a is a valid student");
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: sameName })).status, 404, "another cohort's cr-a cannot read the Project");
+    assert.equal((await f.upload(s.project.id, V1, sameName)).status, 404);
+    // An issuer token whose user is on the roster is still not a student (role allow-list).
+    const { issue } = await import("../src/lib/tokens.ts");
+    const issuerAsStudent = (await issue({ u: "cr-a", c: f.cohort, p: f.profile.id, role: "issuer", scopes: [{ cohort: f.cohort, profiles: [f.profile.id] }] }, 2, TEST_SECRET)).token;
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: issuerAsStudent })).status, 404, "an issuer token is not a student token");
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: await f.student() })).status, 200, "control: the student token of the same user is");
+    // Two concurrent opens of the same session count once. The session key's put is slowed so
+    // both opens pass the "already open" read and reserve before either write lands.
+    const entry = hpTest((await openEntry(f, s.url)).text);
+    const put = f.r2.put;
+    f.r2.put = async (key, ...rest) => {
+      if (key.includes("/sessions/published/")) await new Promise((r) => setTimeout(r, 30));
+      return put.call(f.r2, key, ...rest);
+    };
+    const both = await Promise.all([openSessionOf(f, s.url, entry.session_token), openSessionOf(f, s.url, entry.session_token)]);
+    f.r2.put = put;
+    assert.deepEqual(both.map((r) => r.status), [204, 204]);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/channels`, { token: s.token })).json.sessions_opened.unlabelled, 1, "a concurrent duplicate open is counted once");
     // The test origin is its host AND its port: another port of the same host is not it.
     const cfg = parseTestOrigin(TEST_ORIGIN, "development").config;
     const label = new URL(s.url).hostname;
@@ -1032,6 +1174,19 @@ await test("App project: a transient failure aborts instead of creating a second
     assert.equal((await mate.session.view()).project.id, first, "the team Project is adopted");
     assert.equal((await mate.session.submit(FORM)).ok, true);
     assert.deepEqual(await projectsOf("cr-c"), [first], "no solo Project for the teammate");
+    // A student who published alone before the team was set up moves into the team Project.
+    const solo = appSession({ ...f, student: () => f.student("cr-b") }, root);
+    assert.equal((await solo.session.submit(FORM)).ok, true);
+    const own = solo.project();
+    assert.notEqual(own, first);
+    await f.api(`/v1/curriculum/projects/${first}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a", "cr-c", "cr-b"] } });
+    // Negative control first: when the list cannot be read, the remembered Project is kept.
+    const soloInner = solo.session.ports.fetchImpl;
+    solo.session.ports.fetchImpl = async (url, init) => (new URL(url).pathname.endsWith("/curriculum/projects") ? new Response("{}", { status: 503 }) : soloInner(url, init));
+    assert.equal((await solo.session.view()).project.id, own, "a failed list keeps the remembered solo Project");
+    solo.session.ports.fetchImpl = soloInner;
+    assert.equal((await solo.session.view()).project.id, first, "the team Project the director assigned is preferred over a remembered solo one");
+    assert.equal(solo.project(), first);
     // A remembered Project the student was removed from, with no other: forgotten, a new one is made on publish.
     await f.api(`/v1/curriculum/projects/${first}/members`, { method: "PUT", token: await f.issuer(), body: { members: ["cr-a"] } });
     assert.equal((await mate.session.view()).project, null);
@@ -1047,6 +1202,20 @@ await test("App project: a transient failure aborts instead of creating a second
     rmSync(root, { recursive: true, force: true });
     f.close();
   }
+});
+
+await test("CR-T17 scan cost: a few hundred KB of dotted or kebab-case runs scans in linear time; a URL with credentials is still refused", () => {
+  const ctx = { projectId: "prj-0000000000000000", testOrigin: null };
+  for (const [name, text] of [["a.b-", "a.b-".repeat(80_000)], ["a.a.", "a.a.".repeat(80_000)], ["kebab", "ab-cd-".repeat(40_000)], ["ids", " q1.q2".repeat(40_000)]]) {
+    const t0 = performance.now();
+    assert.deepEqual(scanFile("app.js", text, ctx), [], name);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 1_000, `${name} (${text.length} chars) took ${Math.round(ms)} ms`);
+  }
+  for (const hit of ["const db = 'postgres://admin:hunter2@db.example.com/x';", "x https://user:pass@host", 'fetch("git+ssh://me:tok@github.com/r")', "_https://u:p@h"]) {
+    assert.ok(scanFile("app.js", hit, ctx).some((h) => h.rule === "url_credentials"), hit);
+  }
+  assert.deepEqual(scanFile("app.js", "const u = 'https://example.com/a:b';", ctx), [], "control: a URL without credentials publishes");
 });
 
 await test("CR-64 timing instrument: a publish under 10 s is a pass; a planted slow upload is a recorded miss with its cause", () => {

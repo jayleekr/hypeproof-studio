@@ -85,7 +85,7 @@ It writes `e2e/test-results/cr-app/verify-result.json`. The unit and smoke halve
 
 ## `cr-publish` — Publish for User Test (#1393)
 
-**Flag:** the same `curriculum_runtime: { enabled: true }`. The Service also needs `HPS_TEST_ORIGIN`, where published test versions are served: unset (the default) means no link can be made. Nothing else.
+**Flag:** the same `curriculum_runtime: { enabled: true }`. The Service also needs `HPS_TEST_ORIGIN`, where published test versions are served: unset (the default) means no test can be started and no link can be made. Nothing else.
 
 **Fastest check (background, no app, no phone).** Real Chromium as a 390 px phone against the real Service router:
 

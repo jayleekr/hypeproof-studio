@@ -77,7 +77,9 @@ const PATTERNS: readonly Pattern[] = [
   { rule: "supabase_secret_key", re: /\bsb_secret_[A-Za-z0-9_-]{16,}/g },
   { rule: "github_token", re: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g },
   { rule: "aws_access_key", re: /\bAKIA[0-9A-Z]{16}\b/g },
-  { rule: "url_credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`]+:[^\s/@'"`]+@/gi },
+  // Linear time: the scheme may start only where no scheme character precedes it, and every
+  // part is bounded, so a long dotted or kebab-case run is not re-scanned from each position.
+  { rule: "url_credentials", re: /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@'"`]{1,256}:[^\s/@'"`]{1,256}@/gi },
   { rule: "bearer_token", re: /\bBearer\s+([A-Za-z0-9._~+/-]{20,}=*)/g, valueGroup: 1 },
   {
     rule: "secret_assignment",
