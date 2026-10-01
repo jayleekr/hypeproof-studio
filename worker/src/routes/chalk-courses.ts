@@ -41,7 +41,10 @@ interface PlanFileRow { html: string; sha256: string; knowledge_version: number;
 interface InputsRow {
   revision: number; audience: string; assets_json: string; teaching_style: string;
   requirements: string; format: string; family_session: number; vocab_json: string | null;
-  audience_tier: string | null; duration_min: number | null;
+}
+interface InputsWithOptionsRow extends InputsRow {
+  audience_tier: string | null;
+  duration_min: number | null;
 }
 interface VocabInput { goals: string[]; conditions: string[]; learner_level?: string; has_guidance?: boolean }
 
@@ -279,27 +282,38 @@ chalkCourses.put(
     const nowMs = Date.now();
     const hash = await sha256Hex(JSON.stringify([
       b.expected_revision, profile_id, existingContent, b.audience, b.assets, b.teaching_style,
-      b.requirements, b.format, familySession, vocabJson, audienceTier, durationMinInput,
+      b.requirements, b.format, familySession, vocabJson,
     ]));
 
-    // Extra batch stmt: upsert chalk_course_inputs, conditional on the draft UPDATE succeeding.
-    // SELECT WHERE EXISTS ensures this is a no-op if the CAS UPDATE matched 0 rows.
+    // Extra batch stmts: upsert chalk_course_inputs + chalk_course_input_options,
+    // both conditional on the same CAS WHERE EXISTS. SELECT WHERE EXISTS is a no-op
+    // if the draft UPDATE matched 0 rows.
     const newRevision = (b.expected_revision as number) + 1;
     const boundInputsUpsert = c.env.HPS_DB.prepare(
-      `INSERT INTO chalk_course_inputs (cohort_id,course_id,revision,audience,assets_json,teaching_style,requirements,format,family_session,vocab_json,audience_tier,duration_min,updated_at)
-       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
+      `INSERT INTO chalk_course_inputs (cohort_id,course_id,revision,audience,assets_json,teaching_style,requirements,format,family_session,vocab_json,updated_at)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?
        WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)
        ON CONFLICT(cohort_id,course_id) DO UPDATE SET
          revision=excluded.revision, audience=excluded.audience, assets_json=excluded.assets_json,
          teaching_style=excluded.teaching_style, requirements=excluded.requirements,
          format=excluded.format, family_session=excluded.family_session,
-         vocab_json=excluded.vocab_json, audience_tier=excluded.audience_tier,
-         duration_min=excluded.duration_min, updated_at=excluded.updated_at`
+         vocab_json=excluded.vocab_json, updated_at=excluded.updated_at`
     ).bind(
       cohort, course, newRevision,
       b.audience as string, JSON.stringify(b.assets), b.teaching_style as string,
-      b.requirements as string, b.format as string, familySession, vocabJson,
-      audienceTier, durationMinInput, nowMs,
+      b.requirements as string, b.format as string, familySession, vocabJson, nowMs,
+      cohort, course, newRevision, b.request_id as string, hash
+    );
+    const boundOptionsUpsert = c.env.HPS_DB.prepare(
+      `INSERT INTO chalk_course_input_options (cohort_id,course_id,audience_tier,duration_min,updated_at)
+       SELECT ?,?,?,?,?
+       WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)
+       ON CONFLICT(cohort_id,course_id) DO UPDATE SET
+         audience_tier=excluded.audience_tier,
+         duration_min=excluded.duration_min,
+         updated_at=excluded.updated_at`
+    ).bind(
+      cohort, course, audienceTier, durationMinInput, nowMs,
       cohort, course, newRevision, b.request_id as string, hash
     );
 
@@ -312,7 +326,7 @@ chalkCourses.put(
       hash, now,
       independent: !!prior.independent,
       profile_scope: auth.scope.profiles ?? [],
-      extra_batch_stmts: [boundInputsUpsert],
+      extra_batch_stmts: [boundInputsUpsert, boundOptionsUpsert],
     });
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent')
@@ -432,10 +446,14 @@ chalkCourses.get(
     if (!VALID_FILES.includes(file as any))
       return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
 
-    // Load inputs
+    // Load inputs (LEFT JOIN to pick up audience_tier/duration_min from options table)
     const inputs = await c.env.HPS_DB.prepare(
-      "SELECT * FROM chalk_course_inputs WHERE cohort_id=? AND course_id=?"
-    ).bind(cohort, course).first<InputsRow>();
+      `SELECT ci.*, cio.audience_tier, cio.duration_min
+       FROM chalk_course_inputs ci
+       LEFT JOIN chalk_course_input_options cio
+         ON ci.cohort_id=cio.cohort_id AND ci.course_id=cio.course_id
+       WHERE ci.cohort_id=? AND ci.course_id=?`
+    ).bind(cohort, course).first<InputsWithOptionsRow>();
     if (!inputs) return c.json({ code: "inputs_missing", error: "입력을 먼저 저장하세요 (PUT .../inputs)" }, 409);
     if (!inputs.vocab_json) return c.json({ code: "inputs_missing", error: "어휘(vocab)를 입력에 포함해야 brief를 만들 수 있습니다" }, 409);
 

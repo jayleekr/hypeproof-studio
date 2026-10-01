@@ -1293,9 +1293,16 @@ CREATE TABLE IF NOT EXISTS chalk_course_inputs (
   format          TEXT NOT NULL,
   family_session  INTEGER NOT NULL DEFAULT 0,
   vocab_json      TEXT,
-  audience_tier   TEXT,
-  duration_min    INTEGER,
   updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (cohort_id, course_id),
+  FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
+);
+CREATE TABLE IF NOT EXISTS chalk_course_input_options (
+  cohort_id     TEXT NOT NULL,
+  course_id     TEXT NOT NULL,
+  audience_tier TEXT,
+  duration_min  INTEGER,
+  updated_at    INTEGER NOT NULL,
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );

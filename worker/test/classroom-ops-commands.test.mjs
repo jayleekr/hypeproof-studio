@@ -118,7 +118,7 @@ try {
     const m = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings', '0025-classroom-collect-kinds', '0026-authoring-rehearsal', '0030-chalk-knowledge', '0031-chalk-plan-files', '0032-chalk-course-inputs-tier-duration'].map((n) => readFileSync(new URL(`../migrations/${n}.sql`, import.meta.url), 'utf8'));
     const upgraded = new DatabaseSync(':memory:'); upgraded.exec(readFileSync(new URL('./fixtures/schema-pre-0011.sql', import.meta.url), 'utf8')); for (const sql of [...m, ...m]) upgraded.exec(sql);
     const fresh = new DatabaseSync(':memory:'); fresh.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8')); assert.equal(shape(upgraded), shape(fresh));
-    for (const sql of m) assert.ok(!/\b(DROP|ALTER TABLE(?!\s+\w+\s+ADD\s+COLUMN)|DELETE|UPDATE)\b/i.test(sql.replace(/^--.*$/gm, '').replace(/ON DELETE CASCADE/g, ''))); upgraded.close(); fresh.close();
+    for (const sql of m) assert.ok(!/\b(DROP|ALTER|DELETE|UPDATE)\b/i.test(sql.replace(/^--.*$/gm, '').replace(/ON DELETE CASCADE/g, ''))); upgraded.close(); fresh.close();
   });
   console.log(`${count} remote classroom command controls passed`);
 } finally { f.close(); }
