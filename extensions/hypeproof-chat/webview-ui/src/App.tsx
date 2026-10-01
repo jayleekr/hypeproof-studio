@@ -210,6 +210,13 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const scope = useRef<string | undefined>();
   const [shouldCrash, setShouldCrash] = useState(false);
+  // cr-verify — the verify requests THIS view made; the host echoes the id with the sentence to send.
+  const verifyRequests = useRef(new Set<string>());
+  const verifyRequest = () => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    verifyRequests.current.add(id);
+    return id;
+  };
   // #384 — image handed over from the host (an image opened in an editor tab).
   // nonce forces ChatPanel's effect to re-run even for the same dataUrl.
   const [incomingImage, setIncomingImage] = useState<{ dataUrl: string; nonce: number } | null>(null);
@@ -241,7 +248,8 @@ export function App() {
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "elementAttached": dispatch({ type: "elementAttached", element: msg.element }); break;
-        case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText, error: msg.error }); break;
+        // Every chat view gets the post; only the one whose panel asked sends the sentence.
+        case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -287,9 +295,9 @@ export function App() {
       view={state.verify}
       error={state.verifyError}
       busy={!!state.streamId}
-      onStart={(criteria) => postToHost({ type: "verifyStart", criteria })}
+      onStart={(criteria) => postToHost({ type: "verifyStart", requestId: verifyRequest(), criteria })}
       onRetest={() => postToHost({ type: "verifyRetest" })}
-      onFix={(criterionId, text) => postToHost({ type: "verifyFix", criterionId, text })}
+      onFix={(criterionId, text) => postToHost({ type: "verifyFix", requestId: verifyRequest(), criterionId, text })}
       onClose={() => dispatch({ type: "verifyClose" })}
     />
   ) : null;

@@ -591,7 +591,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** Post the panel state; `sendText` is the student's sentence the panel sends next. */
-  private async postVerifyState(extra: { sendText?: string; error?: string } = {}): Promise<void> {
+  private async postVerifyState(extra: { sendText?: string; requestId?: string; error?: string } = {}): Promise<void> {
     if (!this.isCurriculumRuntimeEnabled()) {
       await this.post({ type: "verifyState", view: null });
       return;
@@ -610,7 +610,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** One verify action from the panel, each behind the served switch (a message can be posted without the panel). */
-  private async handleVerifyMessage(msg: { type: "verifyOpen" } | { type: "verifyStart"; criteria: unknown } | { type: "verifyRetest" } | { type: "verifyFix"; criterionId: string; text: string }): Promise<void> {
+  private async handleVerifyMessage(msg: { type: "verifyOpen" } | { type: "verifyStart"; requestId: string; criteria: unknown } | { type: "verifyRetest" } | { type: "verifyFix"; requestId: string; criterionId: string; text: string }): Promise<void> {
     if (!this.isCurriculumRuntimeEnabled()) {
       await this.post({ type: "verifyState", view: null, error: refusalText("switch_off") });
       return;
@@ -618,11 +618,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (msg.type === "verifyOpen") return this.postVerifyState();
     if (msg.type === "verifyStart") {
       const r = await this.verifySession.start(msg.criteria);
-      return this.postVerifyState(r.ok ? { sendText: r.sendText } : { error: refusalText(r.code) });
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
     }
     if (msg.type === "verifyFix") {
       const r = await this.verifySession.fix(msg.criterionId, msg.text);
-      return this.postVerifyState(r.ok ? { sendText: r.sendText } : { error: refusalText(r.code) });
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
     }
     const pending = this.verifySession.retest();
     await this.postVerifyState();
