@@ -1,0 +1,227 @@
+{
+  "skill": "critic",
+  "version": "1.0.0",
+  "title": "비판적 검토",
+  "intent": "Find weak claims, missing evidence, claims no verification criterion or experiment checks, and safety issues, including what the product does when its own AI answer is wrong, unsafe or unavailable.",
+  "required_context": [
+    "deck_slides",
+    "hypotheses",
+    "experiments",
+    "evidence_items",
+    "version_files",
+    "version_sources"
+  ],
+  "allowed_tools": [
+    "memory_read",
+    "evidence_read",
+    "version_read"
+  ],
+  "preferred_capability": "reasoning.high",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "claims": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 60,
+              "minLength": 1
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 600,
+              "minLength": 1
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "maxItems": 30
+            }
+          },
+          "required": [
+            "id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 20
+      },
+      "criteria": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "claim_id": {
+              "type": "string",
+              "maxLength": 60,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "text",
+            "claim_id"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 20
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "weak_claims": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "claim_id": {
+              "type": "string",
+              "maxLength": 60,
+              "minLength": 1
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "claim_id",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 40
+      },
+      "missing_evidence": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "claim_id": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "what": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "what"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 40
+      },
+      "missing_tests": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "claim_id": {
+              "type": "string",
+              "maxLength": 60,
+              "minLength": 1
+            },
+            "test": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "claim_id",
+            "test"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 40
+      },
+      "safety": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "issue": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "issue"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 20
+      },
+      "ai_failure_review": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "case": {
+              "type": "string",
+              "maxLength": 20,
+              "enum": [
+                "wrong",
+                "unsafe",
+                "unavailable"
+              ]
+            },
+            "handling": {
+              "type": "string",
+              "maxLength": 10,
+              "enum": [
+                "present",
+                "missing"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "case",
+            "handling",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 3
+      }
+    },
+    "required": [
+      "weak_claims",
+      "missing_tests",
+      "safety",
+      "ai_failure_review"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "critic_claims_known",
+    "critic_lists_missing_tests",
+    "critic_lists_weak_claims",
+    "critic_reviews_ai_failure"
+  ],
+  "write_back_targets": []
+}

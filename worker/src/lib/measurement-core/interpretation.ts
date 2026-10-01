@@ -347,6 +347,11 @@ export interface EvidenceDraft {
   /** Who wrote this revision: the runtime's reading of the records, an AI summary, or the student. */
   author: "runtime" | "ai" | "user";
   created_at: number;
+  /**
+   * The curriculum skill that wrote this revision, as `skill@version` (cr-skills, CR-45;
+   * additive per decision 8). Only on a revision an AI skill wrote; absent otherwise.
+   */
+  skill?: string;
   items: DraftItem[];
 }
 
@@ -365,7 +370,8 @@ export interface DraftRefusal {
 export function validateEvidenceDraftShape(value: unknown): EvidenceDraft {
   check(object(value) && value.format === EVIDENCE_DRAFT_FORMAT, "unsupported_evidence_draft");
   forbidKeys(value);
-  check(keysWithin(value, ["format", "id", "revision", "supersedes", "reason", "experiment", "author", "created_at", "items"]), "invalid_draft_fields");
+  check(keysWithin(value, ["format", "id", "revision", "supersedes", "reason", "experiment", "author", "created_at", "skill", "items"]), "invalid_draft_fields");
+  if (value.skill !== undefined) check(value.author === "ai" && typeof value.skill === "string" && /^[a-z][a-z0-9-]{1,39}@\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value.skill), "invalid_draft_skill");
   check(str(value.id, 100) && /^[A-Za-z0-9_-]+$/.test(String(value.id)) && Number.isSafeInteger(value.revision) && Number(value.revision) >= 1 && Number(value.revision) <= 200, "invalid_revision");
   if (value.revision === 1) check(value.supersedes === null, "invalid_supersedes");
   else check(object(value.supersedes) && value.supersedes.id === value.id && value.supersedes.revision === Number(value.revision) - 1 && str(value.reason, 1000), "invalid_supersedes");
@@ -471,8 +477,10 @@ export function reviseEvidenceDraft(
     } else item.review = a.action === "accept" ? "accepted" : "rejected";
     item.reviewed_by = "user";
   }
+  // The skill tag names the AI skill that wrote a revision; the student's review is not the skill's.
+  const { skill: _skill, ...base } = previous;
   return {
-    ...previous,
+    ...base,
     revision: previous.revision + 1,
     supersedes: { id: previous.id, revision: previous.revision },
     reason: input.reason,
