@@ -5,11 +5,18 @@
 
 import {
   VENTURE_SCHEMA,
+  hypothesisRevisionProblems,
+  hypothesisRevisions,
   newLinkId,
   newVentureId,
+  type DeckSlide,
+  type Decision,
   type Experiment,
   type ExperimentDeclarations,
   type Hypothesis,
+  type HypothesisRevision,
+  type Metric,
+  type Stakeholder,
   type ProductVersion,
   type ProductVersionFile,
   type Project,
@@ -518,4 +525,149 @@ export async function putCohortControls(db: DB, next: CohortControls, expectedRe
       ? await db.prepare("INSERT OR IGNORE INTO cr_cohort_controls (cohort_id, doc, revision, updated_by, updated_at) VALUES (?, ?, 1, ?, ?)").bind(next.cohort_id, doc, next.updated_by, next.updated_at).run()
       : await db.prepare("UPDATE cr_cohort_controls SET doc = ?, revision = revision + 1, updated_by = ?, updated_at = ? WHERE cohort_id = ? AND revision = ?").bind(doc, next.updated_by, next.updated_at, next.cohort_id, expectedRevision).run();
   return Number(r.meta?.changes ?? 0) > 0 ? next : null;
+}
+
+// ── cr-memory (#1395): the rest of Venture Memory (migration 0034; CR-35–CR-42, CR-75–CR-79) ──
+
+/** The Projects of one cohort (a director's traversal, CR-37; the route applies the issuer scope). */
+export async function projectsOfCohort(db: DB, cohortId: string): Promise<Project[]> {
+  const rows = await db.prepare("SELECT doc FROM cr_projects WHERE cohort_id = ? ORDER BY created_at").bind(cohortId).all<{ doc: string }>();
+  return (rows.results ?? []).map((r) => parse<Project>(r)).filter((p): p is Project => !!p);
+}
+
+/**
+ * The team's problem statement, a new revision (CR-35 "Problem"). Written at the Project's
+ * current revision only (one statement decides; a concurrent write answers null), and every
+ * earlier statement is kept.
+ */
+export async function reviseProblem(db: DB, project: Project, input: { statement: string; by: string; now: number }): Promise<Project | null> {
+  const row = await db.prepare("SELECT doc, revision FROM cr_projects WHERE id = ?").bind(project.id).first<{ doc: string; revision: number }>();
+  const current = parse<Project>(row);
+  if (!current || !row) return null;
+  const next: Project = { ...current, problem: { revisions: [...(current.problem?.revisions ?? []), { statement: input.statement, at: input.now, by: input.by }] } };
+  const r = await db.prepare("UPDATE cr_projects SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?").bind(JSON.stringify(next), input.now, project.id, row.revision).run();
+  return Number(r.meta?.changes ?? 0) > 0 ? next : null;
+}
+
+/** A hypothesis the team writes directly (not through a test start), with its first revision. */
+export async function addHypothesis(db: DB, input: { project_id: string; statement: string; stakeholder_id?: string; by: string; now: number; max: number }): Promise<Hypothesis | null> {
+  const first: HypothesisRevision = { revision: 1, statement: input.statement, status: "open", at: input.now, by: input.by };
+  const h: Hypothesis = { schema: VENTURE_SCHEMA, kind: "hypothesis", id: newVentureId("hyp"), project_id: input.project_id, statement: input.statement, status: "open", revision: 1, created_at: input.now, ...(input.stakeholder_id ? { stakeholder_id: input.stakeholder_id } : {}), revisions: [first] };
+  const r = await db
+    .prepare("INSERT OR IGNORE INTO cr_hypotheses (id, project_id, doc, revision, open_statement, created_at, updated_at) SELECT ?, ?, ?, 1, ?, ?, ? WHERE (SELECT COUNT(*) FROM cr_hypotheses WHERE project_id = ?) < ?")
+    .bind(h.id, h.project_id, JSON.stringify(h), h.statement, input.now, input.now, h.project_id, input.max)
+    .run();
+  return Number(r.meta?.changes ?? 0) > 0 ? h : null;
+}
+
+/**
+ * A new revision of a hypothesis (CR-79): every earlier revision kept unchanged
+ * (`hypothesisRevisionProblems`), written only at the revision it was read at (a concurrent
+ * revision answers `stale_revision`). The open-statement key follows the status, so a test
+ * start reuses a hypothesis only while it is open.
+ */
+export async function reviseHypothesis(
+  db: DB,
+  h: Hypothesis,
+  input: { statement: string; status: Hypothesis["status"]; by: string; now: number; decision_id?: string; evidence_refs?: string[]; stakeholder_id?: string },
+): Promise<{ ok: true; hypothesis: Hypothesis } | { ok: false; code: string; problems?: string[] }> {
+  const revs = hypothesisRevisions(h);
+  const rev: HypothesisRevision = {
+    revision: (revs.at(-1)?.revision ?? 0) + 1,
+    statement: input.statement,
+    status: input.status,
+    at: input.now,
+    by: input.by,
+    ...(input.decision_id ? { decision_id: input.decision_id } : {}),
+    ...(input.evidence_refs?.length ? { evidence_refs: input.evidence_refs } : {}),
+  };
+  const next: Hypothesis = { ...h, statement: rev.statement, status: rev.status, revision: rev.revision, revisions: [...revs, rev], ...(input.stakeholder_id ? { stakeholder_id: input.stakeholder_id } : {}) };
+  const problems = hypothesisRevisionProblems(h, next);
+  if (problems.length) return { ok: false, code: "invalid_revision", problems };
+  const openStatement = next.status === "open" ? next.statement : null;
+  const r = await db
+    .prepare("UPDATE OR IGNORE cr_hypotheses SET doc = ?, revision = ?, open_statement = ?, updated_at = ? WHERE id = ? AND revision = ?")
+    .bind(JSON.stringify(next), rev.revision, openStatement, input.now, h.id, h.revision ?? 1)
+    .run();
+  if (Number(r.meta?.changes ?? 0) > 0) return { ok: true, hypothesis: next };
+  const fresh = await getHypothesis(db, h.id);
+  return { ok: false, code: fresh && fresh.statement !== next.statement && fresh.status === "open" && openStatement !== null ? "open_statement_exists" : "stale_revision" };
+}
+
+/** Name the stakeholder an experiment concerns (CR-75): an additive key on the cr-publish record, in place. */
+export async function setExperimentStakeholder(db: DB, experiment: Experiment, stakeholderId: string, now: number): Promise<Experiment> {
+  const fresh = (await getExperiment(db, experiment.id)) ?? experiment;
+  const next: Experiment = { ...fresh, stakeholder_id: stakeholderId };
+  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
+  return next;
+}
+
+// Decisions (CR-38, CR-41)
+
+export async function addDecision(db: DB, d: Decision, now: number, max: number): Promise<boolean> {
+  const r = await db
+    .prepare("INSERT INTO cr_decisions (id, project_id, doc, revision, created_at, updated_at) SELECT ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM cr_decisions WHERE project_id = ?) < ?")
+    .bind(d.id, d.project_id, JSON.stringify(d), now, now, d.project_id, max)
+    .run();
+  return Number(r.meta?.changes ?? 0) > 0;
+}
+
+export async function getDecision(db: DB, id: string): Promise<Decision | null> {
+  return parse<Decision>(await db.prepare("SELECT doc FROM cr_decisions WHERE id = ?").bind(id).first());
+}
+
+export async function decisionsOf(db: DB, projectId: string): Promise<Decision[]> {
+  const rows = await db.prepare("SELECT doc FROM cr_decisions WHERE project_id = ? ORDER BY created_at, id").bind(projectId).all<{ doc: string }>();
+  return (rows.results ?? []).map((r) => parse<Decision>(r)).filter((d): d is Decision => !!d);
+}
+
+/** Link the version a decision produced, once (null → id): a decision is otherwise immutable. */
+export async function linkDecisionVersion(db: DB, d: Decision, versionId: string, now: number): Promise<Decision | null> {
+  const next: Decision = { ...d, resulting_version_id: versionId };
+  const r = await db.prepare("UPDATE cr_decisions SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = 1").bind(JSON.stringify(next), now, d.id).run();
+  return Number(r.meta?.changes ?? 0) > 0 ? next : null;
+}
+
+// Stakeholders (CR-75), metrics (CR-76), deck slides (CR-35)
+
+export async function addStakeholder(db: DB, s: Stakeholder, max: number): Promise<boolean> {
+  const r = await db.prepare("INSERT INTO cr_stakeholders (id, project_id, doc, created_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM cr_stakeholders WHERE project_id = ?) < ?").bind(s.id, s.project_id, JSON.stringify(s), s.created_at, s.project_id, max).run();
+  return Number(r.meta?.changes ?? 0) > 0;
+}
+
+export async function stakeholdersOf(db: DB, projectId: string): Promise<Stakeholder[]> {
+  const rows = await db.prepare("SELECT doc FROM cr_stakeholders WHERE project_id = ? ORDER BY created_at, id").bind(projectId).all<{ doc: string }>();
+  return (rows.results ?? []).map((r) => parse<Stakeholder>(r)).filter((x): x is Stakeholder => !!x);
+}
+
+export async function addMetric(db: DB, m: Metric, max: number): Promise<boolean> {
+  const r = await db.prepare("INSERT INTO cr_metrics (id, project_id, doc, created_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM cr_metrics WHERE project_id = ?) < ?").bind(m.id, m.project_id, JSON.stringify(m), m.created_at, m.project_id, max).run();
+  return Number(r.meta?.changes ?? 0) > 0;
+}
+
+export async function metricsOf(db: DB, projectId: string): Promise<Metric[]> {
+  const rows = await db.prepare("SELECT doc FROM cr_metrics WHERE project_id = ? ORDER BY created_at, id").bind(projectId).all<{ doc: string }>();
+  return (rows.results ?? []).map((r) => parse<Metric>(r)).filter((x): x is Metric => !!x);
+}
+
+/** One more revision of one slide: the next number after the stored ones, one statement; an earlier revision is never rewritten. */
+export async function addSlideRevision(db: DB, slide: Omit<DeckSlide, "revision">, maxRevisions: number): Promise<DeckSlide | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await db.prepare("SELECT MAX(revision) AS r FROM cr_deck_slides WHERE project_id = ? AND number = ?").bind(slide.project_id, slide.number).first<{ r: number | null }>();
+    const revision = Number(row?.r ?? 0) + 1;
+    if (revision > maxRevisions) return null;
+    const doc: DeckSlide = { ...slide, revision };
+    const r = await db.prepare("INSERT OR IGNORE INTO cr_deck_slides (project_id, number, revision, doc, created_at) VALUES (?, ?, ?, ?, ?)").bind(slide.project_id, slide.number, revision, JSON.stringify(doc), slide.at).run();
+    if (Number(r.meta?.changes ?? 0) > 0) return doc;
+  }
+  return null;
+}
+
+export async function slidesOf(db: DB, projectId: string): Promise<DeckSlide[]> {
+  const rows = await db.prepare("SELECT doc FROM cr_deck_slides WHERE project_id = ? ORDER BY number, revision").bind(projectId).all<{ doc: string }>();
+  return (rows.results ?? []).map((r) => parse<DeckSlide>(r)).filter((x): x is DeckSlide => !!x);
+}
+
+export async function getStakeholder(db: DB, id: string): Promise<Stakeholder | null> {
+  return parse<Stakeholder>(await db.prepare("SELECT doc FROM cr_stakeholders WHERE id = ?").bind(id).first());
 }

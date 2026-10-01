@@ -22,8 +22,19 @@ import { makeErrorBody } from "../middleware/request-id";
 import { digestOf } from "../lib/measurement-core/local-record";
 import {
   CHANNEL_MAX,
+  HYPOTHESIS_STATUSES,
   LINK_ID,
+  VENTURE_SCHEMA,
   isVentureId,
+  parseEvidenceItemRef,
+  validateDecisionContract,
+  validateDeckSlide,
+  validateMetric,
+  validateStakeholder,
+  type Decision,
+  type Hypothesis,
+  type Metric,
+  type Stakeholder,
   linkState,
   newVentureId,
   normalizeChannel,
@@ -64,6 +75,26 @@ import { hypeproofTokensIn, judgeToken, scanFile, type ScanHit } from "../lib/cu
 import { originFor, parseTestOrigin, shareUrl } from "../lib/curriculum/test-origin";
 import { EVIDENCE_LIMITS, addNote, ensureExperimentTask, experimentEvidence, noteEvent, participantRecord, PUBLISHED_HOST, type R2Like } from "../lib/curriculum/participant-record";
 import { getCohortControls, releaseErasedSession, touchExperiment } from "../lib/curriculum/store";
+import {
+  addDecision,
+  addHypothesis,
+  addMetric,
+  addSlideRevision,
+  addStakeholder,
+  decisionsOf,
+  getDecision,
+  getStakeholder,
+  linkDecisionVersion,
+  metricsOf,
+  projectsOfCohort,
+  reviseHypothesis,
+  reviseProblem,
+  setExperimentStakeholder,
+  slidesOf,
+  stakeholdersOf,
+} from "../lib/curriculum/store";
+import { decisionRefProblems, decisionView, evidenceItemsOf, memoryState, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
+import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
@@ -394,6 +425,7 @@ curriculum.post("/experiments", async (c) => {
     product_version_id: body.product_version_id,
     status: "running",
     ...(body.declarations !== undefined ? { declarations: body.declarations } : {}),
+    ...(body.stakeholder_id !== undefined ? { stakeholder_id: body.stakeholder_id } : {}),
   };
   const contract = validateExperimentContract(draft);
   if (!contract.ok) return refuse(c, 400, "invalid_experiment", { problems: contract.problems });
@@ -407,6 +439,11 @@ curriculum.post("/experiments", async (c) => {
   }
   for (const v of contract.value.declarations?.variants ?? []) {
     if (v.product_version_id && !(await getVersion(db, project.id, v.product_version_id))) return refuse(c, 409, "variant_version_unresolved");
+  }
+  // cr-memory (CR-75): the stakeholder the experiment concerns is one of this Project's.
+  if (contract.value.stakeholder_id !== undefined) {
+    const st = await getStakeholder(db, contract.value.stakeholder_id);
+    if (!st || st.project_id !== project.id) return refuse(c, 409, "stakeholder_unresolved");
   }
   const { id: _pending, ...rest } = contract.value;
   const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
@@ -765,6 +802,373 @@ curriculum.delete("/experiments/:id/sessions/:sid", async (c) => {
   return c.json({ receipt: { kind: "participant_session_deleted", experiment_id: r.experiment.id, session_id: sid, at: now, deleted_by: r.by, removed: report.removed, not_covered: report.not_covered } });
 });
 
+// ── Venture Memory (cr-memory #1395; CR-35–CR-42, CR-75–CR-79, CR-82) ─────────
+//
+// Structure lives in the `cr_*` documents (migrations 0032, 0034); evidence items are read from
+// the experiments' measurement-core records on every request and never copied (SX-48). Reads
+// serve a member of the Project or a director whose issuer scope covers its cohort and profile
+// (CR-37, SX-38: the issuer identity, no new role); writes serve members only.
+
+/** Policy bounds on what one Project's memory may hold (each a fixed-size D1 row). */
+export const MEMORY_LIMITS = { decisionsPerProject: 500, stakeholdersPerProject: 30, metricsPerProject: 30, hypothesesPerProject: 100, slideRevisions: 200, problemRevisions: 50, hypothesisRevisions: 50 } as const;
+
+/** The issuer scope covers this Project's cohort and profile (R5, CR-37). */
+const scopeCovers = (payload: TokenPayload, project: Project) => (payload.scopes ?? []).some((sc) => sc.cohort === project.cohort_id && (sc.profiles ?? []).includes(project.profile_id));
+
+/** An issuer for whom at least one scoped profile has the switch on, else the unknown-route answer (no D1 read before, CR-02). */
+async function director(c: Ctx): Promise<{ payload: TokenPayload } | Response> {
+  const raw = bearer(c.req.header("authorization"));
+  if (!raw) return unknownRoute(c);
+  let payload: TokenPayload;
+  try {
+    payload = await verify(raw, c.env.HPS_SIGNING_SECRET);
+  } catch {
+    return unknownRoute(c);
+  }
+  if (payload.role !== "issuer") return unknownRoute(c);
+  for (const p of [...new Set((payload.scopes ?? []).flatMap((sc) => sc.profiles ?? []))]) {
+    const r = await resolveProfile(c.env, p);
+    if (r && curriculumRuntimeAllowed(r.profile)) return { payload };
+  }
+  return unknownRoute(c);
+}
+
+/** The reader of a Project's memory: a member, or a director in scope (CR-37). Anyone else: the unknown route. */
+async function memoryReader(c: Ctx, projectId: string): Promise<{ project: Project; by: "student" | "director" } | Response> {
+  const raw = bearer(c.req.header("authorization"));
+  if (!raw) return unknownRoute(c);
+  let payload: TokenPayload;
+  try {
+    payload = await verify(raw, c.env.HPS_SIGNING_SECRET);
+  } catch {
+    return unknownRoute(c);
+  }
+  if (payload.role !== "issuer") {
+    const s = await student(c);
+    if (s instanceof Response) return s;
+    const project = await memberProject(c, s, projectId);
+    return project instanceof Response ? project : { project, by: "student" };
+  }
+  const d = await director(c);
+  if (d instanceof Response) return d;
+  if (!isVentureId(projectId)) return unknownRoute(c);
+  const project = await getProject(c.env.HPS_DB, projectId);
+  if (!project || !scopeCovers(d.payload, project)) return unknownRoute(c);
+  const resolved = await resolveProfile(c.env, project.profile_id);
+  if (!resolved || !curriculumRuntimeAllowed(resolved.profile)) return unknownRoute(c);
+  noStore(c);
+  if (d.payload.jti && (await isTokenRevoked(c.env.HPS_KV, d.payload.jti))) return refuse(c, 401, "revoked");
+  return { project, by: "director" };
+}
+
+/** A member writing to a Project's memory, with the parsed body, or the answer to send. */
+async function memberWrite(c: Ctx, projectId: string): Promise<{ s: Student; project: Project; body: Record<string, unknown> } | Response> {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const project = await memberProject(c, s, projectId);
+  if (project instanceof Response) return project;
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return refuse(c, 400, "invalid_json");
+  return { s, project, body: body as Record<string, unknown> };
+}
+
+const recordOf = (env: Env, project: Project) => participantRecord(env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+
+/**
+ * The evidence items of the named experiments (or every experiment of the Project), read from
+ * their records now. Refs naming an experiment of another Project are simply not found.
+ */
+async function itemsFor(env: Env, project: Project, experimentIds: Iterable<string>): Promise<Map<string, EvidenceItemView>> {
+  const own = new Set((await experimentsOf(env.HPS_DB, project.id)).map((e) => e.id));
+  const record = recordOf(env, project);
+  const out = new Map<string, EvidenceItemView>();
+  for (const id of new Set(experimentIds)) {
+    if (!own.has(id)) continue;
+    for (const it of evidenceItemsOf(id, await record.evidenceDrafts(id).catch(() => []))) out.set(it.id, it);
+  }
+  return out;
+}
+const experimentsOfRefs = (refs: readonly string[]) => refs.map((r) => parseEvidenceItemRef(r)?.experiment).filter((x): x is string => !!x);
+const refList = (v: unknown): string[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= 30 && v.every((x) => typeof x === "string" && x.length > 0 && x.length <= 300) ? [...new Set(v as string[])] : null);
+const unresolved = (refs: readonly string[], items: ReadonlyMap<string, EvidenceItemView>) => refs.filter((r) => !items.has(r));
+
+/** Everything the Project's memory holds, assembled with no model call (CR-36): no chat history is read anywhere. */
+async function loadMemory(env: Env, project: Project): Promise<MemoryState> {
+  const db = env.HPS_DB;
+  const [hypotheses, experiments, versions, decisions, stakeholders, metrics, slides] = await Promise.all([
+    hypothesesOf(db, project.id),
+    experimentsOf(db, project.id),
+    versionsOf(db, project.id),
+    decisionsOf(db, project.id),
+    stakeholdersOf(db, project.id),
+    metricsOf(db, project.id),
+    slidesOf(db, project.id),
+  ]);
+  const record = recordOf(env, project);
+  const items: EvidenceItemView[] = [];
+  for (const e of experiments) items.push(...evidenceItemsOf(e.id, await record.evidenceDrafts(e.id).catch(() => [])));
+  // Participant events are read only for the experiments a metric counts over.
+  const events = new Map<string, ObservationEvent[]>();
+  for (const m of metrics) {
+    if (m.source.type !== "event_count" || events.has(m.source.experiment_id) || !experiments.some((e) => e.id === (m.source as { experiment_id: string }).experiment_id)) continue;
+    events.set(m.source.experiment_id, (await record.observationsOf(PUBLISHED_HOST, m.source.experiment_id)).map((r) => r.event));
+  }
+  return memoryState({ project, hypotheses, experiments, versions, decisions, stakeholders, metrics, slides, items }, events);
+}
+
+curriculum.get("/projects/:id/memory", async (c) => {
+  const r = await memoryReader(c, c.req.param("id"));
+  if (r instanceof Response) return r;
+  return c.json({ memory: await loadMemory(c.env, r.project), read_by: r.by });
+});
+
+/** CR-77: two versions of this Project, compared by content digest; the decision behind the newer one or "no recorded decision". */
+curriculum.get("/projects/:id/memory/diff", async (c) => {
+  const r = await memoryReader(c, c.req.param("id"));
+  if (r instanceof Response) return r;
+  const from = c.req.query("from") ?? "";
+  const to = c.req.query("to") ?? "";
+  const [a, b] = await Promise.all([getVersion(c.env.HPS_DB, r.project.id, from), getVersion(c.env.HPS_DB, r.project.id, to)]);
+  // A version of another Project is not a version of this one: the comparison is refused.
+  if (!a || !b) return refuse(c, 409, "cross_project");
+  const decisions = await decisionsOf(c.env.HPS_DB, r.project.id);
+  const items = await itemsFor(c.env, r.project, decisions.flatMap((d) => experimentsOfRefs(d.evidence_refs)));
+  const diff = versionDiff(r.project.id, a, b, decisions, items);
+  if (!diff.ok) return refuse(c, 409, diff.code);
+  return c.json({ diff });
+});
+
+/** CR-37: the Projects a director may traverse (issuer scope covering their cohort and profile, switch on). */
+curriculum.get("/director/projects", async (c) => {
+  const d = await director(c);
+  if (d instanceof Response) return d;
+  noStore(c);
+  if (d.payload.jti && (await isTokenRevoked(c.env.HPS_KV, d.payload.jti))) return refuse(c, 401, "revoked");
+  const out: Array<Pick<Project, "id" | "title" | "cohort_id" | "profile_id" | "members">> = [];
+  for (const cohort of [...new Set((d.payload.scopes ?? []).map((s) => s.cohort))]) {
+    for (const p of await projectsOfCohort(c.env.HPS_DB, cohort)) {
+      if (!scopeCovers(d.payload, p)) continue;
+      const resolved = await resolveProfile(c.env, p.profile_id);
+      if (resolved && curriculumRuntimeAllowed(resolved.profile)) out.push({ id: p.id, title: p.title, cohort_id: p.cohort_id, profile_id: p.profile_id, members: p.members });
+    }
+  }
+  return c.json({ projects: out });
+});
+
+/** CR-35 "Problem": the team's statement, a new revision; earlier statements stay. */
+curriculum.put("/projects/:id/problem", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const statement = validateHypothesisStatement(w.body.statement);
+  if (!statement) return refuse(c, 400, "invalid_problem");
+  if ((w.project.problem?.revisions.length ?? 0) >= MEMORY_LIMITS.problemRevisions) return refuse(c, 409, "problem_revision_limit");
+  const next = await reviseProblem(c.env.HPS_DB, w.project, { statement, by: w.s.payload.u, now: Date.now() });
+  if (!next) return refuse(c, 409, "stale_revision");
+  return c.json({ project: next });
+});
+
+/** Resolve a stakeholder id to this Project's, or null (a missing key is "absent", not an error). */
+async function ownStakeholder(env: Env, project: Project, id: unknown): Promise<string | null | undefined> {
+  if (id === undefined) return undefined;
+  if (!isVentureId(id)) return null;
+  const s = await getStakeholder(env.HPS_DB, id);
+  return s && s.project_id === project.id ? s.id : null;
+}
+
+curriculum.post("/projects/:id/hypotheses", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const statement = validateHypothesisStatement(w.body.statement);
+  if (!statement) return refuse(c, 400, "invalid_hypothesis");
+  const stakeholder = await ownStakeholder(c.env, w.project, w.body.stakeholder_id);
+  if (stakeholder === null) return refuse(c, 409, "stakeholder_unresolved");
+  if (await openHypothesis(c.env.HPS_DB, w.project.id, statement)) return refuse(c, 409, "open_statement_exists");
+  const h = await addHypothesis(c.env.HPS_DB, { project_id: w.project.id, statement, ...(stakeholder ? { stakeholder_id: stakeholder } : {}), by: w.s.payload.u, now: Date.now(), max: MEMORY_LIMITS.hypothesesPerProject });
+  if (!h) return refuse(c, 409, "hypothesis_limit", { max: MEMORY_LIMITS.hypothesesPerProject });
+  return c.json({ hypothesis: h }, 201);
+});
+
+/**
+ * CR-79: a new revision of a hypothesis. The earlier statement is kept; the revision may cite the
+ * team's Decision and the evidence items that caused it. Without them the belief change reads
+ * "reason not recorded", never a generated reason.
+ */
+curriculum.post("/projects/:id/hypotheses/:hid/revisions", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const hid = c.req.param("hid");
+  const h = isVentureId(hid) ? await getHypothesis(c.env.HPS_DB, hid) : null;
+  if (!h || h.project_id !== w.project.id) return unknownRoute(c);
+  if (w.body.revision !== (h.revision ?? 1)) return refuse(c, 409, "stale_revision", { latest: h.revision ?? 1 });
+  if ((h.revisions?.length ?? 1) >= MEMORY_LIMITS.hypothesisRevisions) return refuse(c, 409, "hypothesis_revision_limit");
+  const statement = w.body.statement === undefined ? h.statement : validateHypothesisStatement(w.body.statement);
+  if (!statement) return refuse(c, 400, "invalid_hypothesis");
+  const status = w.body.status;
+  if (!(HYPOTHESIS_STATUSES as readonly string[]).includes(String(status))) return refuse(c, 400, "invalid_status");
+  const refs = refList(w.body.evidence_refs);
+  if (!refs) return refuse(c, 400, "invalid_evidence_refs");
+  let decisionId: string | undefined;
+  if (w.body.decision_id !== undefined) {
+    const d = isVentureId(w.body.decision_id) ? await getDecision(c.env.HPS_DB, w.body.decision_id) : null;
+    // Only the team's own decision can be the reason a belief changed (SX-45).
+    if (!d || d.project_id !== w.project.id) return refuse(c, 409, "decision_unresolved");
+    if (d.actor !== "student") return refuse(c, 409, "decision_is_ai_suggestion");
+    decisionId = d.id;
+  }
+  const items = await itemsFor(c.env, w.project, experimentsOfRefs(refs));
+  const missingRefs = unresolved(refs, items);
+  if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  const stakeholder = await ownStakeholder(c.env, w.project, w.body.stakeholder_id);
+  if (stakeholder === null) return refuse(c, 409, "stakeholder_unresolved");
+  const r = await reviseHypothesis(c.env.HPS_DB, h, { statement, status: status as Hypothesis["status"], by: w.s.payload.u, now: Date.now(), ...(decisionId ? { decision_id: decisionId } : {}), ...(refs.length ? { evidence_refs: refs } : {}), ...(stakeholder ? { stakeholder_id: stakeholder } : {}) });
+  if (!r.ok) return refuse(c, 409, r.code, r.problems ? { problems: r.problems } : {});
+  return c.json({ hypothesis: r.hypothesis }, 201);
+});
+
+/** CR-75: a stakeholder with its roles; a role claimed observed must cite evidence items that resolve. */
+curriculum.post("/projects/:id/stakeholders", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const v = validateStakeholder(w.body);
+  if (!v.ok) return refuse(c, 400, "invalid_stakeholder", { problems: v.problems });
+  const refs = v.value.roles.flatMap((r) => r.evidence_refs);
+  const items = await itemsFor(c.env, w.project, experimentsOfRefs(refs));
+  const missingRefs = unresolved(refs, items);
+  if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  const s: Stakeholder = { schema: VENTURE_SCHEMA, kind: "stakeholder", id: newVentureId("stk"), project_id: w.project.id, label: v.value.label, roles: v.value.roles, created_at: Date.now() };
+  if (!(await addStakeholder(c.env.HPS_DB, s, MEMORY_LIMITS.stakeholdersPerProject))) return refuse(c, 409, "stakeholder_limit", { max: MEMORY_LIMITS.stakeholdersPerProject });
+  return c.json({ stakeholder: s }, 201);
+});
+
+/** CR-75: name the stakeholder an experiment concerns (an additive key on its cr-publish record). */
+curriculum.post("/experiments/:id/stakeholder", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const id = c.req.param("id");
+  const experiment = isVentureId(id) ? await getExperiment(c.env.HPS_DB, id) : null;
+  if (!experiment) return unknownRoute(c);
+  const project = await memberProject(c, s, experiment.project_id);
+  if (project instanceof Response) return project;
+  let body: { stakeholder_id?: unknown } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  const stakeholder = await ownStakeholder(c.env, project, body.stakeholder_id);
+  if (!stakeholder) return refuse(c, 409, "stakeholder_unresolved");
+  return c.json({ experiment: await setExperimentStakeholder(c.env.HPS_DB, experiment, stakeholder, Date.now()) });
+});
+
+/** CR-76: a metric definition; its value is computed on every read from its source. */
+curriculum.post("/projects/:id/metrics", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const v = validateMetric(w.body);
+  if (!v.ok) return refuse(c, 400, "invalid_metric", { problems: v.problems });
+  if (v.value.stakeholder_id !== undefined && !(await ownStakeholder(c.env, w.project, v.value.stakeholder_id))) return refuse(c, 409, "stakeholder_unresolved");
+  const src = v.value.source;
+  if (src.type === "event_count") {
+    const e = await getExperiment(c.env.HPS_DB, src.experiment_id);
+    if (!e || e.project_id !== w.project.id) return refuse(c, 409, "experiment_unresolved");
+  } else {
+    const items = await itemsFor(c.env, w.project, experimentsOfRefs(src.refs));
+    const missingRefs = unresolved(src.refs, items);
+    if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  }
+  const m: Metric = { schema: VENTURE_SCHEMA, kind: "metric", id: newVentureId("met"), project_id: w.project.id, ...v.value, created_at: Date.now() };
+  if (!(await addMetric(c.env.HPS_DB, m, MEMORY_LIMITS.metricsPerProject))) return refuse(c, 409, "metric_limit", { max: MEMORY_LIMITS.metricsPerProject });
+  return c.json({ metric: m }, 201);
+});
+
+/**
+ * CR-38, CR-41, CR-82: a decision of the team (`author: "user"`, actor student, SX-45) or an AI
+ * suggestion (`author: "ai"`, never shown as the team's decision). Every evidence reference must
+ * be an evidence item of this Project, every assumption reference an item whose current
+ * confidence is assumed, the resulting version one of this Project's; otherwise nothing is stored.
+ */
+curriculum.post("/projects/:id/decisions", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  if (w.body.author !== "user" && w.body.author !== "ai") return refuse(c, 400, "missing_author");
+  const now = Date.now();
+  const candidate = {
+    id: newVentureId("dec"),
+    statement: typeof w.body.statement === "string" ? w.body.statement.trim() : w.body.statement,
+    evidence_refs: w.body.evidence_refs ?? [],
+    assumption_refs: w.body.assumption_refs ?? [],
+    resulting_version_id: w.body.resulting_version_id ?? null,
+    affected_deck_slides: w.body.affected_deck_slides ?? [],
+    decided_at: now,
+  };
+  const v = validateDecisionContract(candidate);
+  if (!v.ok) return refuse(c, 400, "invalid_decision", { problems: v.problems });
+  const experimentId = w.body.experiment_id;
+  if (experimentId !== undefined && !isVentureId(experimentId)) return refuse(c, 400, "invalid_decision", { problems: ["invalid:experiment_id"] });
+  const d = v.value;
+  const items = await itemsFor(c.env, w.project, experimentsOfRefs([...d.evidence_refs, ...d.assumption_refs]));
+  const versions = new Set((await versionsOf(c.env.HPS_DB, w.project.id)).map((x) => x.id));
+  const experiments = new Set((await experimentsOf(c.env.HPS_DB, w.project.id)).map((x) => x.id));
+  const problems = decisionRefProblems({ ...d, ...(experimentId !== undefined ? { experiment_id: experimentId as string } : {}) }, { items, versions, experiments });
+  if (problems.length) return refuse(c, 409, "unresolved_decision_refs", { problems });
+  const decision: Decision = {
+    schema: VENTURE_SCHEMA,
+    kind: "decision",
+    ...d,
+    project_id: w.project.id,
+    actor: w.body.author === "user" ? "student" : "ai",
+    ...(w.body.author === "user" ? { decided_by: w.s.payload.u } : {}),
+    ...(experimentId !== undefined ? { experiment_id: experimentId as string } : {}),
+  };
+  if (!(await addDecision(c.env.HPS_DB, decision, now, MEMORY_LIMITS.decisionsPerProject))) return refuse(c, 409, "decision_limit", { max: MEMORY_LIMITS.decisionsPerProject });
+  return c.json({ decision: decisionView(decision, items) }, 201);
+});
+
+/** Link the product version a decision produced, once (CR-41 `resulting_version_id`, CR-77). */
+curriculum.post("/decisions/:id/version", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const id = c.req.param("id");
+  const d = isVentureId(id) ? await getDecision(c.env.HPS_DB, id) : null;
+  if (!d) return unknownRoute(c);
+  const project = await memberProject(c, s, d.project_id);
+  if (project instanceof Response) return project;
+  let body: { version_id?: unknown } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return refuse(c, 400, "invalid_json");
+  }
+  if (typeof body.version_id !== "string" || !(await getVersion(c.env.HPS_DB, project.id, body.version_id))) return refuse(c, 409, "unresolved_version");
+  if (d.resulting_version_id !== null) return refuse(c, 409, "version_already_linked");
+  const next = await linkDecisionVersion(c.env.HPS_DB, d, body.version_id, Date.now());
+  if (!next) return refuse(c, 409, "version_already_linked");
+  return c.json({ decision: next });
+});
+
+/** One revision of one of the eight deck slides (CR-35 DeckSlides; cr-deck builds on these rows, R10). */
+curriculum.put("/projects/:id/slides/:n", async (c) => {
+  const w = await memberWrite(c, c.req.param("id"));
+  if (w instanceof Response) return w;
+  const v = validateDeckSlide({ ...w.body, number: Number(c.req.param("n")) });
+  if (!v.ok) return refuse(c, 400, "invalid_slide", { problems: v.problems });
+  const items = await itemsFor(c.env, w.project, experimentsOfRefs(v.value.evidence_refs));
+  const missingRefs = unresolved(v.value.evidence_refs, items);
+  if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  if (v.value.decision_id !== undefined) {
+    const d = await getDecision(c.env.HPS_DB, v.value.decision_id);
+    if (!d || d.project_id !== w.project.id) return refuse(c, 409, "decision_unresolved");
+  }
+  const slide = await addSlideRevision(c.env.HPS_DB, { schema: VENTURE_SCHEMA, kind: "deck_slide", project_id: w.project.id, ...v.value, at: Date.now(), by: w.s.payload.u }, MEMORY_LIMITS.slideRevisions);
+  if (!slide) return refuse(c, 409, "slide_revision_limit");
+  return c.json({ slide }, 201);
+});
+
 /** The CR-T02 Worker inventory of this router, as `METHOD /path` under /v1/curriculum. */
 export const CURRICULUM_ROUTES = [
   "GET /v1/curriculum/projects",
@@ -783,4 +1187,17 @@ export const CURRICULUM_ROUTES = [
   "POST /v1/curriculum/experiments/:id/drafts/:draft/review",
   "DELETE /v1/curriculum/experiments/:id",
   "DELETE /v1/curriculum/experiments/:id/sessions/:sid",
+  // cr-memory (#1395)
+  "GET /v1/curriculum/projects/:id/memory",
+  "GET /v1/curriculum/projects/:id/memory/diff",
+  "GET /v1/curriculum/director/projects",
+  "PUT /v1/curriculum/projects/:id/problem",
+  "POST /v1/curriculum/projects/:id/hypotheses",
+  "POST /v1/curriculum/projects/:id/hypotheses/:hid/revisions",
+  "POST /v1/curriculum/projects/:id/stakeholders",
+  "POST /v1/curriculum/experiments/:id/stakeholder",
+  "POST /v1/curriculum/projects/:id/metrics",
+  "POST /v1/curriculum/projects/:id/decisions",
+  "POST /v1/curriculum/decisions/:id/version",
+  "PUT /v1/curriculum/projects/:id/slides/:n",
 ] as const;

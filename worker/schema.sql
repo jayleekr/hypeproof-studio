@@ -1391,3 +1391,40 @@ CREATE TABLE IF NOT EXISTS cr_experiment_records (
   experiment_id  TEXT PRIMARY KEY REFERENCES cr_experiments(id),
   last_record_at INTEGER NOT NULL
 );
+
+-- cr-memory (#1395) — migration 0034: the rest of Venture Memory (decisions, stakeholders, metrics, deck slides).
+-- Structure and references only; evidence items stay in the measurement-core record (SX-48).
+CREATE TABLE IF NOT EXISTS cr_decisions (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_decisions_project ON cr_decisions(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_stakeholders (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_stakeholders_project ON cr_stakeholders(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_metrics (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_metrics_project ON cr_metrics(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_deck_slides (
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  number     INTEGER NOT NULL CHECK (number BETWEEN 1 AND 8),
+  revision   INTEGER NOT NULL,
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, number, revision)
+);

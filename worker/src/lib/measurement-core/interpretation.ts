@@ -429,15 +429,32 @@ export function comparisonSupport(item: Pick<DraftItem, "compares" | "source_ref
  */
 export function reviseEvidenceDraft(
   previous: EvidenceDraft,
-  actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }>,
+  actions: Array<{ item: string; action: "accept" | "edit" | "reject" | "promote"; text?: string; source_refs?: string[] }>,
   input: { at: number; reason: string },
 ): EvidenceDraft {
   check(Array.isArray(actions) && actions.length >= 1 && actions.length <= 60 && str(input.reason, 1000), "invalid_review");
   const byId = new Map(previous.items.map((i) => [i.id, i]));
   const next = previous.items.map((i) => ({ ...i, source_refs: [...i.source_refs] }));
   for (const a of actions) {
-    check(object(a) && byId.has(String(a.item)) && ["accept", "edit", "reject"].includes(String(a.action)), "invalid_review");
+    check(object(a) && byId.has(String(a.item)) && ["accept", "edit", "reject", "promote"].includes(String(a.action)), "invalid_review");
     const item = next.find((i) => i.id === a.item)!;
+    if (a.action === "promote") {
+      // cr-memory (CR-82): an assumption becomes observed only through this, the student's own
+      // revision, citing real records. The statement is kept word for word (the earlier
+      // revision keeps it too); the references are the new ones, and the store resolves every
+      // one of them before the revision is written (`draftRefusals`). A reference to another
+      // evidence item, an AI summary or a skill's statement is not a record and does not match
+      // `EVIDENCE_REF`, so a promotion resting only on one is refused.
+      check(item.section === "assumption" && item.review !== "rejected", "promotion_not_assumption");
+      check(a.text === undefined, "promotion_changes_statement");
+      check(Array.isArray(a.source_refs) && a.source_refs.length >= 1, "promotion_without_sources");
+      check(a.source_refs!.length <= 50 && a.source_refs!.every((r) => typeof r === "string" && EVIDENCE_REF.test(r)), "invalid_source_ref");
+      item.section = "observation";
+      item.source_refs = [...new Set(a.source_refs!)];
+      item.review = "accepted";
+      item.reviewed_by = "user";
+      continue;
+    }
     if (a.action === "edit") {
       check(item.section !== "observation", "observation_not_editable");
       check(str(a.text, 2000), "invalid_review");

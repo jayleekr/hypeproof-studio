@@ -121,6 +121,10 @@ jobs:
       - name: Run Publish for User Test against local D1
         working-directory: worker
         run: npm run test:cr-publish:d1
+      # cr-memory (#1395) — Venture Memory (decisions, stakeholders, metrics, slides, register, timeline, director reads) on local workerd D1 and R2.
+      - name: Run Venture Memory against local D1 and R2
+        working-directory: worker
+        run: npm run test:cr-memory:d1
       # cr-evidence (#1394) — participant evidence, notes, drafts, deletion and controls on local workerd D1 and R2.
       # Keep this step LAST in the job: its Miniflare round trips (the 120-session and 30x120 cases)
       # leave several thousand sockets in TIME_WAIT for about a minute, and a local D1 suite started right
