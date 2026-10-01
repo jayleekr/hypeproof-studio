@@ -1,5 +1,6 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
+import { decideMode, profileFailureToStatus } from './chalk/modeDecision';
 import { chalkToolsEnabled } from './chalk/tools';
 import { runInstructorTurn } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
@@ -4299,9 +4300,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+    // #1298 A-01 — student slot takes priority. If the student token is active
+    // (present, not expired, not hard-rejected), skip the instructor check entirely
+    // to prevent the instructor panel from flashing during a rehearsal.
+    const studentProfileStatus = profileFailureToStatus(
+      this.lastProfileFailure,
+      !!token,
+      !!token, // ensureProfile() ran (and completed) iff token exists
+    );
+    const panelMode = decideMode({ studentToken: token ?? undefined, studentProfileStatus });
     // Instructor auth always uses the issuer token slot, never the student token.
     const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
-    const isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    const isInstructor = panelMode === "instructor"
+      ? await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl)
+      : false;
     // #1298 — on the auto-read path (postConfig/refresh), act on the whoami result.
     // The setInstructorToken command has its own rejection handler; this covers the background refresh path.
     if (issuerToken) {
