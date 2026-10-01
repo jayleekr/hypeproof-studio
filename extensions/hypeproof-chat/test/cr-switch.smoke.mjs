@@ -24,7 +24,8 @@ registerHooks({
   },
 });
 
-const { CR_SURFACES, CR_CONTEXT_KEY, CR_BYTES_CONTEXT_KEY, manifestSwitchProblems, manifestStoredOnlyProblems, isCurriculumRuntimeEnabled } = await import("../src/curriculumRuntime.ts");
+const { CR_SURFACES, CR_CONTEXT_KEY, CR_BYTES_CONTEXT_KEY, manifestSwitchProblems, manifestStoredOnlyProblems, isCurriculumRuntimeEnabled, isCrBrowserTool, isCrVerifyTool } = await import("../src/curriculumRuntime.ts");
+const { VerifySession } = await import("../src/verifySession.ts");
 const { permittedMcpToolsFor } = await import("../src/sdkCoachHelpers.ts");
 const { buildHypeproofMcpServer, MCP_BROWSER_TOOLS } = await import("../src/browserMcp.ts");
 const { BrowserControl } = await import("../src/browserControl.ts");
@@ -63,8 +64,9 @@ ok("commands: the manifest gates every inventoried CR command; planted ungated v
 // Every command handler re-checks the served switch (a command runs without its menu).
 assert.match(providerSrc, /async pickElement\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
 assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
-assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"], "both CR commands are in the inventory the manifest check walks");
-ok("commands: the pickElement and browserResults handlers re-check the served switch before anything else");
+assert.match(providerSrc, /async testMyProduct\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
+assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct"], "every CR command is in the inventory the manifest check walks (cr-verify adds testMyProduct)");
+ok("commands: the pickElement, browserResults and testMyProduct handlers re-check the served switch before anything else");
 
 // ── the listed exception: delete-only, shown only while the person has bytes stored ──
 assert.deepEqual(CR_SURFACES.switchOffWhileStored, ["hypeproof-chat.clearBrowserResultBytes"], "the delete command is in the inventory as the one allowed exception");
@@ -144,16 +146,31 @@ ok("glue: the context key mirrors the switch and the SDK server registers CR too
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, new RegExp(`알 수 없는 도구: ${name}`), `${name} is unknown with the switch off`);
   }
+  assert.deepEqual(CR_SURFACES.proxyTools.filter((n) => !isCrBrowserTool(n) && !isCrVerifyTool(n)), [], "every inventoried proxy tool is a CR browser or verify tool");
   await assert.rejects(control.pickElement({ root: null }), /요소 고르기를 쓸 수 없어요/);
   const legacy = await control.execute({ id: "t", name: "browser_navigate", input: { url: "https://example.com/" } });
   assert.doesNotMatch(legacy.content[0].text, /범위 밖/, "switch off: the pre-CR navigate path, no origin scope");
   enabled = true;
-  for (const name of CR_SURFACES.proxyTools) {
+  for (const name of CR_SURFACES.proxyTools.filter(isCrBrowserTool)) {
     const r = await control.execute({ id: "t", name, input: {} });
     assert.doesNotMatch(r.content[0].text, /알 수 없는 도구/, `${name} is routed with the switch on`);
     assert.match(r.content[0].text, /열린 브라우저 탭이 없어요/, "and answered by the CR executor");
   }
   ok("proxy tools: unknown with the switch off, routed to the CR executor with it on (read per call)");
+  // cr-verify — the verify tools never reach BrowserControl: the proxy loop and the SDK host
+  // send them to the session only while the switch is on, and the session refuses them off.
+  assert.match(providerSrc, /const tr = isCrVerifyTool\(fixed\.call\.name\) && this\.isCurriculumRuntimeEnabled\(\)\s*\? await this\.runVerifyTool\(/);
+  assert.match(providerSrc, /const answer = !this\.isCurriculumRuntimeEnabled\(\)\s*\? \{ isError: true, text: `알 수 없는 도구: \$\{short\}` \}/);
+  {
+    let on = false;
+    const session = new VerifySession({ switchOn: () => on, recorder: async () => { throw new Error("no record may be touched with the switch off"); }, startUrl: () => "http://127.0.0.1:5173/", allowedOrigins: () => ["http://127.0.0.1:5173"], executor: () => undefined, currentVersion: async () => null });
+    for (const call of [() => session.runTool({}), () => session.propose({ criteria: "[\"a\"]" })]) assert.equal((await call()).isError, true, "switch off: refused");
+    for (const call of [() => session.start([{ text: "a" }]), () => session.retest(), () => session.fix("x", "y")]) assert.deepEqual(await call(), { ok: false, code: "switch_off" });
+    assert.equal((await session.view()).available, false);
+    on = true;
+    assert.match((await session.runTool({})).text, /진행 중인 테스트가 없어요/, "switch on: routed to the session (no run yet)");
+  }
+  ok("verify tools: routed to the session only with the switch on; the session refuses every action with it off and touches no record");
   // The executor's own navigation pins the tab (setTargetTab), which drops the control's
   // executor; the one that navigated keeps its place, so the refs it adopts after the
   // navigation are there for the next step (in-app CR-T07, 2026-10-01).
@@ -201,10 +218,16 @@ ok("glue: the context key mirrors the switch and the SDK server registers CR too
 
 // ── webview messages ───────────────────────────────────────────────────────
 for (const t of CR_SURFACES.webviewMessages) {
-  assert.match(protocolSrc, new RegExp(`\\{ type: "${t}" \\}`), `${t} is a declared webview message`);
-  const handler = new RegExp(`case "${t}":[\\s\\S]{0,200}?this\\.clearElementContext\\(\\)`);
-  assert.match(providerSrc, handler, `${t} only removes CR state; it has nothing to reach with the switch off`);
+  assert.match(protocolSrc, new RegExp(`\\{ type: "${t}"[ ;}]`), `${t} is a declared webview message`);
+  if (t === "removeElementContext") {
+    const handler = new RegExp(`case "${t}":[\\s\\S]{0,200}?this\\.clearElementContext\\(\\)`);
+    assert.match(providerSrc, handler, `${t} only removes CR state; it has nothing to reach with the switch off`);
+  } else {
+    // cr-verify — every verify message goes to one handler that checks the switch before anything else.
+    assert.match(providerSrc, new RegExp(`case "${t}":[\\s\\S]{0,300}?await this\\.handleVerifyMessage\\(msg\\)`), `${t} is handled by handleVerifyMessage`);
+  }
 }
+assert.match(providerSrc, /private async handleVerifyMessage\([^)]*\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\) \{\s*await this\.post\(\{ type: "verifyState", view: null/, "the verify handler re-checks the switch first");
 // The queue's behaviour is test/cr-host.smoke.mjs; here, that the provider uses it: one
 // writer (attachElementContext), and the turn takes it through the switch.
 assert.equal((providerSrc.match(/this\.elementQueue\.attach\(/g) ?? []).length, 1, "one writer of the element queue");

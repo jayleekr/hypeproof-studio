@@ -16,6 +16,8 @@ import { runVoiceCapabilityProbe } from "./voiceProbe";
 import { ChatPanel } from "./ChatPanel";
 import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
+import { VerifyPanel } from "./VerifyPanel";
+import type { VerifyView } from "../../src/verifyView";
 
 interface State {
   config: ChatConfig | null;
@@ -31,6 +33,11 @@ interface State {
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   /** CR-09 — the picked element queued for the next turn; the student can remove it. */
   elementPreview: ElementPreview | null;
+  /** cr-verify — the "내 제품 테스트" panel as the host computed it; null = hidden. */
+  verify: VerifyView | null;
+  verifyError: string | null;
+  /** The student's own sentence the panel sends next (a run start or a fix request). */
+  verifySend: string | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -53,6 +60,9 @@ type Action =
   | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
   | { type: "elementAttached"; element: ElementPreview | null }
+  | { type: "verifyState"; view: VerifyView | null; sendText?: string; error?: string }
+  | { type: "verifyClose" }
+  | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamStopped"; by?: "instructor" }
@@ -77,6 +87,9 @@ const initialState: State = {
   errorRunbookUrl: null,
   pageNotice: null,
   elementPreview: null,
+  verify: null,
+  verifyError: null,
+  verifySend: null,
   aiNotice: null,
   stopNotice: null,
   openWorldId: null,
@@ -115,6 +128,12 @@ function reducer(state: State, action: Action): State {
       return { ...state, pageNotice: action.label };
     case "elementAttached":
       return { ...state, elementPreview: action.element };
+    case "verifyState":
+      return { ...state, verify: action.view, verifyError: action.error ?? null, verifySend: action.sendText ?? state.verifySend };
+    case "verifyClose":
+      return { ...state, verify: null, verifyError: null };
+    case "verifySent":
+      return { ...state, verifySend: null };
     case "worldOpened":
       // 세상이 바뀌면 직전 발행 결과는 더 이상 이 세상 얘기가 아니다 — 지운다.
       // (안 지우면 초코 세상을 열었는데 뽀로 세상의 "올렸어요" 링크가 남는다.)
@@ -191,6 +210,13 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const scope = useRef<string | undefined>();
   const [shouldCrash, setShouldCrash] = useState(false);
+  // cr-verify — the verify requests THIS view made; the host echoes the id with the sentence to send.
+  const verifyRequests = useRef(new Set<string>());
+  const verifyRequest = () => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    verifyRequests.current.add(id);
+    return id;
+  };
   // #384 — image handed over from the host (an image opened in an editor tab).
   // nonce forces ChatPanel's effect to re-run even for the same dataUrl.
   const [incomingImage, setIncomingImage] = useState<{ dataUrl: string; nonce: number } | null>(null);
@@ -222,6 +248,8 @@ export function App() {
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "elementAttached": dispatch({ type: "elementAttached", element: msg.element }); break;
+        // Every chat view gets the post; only the one whose panel asked sends the sentence.
+        case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -252,6 +280,27 @@ export function App() {
     dispatch({ type: "userSent", text: trimmed, images });
     postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images, ...(imports?.length ? { imports } : {}) });
   };
+
+  // cr-verify — the host recorded the start or fix request; the student's own sentence goes
+  // out through the ordinary send path (the host attaches the coach context, model-only).
+  useEffect(() => {
+    if (!state.verifySend || state.streamId) return;
+    const text = state.verifySend;
+    dispatch({ type: "verifySent" });
+    send(text);
+  }, [state.verifySend, state.streamId]);
+
+  const verifyPanel = state.verify ? (
+    <VerifyPanel
+      view={state.verify}
+      error={state.verifyError}
+      busy={!!state.streamId}
+      onStart={(criteria) => postToHost({ type: "verifyStart", requestId: verifyRequest(), criteria })}
+      onRetest={() => postToHost({ type: "verifyRetest" })}
+      onFix={(criterionId, text) => postToHost({ type: "verifyFix", requestId: verifyRequest(), criterionId, text })}
+      onClose={() => dispatch({ type: "verifyClose" })}
+    />
+  ) : null;
 
   const retry = (prompt: string) => {
     if (state.streamId) return;
@@ -340,6 +389,8 @@ export function App() {
         messages={messages}
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
+        verifyPanel={verifyPanel}
+        sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });
           postToHost({ type: "removeElementContext" });

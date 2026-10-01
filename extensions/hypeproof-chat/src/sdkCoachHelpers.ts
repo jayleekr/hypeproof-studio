@@ -32,6 +32,7 @@ import {
   MCP_BROWSER_TYPE,
   MCP_LIVE_PREVIEW_START,
   MCP_CR_BROWSER_TOOLS,
+  MCP_CR_VERIFY_TOOLS,
   MCP_BROWSER_SELECT,
 } from "./browserMcp.ts";
 import { isCurriculumRuntimeEnabled } from "./curriculumRuntime.ts";
@@ -227,7 +228,7 @@ export function permittedMcpToolsFor(profile: ResolvedProfile): string[] {
   if (profile.sdk_tools?.browser === true && !isMinorTier(profile)) {
     // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
     return isCurriculumRuntimeEnabled(profile)
-      ? [...MCP_BROWSER_TOOLS, ...MCP_CR_BROWSER_TOOLS]
+      ? [...MCP_BROWSER_TOOLS, ...MCP_CR_BROWSER_TOOLS, ...MCP_CR_VERIFY_TOOLS]
       : [...MCP_BROWSER_TOOLS];
   }
   return [];
@@ -1880,7 +1881,11 @@ export function isClassifiedSdkToolName(toolName: string): boolean {
   ) {
     return true;
   }
-  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName) || (MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName);
+  return (
+    (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName) ||
+    (MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName) ||
+    (MCP_CR_VERIFY_TOOLS as readonly string[]).includes(toolName)
+  );
 }
 
 /** A tool action the coach wants to perform, surfaced to the host modal. */
@@ -2301,6 +2306,11 @@ export function evaluateSdkToolUse(args: {
   // (the origin scope, CR-11, is enforced by the executor); select acts like a click.
   if ((MCP_CR_BROWSER_TOOLS as readonly string[]).includes(toolName)) {
     return toolName === MCP_BROWSER_SELECT ? { decision: "ask" } : { decision: "allow" };
+  }
+  // cr-verify — the student started the test themselves ("테스트 시작"), and the runner
+  // stays on their own preview (CR-11); a proposal only shows drafts the student confirms.
+  if ((MCP_CR_VERIFY_TOOLS as readonly string[]).includes(toolName)) {
+    return { decision: "allow" };
   }
   if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {
     // Auto-allow once the browser capability is granted: a screenshot of the

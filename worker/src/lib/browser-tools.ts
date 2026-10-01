@@ -135,3 +135,34 @@ export const CR_BROWSER_TOOLS: BrowserToolDef[] = [
     input_schema: { type: "object", properties: {} },
   },
 ];
+
+/**
+ * AI Verify tools (cr-verify, #1392; CR-12–CR-16). Same condition as CR_BROWSER_TOOLS: both
+ * `browser_control.enabled` and the CR switch. The SDK coach exposes the same short names as
+ * `mcp__hypeproof__<name>` (browserMcp.ts `MCP_CR_VERIFY_TOOLS`). The model never judges a
+ * criterion: it hands the runner a plan, and the runner observes and decides (CR-15).
+ */
+export const CR_VERIFY_TOOLS: BrowserToolDef[] = [
+  {
+    name: "verify_criterion",
+    description:
+      "학생이 시작한 제품 테스트에서 기대 조건 하나를 실행한다. criterion_id와 plan(JSON 문자열 {steps, expect})을 준다. 러너가 미리보기를 새로 열어 단계를 실행하고 관찰로 판정한다.",
+    input_schema: {
+      type: "object",
+      properties: {
+        criterion_id: { type: "string", description: "테스트 시작 안내에 적힌 조건 id" },
+        plan: { type: "string", description: 'JSON 문자열 {"steps":[...],"expect":[...]}' },
+      },
+      required: ["criterion_id", "plan"],
+    },
+  },
+  {
+    name: "verify_propose_criteria",
+    description: "학생에게 관찰 가능한 기대 조건 1~5개를 제안한다. 학생이 확인해야 테스트에 쓰인다.",
+    input_schema: {
+      type: "object",
+      properties: { criteria: { type: "string", description: "JSON 배열 문자열, 조건 1~5개" } },
+      required: ["criteria"],
+    },
+  },
+];

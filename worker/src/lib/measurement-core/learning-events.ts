@@ -124,8 +124,10 @@ export const ARTIFACT_REF_KEYS = ["artifact_before", "artifact_after"] as const;
  * person; the event then names bytes that are no longer stored.
  *
  * Not `ARTIFACT_REF_KEYS`: those name one `artifact` event's plain sha256 in the same
- * batch (AE-37 binds single files). A version is a file set, and recording it as an
- * `artifact` event would change what `observableAssets` counts as a revision.
+ * batch (AE-37 binds single files), and a browser result references the version by these
+ * keys alone. Where a version must be an `artifact` event (cr-verify's `artifact_after`),
+ * it is recorded tagged `hps-artifact-version/1` and `observableAssets` skips it
+ * (`isVersionArtifact`, verification.ts), so it is never counted as a revision.
  */
 export const BROWSER_RESULT_REF_KEYS = ["artifact_version", "screenshot_digest", "trace_digest"] as const;
 
