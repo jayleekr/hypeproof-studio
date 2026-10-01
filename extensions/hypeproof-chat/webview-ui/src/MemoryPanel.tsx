@@ -22,6 +22,7 @@ function Item(props: { item: MemoryItemView; pick?: { checked: boolean; onChange
       <button type="button" className="hps-evidence-claim" aria-expanded={open} onClick={() => setOpen(!open)}>{item.statement}</button>
       <span className="hps-evidence-meta">
         {item.pending_review && <em data-testid="memory-item-unreviewed"> · 아직 검토하지 않은 초안</em>}
+        {item.sources_real === false && <em data-testid="memory-item-not-real"> · 실제로 본 기록이 아니에요</em>}
         {item.assumption_status === "observed_later" && <strong data-testid="memory-promoted"> · 처음엔 가정이었는데 나중에 확인했어요</strong>}
         {item.assumption_status === "open" && " · 아직 확인 안 됨"}
         {(item.cited_by?.length ?? 0) > 0 && ` · 결정 ${item.cited_by!.length}개가 씀`}
@@ -127,7 +128,7 @@ export function MemoryPanel(props: {
             <textarea aria-label="결정" rows={2} value={form.statement} onChange={(e) => setForm({ ...form, statement: e.target.value })} placeholder="무엇을 하기로 했나요?" />
             <div>근거 (확인한 것, 해석)</div>
             <ul>
-              {[...m.register.observed, ...m.register.interpreted].filter((it) => !it.pending_review).map((it) => (
+              {[...m.register.observed, ...m.register.interpreted].filter((it) => !it.pending_review && it.sources_real !== false).map((it) => (
                 <Item key={it.id} item={it} pick={{ checked: form.evidence_refs.includes(it.id), onChange: (v) => toggle("evidence_refs", it.id, v) }} />
               ))}
             </ul>

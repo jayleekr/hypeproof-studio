@@ -41,7 +41,7 @@ const MEMORY = {
   deck_slides: [{ number: 2, title: "문제", revision: 1 }],
   slide_revisions: [{ number: 2, title: "문제", body: "옵션에서 멈춘다", revision: 1, evidence_refs: ["ev:exp-1/drf-1/o1"] }],
   register: {
-    observed: [ITEM("o1", "observed", "3명 중 2명이 멈췄다", { cited_by: [{ decision_id: "dec-1", shown_as: "team_decision" }], slides: [2, 3] }), ITEM("a2", "observed", "어르신도 멈춘다", { assumption_status: "observed_later", revisions: [{ revision: 1, confidence: "assumed", statement: "어르신도 멈춘다" }, { revision: 3, confidence: "observed", statement: "어르신도 멈춘다" }] })],
+    observed: [ITEM("o1", "observed", "3명 중 2명이 멈췄다", { cited_by: [{ decision_id: "dec-1", shown_as: "team_decision" }], slides: [2, 3] }), ITEM("a2", "observed", "어르신도 멈춘다", { assumption_status: "observed_later", revisions: [{ revision: 1, confidence: "assumed", statement: "어르신도 멈춘다" }, { revision: 3, confidence: "observed", statement: "어르신도 멈춘다" }] }), ITEM("o9", "observed", "연습 메모로 본 것", { sources_real: false })],
     interpreted: [ITEM("i1", "interpreted", "옵션이 너무 많다"), ITEM("i9", "interpreted", "AI가 쓴 해석", { review: "draft", created_by: "system", pending_review: true })],
     assumed: [ITEM("a1", "assumed", "한 단계면 혼자 주문한다", { assumption_status: "open" })],
   },
@@ -183,7 +183,7 @@ if (!status.available) {
   assert.match(text, /AI 제안 \(팀 결정 아님\): 버튼을 키운다/);
   assert.doesNotMatch(text, /팀 결정: 버튼을 키운다/, "the AI suggestion is never drawn as the team's decision");
   assert.equal((html.match(/data-testid="memory-no-evidence"/g) ?? []).length, 2, "both decisions with no evidence are marked");
-  assert.match(text, /확인한 것 2개/);
+  assert.match(text, /확인한 것 3개/);
   assert.match(text, /해석 2개/);
   assert.match(text, /가정 1개/);
   assert.match(text, /처음엔 가정이었는데 나중에 확인했어요/);
@@ -202,6 +202,9 @@ if (!status.available) {
   assert.match(text, /AI가 쓴 해석\n· 아직 검토하지 않은 초안/);
   const formHtml = html.slice(html.indexOf('data-testid="memory-decision-form"'));
   assert.ok(!/AI가 쓴 해석/.test(formHtml.slice(0, formHtml.indexOf("이 결정이 기대는 가정"))), "an unreviewed AI item is not a pickable piece of evidence");
+  // An item on a record that is not real (SX-46) is marked and is not offered either.
+  assert.match(text, /연습 메모로 본 것\n· 실제로 본 기록이 아니에요/);
+  assert.ok(!/연습 메모로 본 것/.test(formHtml.slice(0, formHtml.indexOf("이 결정이 기대는 가정"))), "an item on an unreal record is not a pickable piece of evidence");
   assert.match(text, /도움 받는 사람 \(근거를 찾을 수 없어요\)/, "a role whose evidence is gone says so");
   // evidence_only: the cited items, not "no real records".
   assert.match(text, /멈춘 사람: 숫자 없이 근거 2개 \(확인한 것 1, 해석 1\)/);

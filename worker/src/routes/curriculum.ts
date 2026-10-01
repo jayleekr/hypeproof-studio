@@ -93,7 +93,7 @@ import {
   slidesOf,
   stakeholdersOf,
 } from "../lib/curriculum/store";
-import { decisionRefProblems, decisionView, evidenceItemsOf, memoryState, supportsObservedRole, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
+import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
 import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
@@ -765,8 +765,15 @@ curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
   const promoted = Array.isArray(body.actions) ? (body.actions as Array<{ action?: unknown; source_refs?: unknown }>).filter((a) => a && a.action === "promote").flatMap((a) => (Array.isArray(a.source_refs) ? a.source_refs.map(String) : [])) : [];
   const noteRefs = promoted.filter((ref) => ref.startsWith("note:"));
   if (noteRefs.length) {
-    const states = new Map((await r.record.observationsOf(NOTES_HOST, r.experiment.id).catch(() => [])).map((o) => [o.event.id, o.event.source_state]));
-    const notReal = noteRefs.filter((ref) => states.has(ref.slice(5)) && states.get(ref.slice(5)) !== "real");
+    // Fail closed: a note whose state is not known to be real confirms nothing, and a failed
+    // read of the notes refuses the promotion rather than reading as "no note is unreal".
+    let states: Map<string, string | undefined>;
+    try {
+      states = await noteStatesOf(r.record, r.experiment.id);
+    } catch {
+      return refuse(c, 503, "evidence_unavailable");
+    }
+    const notReal = noteRefs.filter((ref) => states.get(ref.slice(5)) !== "real");
     if (notReal.length) return refuse(c, 422, "promotion_source_not_real", { refs: notReal });
   }
   const now = Date.now();
@@ -889,6 +896,19 @@ async function memberWrite(c: Ctx, projectId: string): Promise<{ s: Student; pro
 
 const recordOf = (env: Env, project: Project) => participantRecord(env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
 
+/** An experiment's manual records by id, with the source_state the student gave each (SX-46). */
+async function noteStatesOf(record: ReturnType<typeof participantRecord>, experimentId: string): Promise<Map<string, string | undefined>> {
+  return new Map((await record.observationsOf(NOTES_HOST, experimentId)).map((o) => [o.event.id, o.event.source_state]));
+}
+
+/** An experiment's evidence items; a failed notes read leaves every note-backed item not real (fail closed). */
+async function experimentItems(record: ReturnType<typeof participantRecord>, experimentId: string): Promise<EvidenceItemView[]> {
+  const drafts = await record.evidenceDrafts(experimentId).catch(() => []);
+  if (!drafts.length) return [];
+  const states = await noteStatesOf(record, experimentId).catch(() => new Map<string, string | undefined>());
+  return evidenceItemsOf(experimentId, drafts, states);
+}
+
 /**
  * The evidence items of the named experiments (or every experiment of the Project), read from
  * their records now. Refs naming an experiment of another Project are simply not found.
@@ -899,7 +919,7 @@ async function itemsFor(env: Env, project: Project, experimentIds: Iterable<stri
   const out = new Map<string, EvidenceItemView>();
   for (const id of new Set(experimentIds)) {
     if (!own.has(id)) continue;
-    for (const it of evidenceItemsOf(id, await record.evidenceDrafts(id).catch(() => []))) out.set(it.id, it);
+    for (const it of await experimentItems(record, id)) out.set(it.id, it);
   }
   return out;
 }
@@ -921,7 +941,7 @@ async function loadMemory(env: Env, project: Project): Promise<MemoryState> {
   ]);
   const record = recordOf(env, project);
   const items: EvidenceItemView[] = [];
-  for (const e of experiments) items.push(...evidenceItemsOf(e.id, await record.evidenceDrafts(e.id).catch(() => [])));
+  for (const e of experiments) items.push(...(await experimentItems(record, e.id)));
   // Participant events are read only for the experiments a metric counts over.
   const events = new Map<string, ObservationEvent[]>();
   for (const m of metrics) {
@@ -1038,6 +1058,10 @@ curriculum.post("/projects/:id/hypotheses/:hid/revisions", async (c) => {
   const items = await itemsFor(c.env, w.project, experimentsOfRefs(refs));
   const missingRefs = unresolved(refs, items);
   if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  // What the team cites as the reason its belief changed follows the decision rules (CR-79,
+  // CR-38): no assumption, no AI item the student has not reviewed, no unreal record.
+  const refProblems = evidenceRefProblems(refs, items, "student");
+  if (refProblems.length) return refuse(c, 409, "evidence_ref_refused", { problems: refProblems });
   const stakeholder = await ownStakeholder(c.env, w.project, w.body.stakeholder_id);
   if (stakeholder === null) return refuse(c, 409, "stakeholder_unresolved");
   const r = await reviseHypothesis(c.env.HPS_DB, h, { statement, status: status as Hypothesis["status"], by: w.s.payload.u, now: Date.now(), ...(decisionId ? { decision_id: decisionId } : {}), ...(refs.length ? { evidence_refs: refs } : {}), ...(stakeholder ? { stakeholder_id: stakeholder } : {}) });

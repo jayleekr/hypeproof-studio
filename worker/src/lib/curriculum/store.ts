@@ -76,11 +76,22 @@ export async function projectsOf(db: DB, token: { c: string; u: string }): Promi
   return (rows.results ?? []).map((r) => parse<Project>(r)).filter((p): p is Project => !!p && isMember(p, token));
 }
 
-/** Members are set by the cohort's director (an issuer scoped to it), never by a student (R5). */
+/**
+ * Members are set by the cohort's director (an issuer scoped to it), never by a student (R5).
+ * Only `members` changes: the doc is re-read and written at the revision it was read at, so a
+ * problem revision (cr-memory, CR-35) that landed after the route read the Project is kept.
+ */
 export async function setMembers(db: DB, project: Project, members: string[], now: number): Promise<Project> {
-  const next: Project = { ...project, members: [...new Set(members)] };
-  await db.prepare("UPDATE cr_projects SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, project.id).run();
-  return next;
+  const set = [...new Set(members)];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await db.prepare("SELECT doc, revision FROM cr_projects WHERE id = ?").bind(project.id).first<{ doc: string; revision: number }>();
+    const current = parse<Project>(row);
+    if (!current || !row) return { ...project, members: set };
+    const next: Project = { ...current, members: set };
+    const r = await db.prepare("UPDATE cr_projects SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?").bind(JSON.stringify(next), now, project.id, row.revision).run();
+    if (Number(r.meta?.changes ?? 0) > 0) return next;
+  }
+  throw new Error("members_write_contended");
 }
 
 // ── ProductVersion (content-addressed; immutable) ───────────────────────────

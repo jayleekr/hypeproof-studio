@@ -3079,6 +3079,34 @@
       ]
     },
     {
+      "id": "ST-IMP-CR-MEMORY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-PUBLISH",
+        "ST-IMP-CR-EVIDENCE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/curriculum/memory.ts"
+        },
+        {
+          "path": "worker/migrations/0034-curriculum-runtime-memory.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/memorySession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/memoryView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/MemoryPanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CR",
       "stage": "test",
       "owner": "jayleekr",
@@ -3086,7 +3114,8 @@
         "ST-REQ-CR",
         "ST-DES-CR",
         "ST-IMP-CR-PUBLISH",
-        "ST-IMP-CR-EVIDENCE"
+        "ST-IMP-CR-EVIDENCE",
+        "ST-IMP-CR-MEMORY"
       ],
       "sources": [
         {
@@ -3148,6 +3177,18 @@
         },
         {
           "path": "docs/testing/curriculum-runtime-2026-10-02-evidence-capture.md"
+        },
+        {
+          "path": "worker/test/cr-memory.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-memory.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/memory-app.spec.ts"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-memory.md"
         }
       ]
     },

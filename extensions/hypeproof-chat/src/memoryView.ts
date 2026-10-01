@@ -17,6 +17,8 @@ export interface MemoryItemView {
   created_by?: "student" | "system";
   /** An AI or runtime draft item the student has not reviewed yet. */
   pending_review?: boolean;
+  /** False when a manual record it cites is not real (simulated, self-reported, unverified): listed, never the team's evidence. */
+  sources_real?: boolean;
   assumption_status?: "open" | "observed_later";
   cited_by?: Array<{ decision_id: string; shown_as: "team_decision" | "ai_suggestion" }>;
   slides?: number[];

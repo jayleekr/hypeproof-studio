@@ -10,8 +10,10 @@
 //                   panel, chat with the coach; close the app, delete every workspaceState of the
 //                   workspace (the chat history and the remembered Project with it), reopen: the
 //                   chat is empty and the panel shows the same hypotheses, experiments, decisions
-//                   and versions. Negative: a reconstruction that mixes in the chat is caught by
-//                   the same comparison.
+//                   and versions. This spec's controls: the chat showed the message before the
+//                   deletion and is gone after it. The negative (a planted MemorySession that
+//                   mixes in the chat is caught by the same comparison) is in
+//                   extensions/hypeproof-chat/test/cr-memory.smoke.mjs.
 //
 // Needs an unlocked screen (recon F7): when locked the run is skipped as NOT RUN.
 import { test, expect, type FrameLocator, type Page } from "@playwright/test";

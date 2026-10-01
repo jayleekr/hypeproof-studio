@@ -62,6 +62,12 @@ export interface EvidenceItemView {
   review: DraftItem["review"];
   /** Written by an AI or the runtime and not yet reviewed by the student (CR-26, MC-22): listed, marked, not something the team's decision rests on. */
   pending_review: boolean;
+  /**
+   * Every manual record the item cites is known to be real (SX-46). False when one is marked
+   * simulated, self-reported or unverified, or its state cannot be read: the item is listed but
+   * cannot establish an observed fact, the same rule the promotion route applies (CR-82).
+   */
+  sources_real: boolean;
   /** Every revision of the draft that holds this item, oldest first: an earlier statement stays readable. */
   revisions: EvidenceItemRevision[];
   /** Ever an assumption: still open, or observed in a later revision the student made (CR-82). */
@@ -71,9 +77,11 @@ export interface EvidenceItemView {
 
 /**
  * The evidence items of one experiment, from its stored draft revisions. Rejected items and
- * "next experiment" items are not evidence and are left out.
+ * "next experiment" items are not evidence and are left out. `noteStates` maps the experiment's
+ * manual records to their source_state; when it is given, a `note:` ref whose state is not
+ * known to be "real" makes the item's sources not real (fail closed).
  */
-export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceDraft[]): EvidenceItemView[] {
+export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceDraft[], noteStates?: ReadonlyMap<string, string | undefined>): EvidenceItemView[] {
   const byDraft = new Map<string, EvidenceDraft[]>();
   for (const d of drafts) if (d.experiment === experimentId) (byDraft.get(d.id) ?? byDraft.set(d.id, []).get(d.id)!).push(d);
   const out: EvidenceItemView[] = [];
@@ -102,11 +110,12 @@ export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceD
         confidence = h.confidence;
       }
       const last = history.at(-1)!;
-      // Who wrote the item (CR-40): the student when the item first appeared in a revision the
-      // student wrote, or the student reviewed this item. A student's review of another item in
-      // the same draft makes the whole draft user-authored but does not make this item theirs.
+      // Who wrote the item (CR-40): the author of the first revision that holds it. Accepting an
+      // AI item is a review, not authorship (SX-45): the item stays the system's, and whether the
+      // student reviewed it is `review` / `pending_review`. A student's review revision makes the
+      // whole draft user-authored, so later revisions never decide this.
       const firstRev = revs.find((r) => r.items.some((i) => i.id === item.id))!;
-      const createdBy = firstRev.author === "user" || item.reviewed_by === "user" ? "student" : "system";
+      const createdBy = firstRev.author === "user" ? "student" : "system";
       const everAssumed = history.some((h) => h.confidence === "assumed");
       out.push({
         id: evidenceItemRef(experimentId, draftId, item.id),
@@ -122,6 +131,7 @@ export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceD
         revision: latest.revision,
         review: item.review,
         pending_review: item.review === "draft" && createdBy === "system",
+        sources_real: !noteStates || last.source_refs.every((r) => !r.startsWith("note:") || noteStates.get(r.slice(5)) === "real"),
         revisions: history,
         ...(everAssumed ? { assumption_status: promotedAt !== undefined ? ("observed_later" as const) : ("open" as const) } : {}),
         ...(promotedAt !== undefined ? { promoted_at_revision: promotedAt } : {}),
@@ -142,17 +152,7 @@ export function decisionRefProblems(
   d: Pick<Decision, "evidence_refs" | "assumption_refs" | "resulting_version_id"> & { experiment_id?: string; actor?: Decision["actor"] },
   ctx: { items: ReadonlyMap<string, EvidenceItemView>; versions: ReadonlySet<string>; experiments: ReadonlySet<string> },
 ): string[] {
-  const problems: string[] = [];
-  for (const ref of d.evidence_refs) {
-    const it = ctx.items.get(ref);
-    if (!it) problems.push(`unresolved_evidence_ref:${ref}`);
-    // An assumption is cited as an assumption, never as evidence (CR-38, CR-82): one ref in
-    // both lists, or an assumed item in evidence_refs, would read as a decision with evidence.
-    else if (it.confidence === "assumed") problems.push(`evidence_ref_is_assumption:${ref}`);
-    // An AI draft stays a draft until the student reviews it (CR-26, MC-22): it is not yet
-    // something the team's own decision can rest on (SX-45).
-    else if (d.actor === "student" && it.pending_review) problems.push(`evidence_ref_not_reviewed:${ref}`);
-  }
+  const problems = evidenceRefProblems(d.evidence_refs, ctx.items, d.actor);
   for (const ref of d.assumption_refs) {
     const it = ctx.items.get(ref);
     if (!it) problems.push(`unresolved_assumption_ref:${ref}`);
@@ -162,6 +162,27 @@ export function decisionRefProblems(
   if (d.experiment_id !== undefined && !ctx.experiments.has(d.experiment_id)) problems.push("unresolved_experiment");
   return problems;
 }
+
+/**
+ * The rules for a ref cited as evidence by the team (a decision, CR-38, or a belief change,
+ * CR-79): it resolves; it is not an assumption (an assumption is cited as one, never as
+ * evidence, CR-82); for the student's own claim it is not an AI draft awaiting review (CR-26,
+ * MC-22, SX-45) and does not rest on a manual record that is not real (SX-46).
+ */
+export function evidenceRefProblems(refs: readonly string[], items: ReadonlyMap<string, EvidenceItemView>, actor?: Decision["actor"]): string[] {
+  const problems: string[] = [];
+  for (const ref of refs) {
+    const it = items.get(ref);
+    if (!it) problems.push(`unresolved_evidence_ref:${ref}`);
+    else if (it.confidence === "assumed") problems.push(`evidence_ref_is_assumption:${ref}`);
+    else if (actor === "student" && it.pending_review) problems.push(`evidence_ref_not_reviewed:${ref}`);
+    else if (actor === "student" && it.sources_real === false) problems.push(`evidence_ref_not_real:${ref}`);
+  }
+  return problems;
+}
+
+/** An item the team's own claim may rest on as evidence: every rule of `evidenceRefProblems` holds. */
+export const supportsTeamEvidence = (it: EvidenceItemView | undefined) => !!it && it.confidence !== "assumed" && !it.pending_review && it.sources_real !== false;
 
 /** A decision as shown: an AI suggestion is never the team's decision (SX-45); no evidence is marked, not hidden (CR-38). */
 export interface DecisionView extends Decision {
@@ -271,7 +292,10 @@ export function beliefChanges(hypotheses: readonly Hypothesis[], decisions: read
       const d = cur.decision_id ? byId.get(cur.decision_id) : undefined;
       const decision = d && d.actor === "student" ? d : undefined;
       const refs = [...new Set([...(cur.evidence_refs ?? []), ...(decision?.evidence_refs ?? [])])];
-      const evidence = refs.map((r) => items.get(r)).filter((x): x is EvidenceItemView => !!x).map((x) => ({ ref: x.id, statement: x.statement, confidence: x.confidence }));
+      // Only what the team may rest a claim on is "what we saw" (CR-79): an assumption, an AI
+      // item the student never reviewed, or an item on a record that is not real is left out,
+      // so it can never become the stated reason a belief changed.
+      const evidence = refs.map((r) => items.get(r)).filter((x): x is EvidenceItemView => supportsTeamEvidence(x)).map((x) => ({ ref: x.id, statement: x.statement, confidence: x.confidence }));
       out.push({
         hypothesis_id: h.id,
         before: { revision: prev.revision, statement: prev.statement, status: prev.status },
@@ -302,7 +326,7 @@ export interface StakeholderView extends Stakeholder {
 }
 
 /** Does this item support a role claimed observed? An observed item the student reviewed (or wrote). */
-export const supportsObservedRole = (it: EvidenceItemView | undefined) => !!it && it.confidence === "observed" && !it.pending_review;
+export const supportsObservedRole = (it: EvidenceItemView | undefined) => !!it && it.confidence === "observed" && !it.pending_review && it.sources_real !== false;
 
 export function roleConfidence(r: Stakeholder["roles"][number], items: ReadonlyMap<string, EvidenceItemView>): "observed" | "assumed" | "unsupported" {
   if (r.basis !== "observed") return "assumed";

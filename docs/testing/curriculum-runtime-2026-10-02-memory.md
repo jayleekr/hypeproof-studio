@@ -8,11 +8,11 @@ Status: run record, 2026-10-02. Item `cr-memory`, epic [#1388](https://github.co
 |---|---|---|
 | Claimed | CR-36, CR-37, CR-38, CR-40, CR-41, CR-42, CR-75, CR-76, CR-77, CR-78, CR-82 | Every positive and negative control of their CR-T rows ran (below); CR-36 and CR-78 also in the app. CR-82's student path is the Service review route only: the App shows a promotion but has no promote control in this slice (plan, deviations) |
 | Re-run, as the plan asks | CR-39 | CR-T80 re-run by this item: the cr-publish records are read and revised in place, no table beside them |
-| Claimed with a recorded deviation (reviewer to accept or reject) | CR-79 | Revisions, their decision and their evidence are recorded in the Hypothesis document (Venture Memory, D1) with references into the measurement-core record, not as a `decision_revised` learning event (plan, deviations). Every CR-T74 control ran |
+| Claimed with a recorded deviation, accepted by the round-2 reviewer (acceptance lens) | CR-79 | Revisions, their decision and their evidence are recorded in the Hypothesis document (Venture Memory, D1) with references into the measurement-core record, not as a `decision_revised` learning event (plan, deviations). Every CR-T74 control ran |
 | Partial, remainder named | CR-35 | Stored and linked: Project and Problem, Stakeholders, Hypotheses, Experiments, Observations and EvidenceItems (by reference), Decisions, ProductVersions, Metrics, DeckSlides (8). Not in this read: WeeklyReviews (their pack is `cr-review`'s design, recon R9) and AIUsage (per-project attribution is `cr-gateway`'s, CR-34); the memory read names both as `not_in_this_read` |
 | Partial, remainder named | CR-02 | Memory surfaces only: the twelve routes, the command and the three webview messages are off with the switch off and reachable with it on, in the Worker and in the app. CR-T02's `09-preview.spec.ts` switch-off baseline stays BLOCKED by pre-existing F1, as for the earlier items |
 
-So the PR says `Refs #1395`.
+So the PR says `Refs #1395`. The set the completion record names is exactly this table: claimed CR-36, CR-37, CR-38, CR-40, CR-41, CR-42, CR-75, CR-76, CR-77, CR-78, CR-79 (deviation accepted), CR-82; CR-39 re-run; CR-02 and CR-35 partial.
 
 ## What was run
 
@@ -30,7 +30,7 @@ So the PR says `Refs #1395`.
 | CR-T36 | in-app `memory-app.spec.ts`; worker `cr-memory.test.mjs` (Service half); extension `cr-memory.smoke.mjs` (App unit) | PASS | In the app: publish, a team decision recorded in the panel ("근거가 연결되지 않았어요" shown), a chat message; close; `User/workspaceStorage` (the chat history and the remembered Project) deleted (control: it existed, and the chat showed the message before); reopen: the chat is empty and the panel shows the same hypothesis, experiment, decision and version ids and texts (`memory-result.json`, 2 passed in 21.4 s). Service: two reads equal, zero outbound calls; deleting the experiment's data changes the read (a computed view, not a snapshot), and the decision's evidence then reads `missing`. Negative: the real `MemorySession` and a planted copy of the same source file that also turns chat messages into decisions are both run through the before/after comparison with and without a chat; the real one is equal, the planted one is caught (smoke). The spec's own controls are that the chat existed before the deletion and is gone after it; the earlier string-only "leaky" check in the spec and the smoke was a tautology and is removed. The memory session's code reads no history or workspaceState; a lost decision changes the digest |
 | CR-T37 | worker `cr-memory.test.mjs` | PASS | A director whose issuer scope covers the cohort and profile lists the team and walks hypothesis → evidence → decision → version. Negative: another cohort's director, the right cohort with another profile, and a student of another team get the unknown-route 404 on the read and the diff; another cohort's director lists nothing; a director cannot write a decision. M9 caught |
 | CR-T38 | worker `cr-memory.test.mjs`; extension `cr-memory.smoke.mjs` (render) | PASS | A student decision with two evidence refs and slides 2–3 is stored with actor student and its member. Negative: a missing item, a missing draft, another project's experiment and a non-`ev:` ref → 409; a missing author → 400; an AI decision is `ai_suggestion` in the read, in the timeline and in the panel ("AI 제안 (팀 결정 아님)"); a decision with no evidence is shown and marked. The instrument catches a hidden no-evidence decision, a missing mark and an AI decision shown as the team's; through the real panel, an answer mislabelling the AI suggestion is drawn as "팀 결정" (so the render check would catch it). An assumed item in `evidence_refs`, alone or also in `assumption_refs` → 409 `evidence_ref_is_assumption`; a team decision citing an unreviewed AI draft item → 409 `evidence_ref_not_reviewed` (controls: an AI suggestion may cite it; after the student's review the team may). M5, M6, N9, N10 caught |
-| CR-T39 | worker `cr-memory.test.mjs` | PASS | `created_by` (CR-40) is per item: in an AI draft where the student accepted one item, the other stays `system` and `pending_review` (control: a student-authored draft's items are the student's); N4 caught. The PRD §10.2–10.4 samples validate. Negative: each sample with any one required field removed is refused by name; an observed item with empty `source_refs`, slide 9, and an artifact with no, empty, non-HTML or escaping `entry_html` are refused (controls: an assumption with no source, slides 1 and 8, a null `resulting_version_id` validate) |
+| CR-T39 | worker `cr-memory.test.mjs` | PASS | `created_by` (CR-40) is the author of the item's first revision: an AI item the student accepted stays `system`, now reviewed (`pending_review` false), and the item the student did not touch stays `system` and `pending_review` (control: a student-authored draft's items are the student's); N4 and N7 (round 2) caught. The PRD §10.2–10.4 samples validate. Negative: each sample with any one required field removed is refused by name; an observed item with empty `source_refs`, slide 9, and an artifact with no, empty, non-HTML or escaping `entry_html` are refused (controls: an assumption with no source, slides 1 and 8, a null `resulting_version_id` validate) |
 | CR-T70 | worker `cr-memory.test.mjs`; extension `cr-memory.smoke.mjs` | PASS | A stakeholder with user and payer (observed, with resolvable evidence) and beneficiary (no evidence) shows user/payer observed, beneficiary assumed, and the payer-and-user overlap; a hypothesis and an experiment name it. Negative: no role or an empty role list → 400 `missing:roles`; an observed role with no refs → 400; an observed role with a dangling ref → 409; an observed role over only an assumed or only an interpreted item → 409 `observed_role_without_observed_evidence` (control: one observed item among them is accepted); an unknown stakeholder → 409; another Project's stakeholder → 409 `stakeholder_unresolved` on a new hypothesis, on naming an experiment's stakeholder and at an experiment's start (control: this Project's stakeholder at the start is accepted); after the experiment's data is deleted (CR-69) the roles resting on it read `unsupported` and the experiment's stakeholder can no longer be set. Pure: the role's confidence is derived (observed over a reviewed observed item, assumed over assumptions or an unreviewed AI item, unsupported when nothing resolves). Store race: with the deletion's close interleaved before the write, the stakeholder write refuses and the closed record stays closed; a planted unguarded write reopens it and is caught. The panel draws an unsupported role as "(근거를 찾을 수 없어요)". M8, N5, N6, N7, N8, N13, N14, S5 caught |
 | CR-T71 | worker `cr-memory.test.mjs` | PASS | Three real `task_complete` events → value 3 with three `event:` refs, `source_state` real; one simulated and one self-reported input are labelled in `not_counted` and not in the value. Negative: a planted value counting the simulated input is caught; only simulated inputs or an experiment of another project → `unsupported`, no value; an impact metric with no stakeholder → refused (pure and route); a metric over another project's experiment → 409. An `evidence_only` metric carries each cited item's confidence and the panel draws it as "숫자 없이 근거 N개 (확인한 것 1, 해석 1)", not "근거가 되는 실제 기록이 없어요". M3, N17, S2 caught |
 | CR-T72 | worker `cr-memory.test.mjs` | PASS | v0 → v1: `help.html` added, `index.html` modified, the decision with both evidence refs resolving; reversed arguments still compare older → newer. Negative: another project's version → 409 `cross_project` (route) and refused (pure, both versions handed in); a newer version with no recorded decision → `no_recorded_decision`, no reason field; an AI suggestion linked to the newer version still reads `no_recorded_decision` with no decisions. M7, N11 caught |
@@ -89,6 +89,37 @@ Round-1 review fixes, planted the same way (each into the working tree, suite ru
 | S5 | an unsupported role drawn without its label | smoke (render) |
 
 A planted promotion-statement check removal alone is not caught: the one-action-per-item rule refuses the only batch that could reach it, and the statement check stays as the second guard.
+
+Round-2 review fixes and the round-2 reviewer's surviving plants, planted the same way into this worktree (`mutate.py` in the scratch directory `fix-cr-memory-r2/`, each file restored after its run; log `mut.log`). Every one turned the named suite red:
+
+| | Defect planted | Turned red |
+|---|---|---|
+| R1 | an AI suggestion accepted as the decision behind a belief change (pure) | worker (CR-T74 unit) |
+| R2, R3 | an AI suggestion's slides counted in the register; its version counted in the chain | worker (CR-T77) |
+| R4 | the director read without the Project profile's switch check | worker (CR-T02, mixed scope) |
+| R5 | the director list without the scope check | worker (CR-T37, same cohort, other profile) |
+| R6 | the director list without the switch check | worker (CR-T02, mixed scope) |
+| R7, R16 | membership dropped on the decision version link; on naming an experiment's stakeholder | worker (memory writes, non-member) |
+| R10, R26 | a dangling `ev:` ref accepted on a hypothesis revision; on an `evidence_items` metric | worker (CR-T74, memory writes) |
+| R11 | a rejected draft item listed as evidence | worker (CR-T77) |
+| R12 | `payer_and_user` with `||` | worker (CR-T70, one role only) |
+| R13 | another Project's stakeholder accepted on a metric | worker (memory writes) |
+| R15 | a revoked director token reads memory | worker (CR-T37) |
+| R18 | the register ignores a slide's own `evidence_refs` | worker (CR-T77) |
+| R21 | `assumption_refs` accept an interpreted item | worker (CR-T77 negatives) |
+| R24, R25 | another Project's decision on a slide; on a hypothesis revision | worker (memory writes) |
+| R28 | another Project's `experiment_id` on a decision | worker (memory writes) |
+| R48 | slide 9 accepted | worker (CR-35 writes) |
+| R51 | an observed role over an interpreted item only | worker (CR-T70) |
+| N1 (r2) | a hypothesis revision citing only an assumption or an unreviewed AI item accepted | worker (CR-T74) |
+| N2 (r2) | a belief change counts any resolving item as what the team saw | worker (CR-T74 unit) |
+| N3, N4, N8 (r2) | an item on a simulated note supports an observed role; is accepted as a team decision's evidence; note states not read | worker (SX-46 sources_real) |
+| N5 (r2) | `setMembers` writes the Project it was handed (erases a problem revision) | worker (CR-35 store race) |
+| N6 (r2) | the promotion's note check fails open on an unknown note | worker (CR-T77 negatives) |
+| N7 (r2) | `created_by` counts acceptance as authorship | worker (CR-40) |
+| S6, S7 | the panel offers an item on an unreal record as evidence; does not mark it | smoke (render) |
+
+Still surviving, not in the round-2 findings: R29 (a participant event with no session id counted into a metric result). Reported as a follow-up, not changed here.
 
 ## NOT RUN
 
