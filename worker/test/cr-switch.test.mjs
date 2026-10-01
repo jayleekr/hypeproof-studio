@@ -161,16 +161,38 @@ await test("/v1/profile serves curriculum_runtime.enabled=false by default and t
  */
 async function unknownRouteProblems(fetcher, origin, route, token) {
   const [method, path] = route.split(" ");
+  if (path.startsWith("<test-origin>")) return testOriginProblems(fetcher, route);
   const res = await fetcher(origin + path, { method, headers: { authorization: "Bearer " + token } });
   const body = await res.json().catch(() => null);
   const problems = [];
   if (res.status !== 404) problems.push(`${route}: status ${res.status}, not 404`);
   if (body?.error?.type !== "not_found" || body?.error?.path !== path) problems.push(`${route}: body differs from app.notFound`);
+  // The headers too (minus the per-request id): a header only CR routes send reveals them.
+  const unknown = await fetcher(origin + "/v1/cr-never-registered", { method, headers: { authorization: "Bearer " + token } });
+  if (headerShape(res) !== headerShape(unknown)) problems.push(`${route}: headers ${headerShape(res)} differ from the unknown route's ${headerShape(unknown)}`);
   return problems;
 }
 
-await test("switch OFF: every inventoried CR Worker route answers as an unknown route (cr-browser and cr-verify add none)", async () => {
+const headerShape = (res) => JSON.stringify([...res.headers].filter(([k]) => k !== "x-request-id").sort());
+
+/**
+ * A published-runtime route (cr-publish) lives on a test origin, whose unknown-path answer
+ * is an empty 404. With no link behind it the route must answer exactly that; the same
+ * check against a live link whose project is switched off is in cr-publish.test.mjs.
+ */
+const TEST_ORIGIN_SAMPLE = "http://prj-0000000000000000.test.invalid";
+async function testOriginProblems(fetcher, route) {
+  const [method, path] = route.split(" ");
+  const url = TEST_ORIGIN_SAMPLE + path.replace("<test-origin>", "").replace(":link", "AAAAAAAAAAAAAAAAAAAAAA").replace("*", "index.html");
+  const answer = async (u) => { const r = await fetcher(u, { method }); return { status: r.status, body: await r.text() }; };
+  const got = await answer(url);
+  const unknown = await answer(TEST_ORIGIN_SAMPLE + "/cr-never-registered");
+  return got.status === unknown.status && got.body === unknown.body && unknown.status === 404 ? [] : [`${route}: ${got.status} ${got.body.slice(0, 80)} differs from the test origin's unknown path`];
+}
+
+await test("switch OFF: every inventoried CR Worker route answers as an unknown route (cr-browser and cr-verify add none; cr-publish adds the curriculum routes)", async () => {
   const { local } = await profileJson(COPYCLONE.id);
+  local.env.HPS_TEST_ORIGIN = "http://{project}.test.invalid";
   const { token } = await issue({ u: "student", c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
   // Instrument positive control: a path nobody registered passes the check.
   assert.deepEqual(await unknownRouteProblems(local.fetcher, local.origin, "GET /v1/cr-never-registered", token), []);
@@ -181,7 +203,19 @@ await test("switch OFF: every inventoried CR Worker route answers as an unknown 
   const planted = async (url, init) =>
     new URL(url).pathname === "/v1/cr-planted" ? new Response(JSON.stringify({ ok: true }), { status: 200 }) : local.fetcher(url, init);
   const caught = await unknownRouteProblems(planted, local.origin, "GET /v1/cr-planted", token);
-  assert.ok(caught.length === 2, `planted route must be caught: ${JSON.stringify(caught)}`);
+  assert.ok(caught.length >= 2, `planted route must be caught: ${JSON.stringify(caught)}`);
+  // A planted route whose status and body are the unknown route's but which adds a header
+  // (cache-control: no-store on a switch-off answer) is caught by the header comparison alone.
+  const headerPlant = async (url, init) => {
+    if (new URL(url).pathname !== "/v1/cr-header-plant") return local.fetcher(url, init);
+    const r = await local.fetcher(url, init);
+    const h = new Headers(r.headers);
+    h.set("cache-control", "no-store");
+    return new Response(await r.text(), { status: r.status, headers: h });
+  };
+  const headerCaught = await unknownRouteProblems(headerPlant, local.origin, "GET /v1/cr-header-plant", token);
+  assert.equal(headerCaught.length, 1, JSON.stringify(headerCaught));
+  assert.match(headerCaught[0], /headers/);
 });
 
 if (failed) {

@@ -1554,3 +1554,22 @@ html, body, #root {
 }
 .hps-instructor-model-input:focus-visible { outline: 2px solid var(--hp-accent, #0ea5e9); outline-offset: 1px; }
 .hps-instructor-model-error { color: var(--vscode-errorForeground, #f48771); font-size: 11px; flex-basis: 100%; }
+
+/* cr-publish (#1393) — "사용자 테스트용으로 공개" panel. Same frame as the verify panel. */
+.hps-publish { border: 1px solid var(--vscode-panel-border, #8884); border-radius: 6px; padding: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.hps-publish > header { display: flex; align-items: center; gap: 8px; }
+.hps-publish > header button { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; }
+.hps-publish-error, .hps-publish-refusal { color: var(--vscode-errorForeground, #c62828); }
+.hps-publish-version, .hps-publish-form, .hps-publish-experiment { display: flex; flex-direction: column; gap: 4px; }
+.hps-publish-form input, .hps-publish-form textarea, .hps-publish-form select { width: 100%; box-sizing: border-box; }
+.hps-publish-manifest, .hps-publish-more, .hps-publish-expiry { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.hps-publish-manifest input, .hps-publish-more input { flex: 1 1 160px; min-width: 0; }
+.hps-publish [data-state="verified"] { color: #2e7d32; font-weight: 600; }
+.hps-publish-experiment { border-top: 1px solid var(--vscode-panel-border, #8882); padding-top: 6px; }
+.hps-publish-link { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.hps-publish-link code, .hps-publish-done code { word-break: break-all; user-select: all; }
+.hps-publish-link img { background: #fff; padding: 4px; }
+.hps-publish-note, .hps-publish-timing { opacity: 0.8; font-size: 11px; }
+.hps-publish-declare { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); padding: 6px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.hps-publish-declare legend { padding: 0 4px; font-size: 12px; }
+.hps-publish-declare small { flex-basis: 100%; opacity: .8; }

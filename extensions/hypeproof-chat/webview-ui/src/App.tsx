@@ -17,6 +17,8 @@ import { ChatPanel } from "./ChatPanel";
 import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 import { VerifyPanel } from "./VerifyPanel";
+import { PublishPanel } from "./PublishPanel";
+import type { PublishView } from "../../src/publishView";
 import type { VerifyView } from "../../src/verifyView";
 
 interface State {
@@ -38,6 +40,8 @@ interface State {
   verifyError: string | null;
   /** The student's own sentence the panel sends next (a run start or a fix request). */
   verifySend: string | null;
+  /** cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden) and its last answer. */
+  testPublish: { view: PublishView; error: string | null; errorLines: string[]; shareUrl: string | null } | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -62,6 +66,8 @@ type Action =
   | { type: "elementAttached"; element: ElementPreview | null }
   | { type: "verifyState"; view: VerifyView | null; sendText?: string; error?: string }
   | { type: "verifyClose" }
+  | { type: "testPublishState"; view: PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
+  | { type: "testPublishClose" }
   | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
@@ -88,6 +94,7 @@ const initialState: State = {
   pageNotice: null,
   elementPreview: null,
   verify: null,
+  testPublish: null,
   verifyError: null,
   verifySend: null,
   aiNotice: null,
@@ -132,6 +139,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, verify: action.view, verifyError: action.error ?? null, verifySend: action.sendText ?? state.verifySend };
     case "verifyClose":
       return { ...state, verify: null, verifyError: null };
+    case "testPublishState":
+      return { ...state, testPublish: action.view ? { view: action.view, error: action.error ?? null, errorLines: action.errorLines ?? [], shareUrl: action.shareUrl ?? null } : null };
+    case "testPublishClose":
+      return { ...state, testPublish: null };
     case "verifySent":
       return { ...state, verifySend: null };
     case "worldOpened":
@@ -250,6 +261,7 @@ export function App() {
         case "elementAttached": dispatch({ type: "elementAttached", element: msg.element }); break;
         // Every chat view gets the post; only the one whose panel asked sends the sentence.
         case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
+        case "publishState": dispatch({ type: "testPublishState", view: msg.view, error: msg.error, errorLines: msg.errorLines, shareUrl: msg.shareUrl }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -299,6 +311,21 @@ export function App() {
       onRetest={() => postToHost({ type: "verifyRetest" })}
       onFix={(criterionId, text) => postToHost({ type: "verifyFix", requestId: verifyRequest(), criterionId, text })}
       onClose={() => dispatch({ type: "verifyClose" })}
+    />
+  ) : null;
+
+  const publishPanel = state.testPublish ? (
+    <PublishPanel
+      view={state.testPublish.view}
+      error={state.testPublish.error}
+      errorLines={state.testPublish.errorLines}
+      shareUrl={state.testPublish.shareUrl}
+      busy={!!state.streamId}
+      onManifest={(manifest) => postToHost({ type: "publishOpen", manifest })}
+      onSubmit={(form) => postToHost({ type: "publishSubmit", form })}
+      onLink={(experimentId, channel, expiresInDays) => postToHost({ type: "publishLink", experimentId, channel, expiresInDays })}
+      onRevoke={(linkId) => postToHost({ type: "publishRevoke", linkId })}
+      onClose={() => dispatch({ type: "testPublishClose" })}
     />
   ) : null;
 
@@ -389,7 +416,7 @@ export function App() {
         messages={messages}
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
-        verifyPanel={verifyPanel}
+        verifyPanel={verifyPanel || publishPanel ? <>{verifyPanel}{publishPanel}</> : null}
         sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });

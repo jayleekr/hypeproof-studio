@@ -73,7 +73,7 @@ export interface CrSurfaceInventory {
   proxyTools: readonly string[];
   /** Webview → host message types that only exist for CR. */
   webviewMessages: readonly string[];
-  /** Worker routes as `METHOD /path`. `cr-browser` adds none. */
+  /** Worker routes as `METHOD /path` (`<test-origin>` for the published runtime). `cr-browser` and `cr-verify` add none. */
   workerRoutes: readonly string[];
   /**
    * The allowed exception: commands that delete what an earlier switch-on stored. Shown
@@ -82,14 +82,32 @@ export interface CrSurfaceInventory {
   switchOffWhileStored: readonly string[];
 }
 
+/** The published test runtime's routes, on a test origin (cr-publish; recon §6). */
+export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
+/** The participant snippet opens the visit's session here, once (CR-21). */
+export const CR_TEST_ORIGIN_SESSION_ROUTE = "POST <test-origin>/l/:link/__hp/session";
+
 export const CR_SURFACES: CrSurfaceInventory = {
-  // cr-verify adds "Test my product" (CR-12).
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct"],
+  // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion"],
   mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
-  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix"],
-  // cr-verify adds no Worker route: the report is a view over the seat's local record.
-  workerRoutes: [],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke"],
+  // cr-verify adds no Worker route. cr-publish adds the Publish for User Test routes
+  // (worker/src/routes/curriculum.ts `CURRICULUM_ROUTES`) and the test origin's.
+  workerRoutes: [
+    "GET /v1/curriculum/projects",
+    "POST /v1/curriculum/projects",
+    "GET /v1/curriculum/projects/:id",
+    "PUT /v1/curriculum/projects/:id/members",
+    "PUT /v1/curriculum/projects/:id/versions/:digest",
+    "POST /v1/curriculum/experiments",
+    "GET /v1/curriculum/experiments/:id/channels",
+    "POST /v1/curriculum/experiments/:id/links",
+    "POST /v1/curriculum/links/:id/revoke",
+    CR_TEST_ORIGIN_ROUTE,
+    CR_TEST_ORIGIN_SESSION_ROUTE,
+  ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };
 

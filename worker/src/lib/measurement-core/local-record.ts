@@ -211,6 +211,30 @@ export interface TaskCurriculum {
   carry_in?: string;
 }
 
+/**
+ * Where a session's traffic belongs (CR-21, CR-73; cr-publish #1393). An additive key on the
+ * session link (Jay's decision 8): a participant session opened from a published test link
+ * carries its project, experiment, product version, link and channel, and the events that
+ * cr-evidence adds inherit them from the session. Plain ids only, never identity.
+ */
+export interface SessionAttribution {
+  project: string;
+  experiment: string;
+  product_version: string;
+  /** The test link the session was opened from; absent means "unknown channel" (CR-73). */
+  link?: string;
+  channel?: string;
+  variant?: string;
+}
+
+const ATTRIBUTION_KEYS = ["project", "experiment", "product_version", "link", "channel", "variant"] as const;
+function checkAttribution(a: unknown): asserts a is SessionAttribution {
+  check(isObj(a), "invalid_session_attribution");
+  for (const k of Object.keys(a)) check((ATTRIBUTION_KEYS as readonly string[]).includes(k), "invalid_session_attribution");
+  for (const k of ["project", "experiment", "product_version"] as const) check(text(a[k], 200), "invalid_session_attribution");
+  for (const k of ["link", "channel", "variant"] as const) check(a[k] === undefined || text(a[k], 200), "invalid_session_attribution");
+}
+
 export interface Task {
   format: typeof LOCAL_RECORD_FORMAT;
   kind: "task";
@@ -224,7 +248,8 @@ export interface Task {
   /** Every purpose ever set, oldest first: an AI proposal stays visible after Jay edits it. */
   purpose_history: Purpose[];
   status: TaskStatus;
-  sessions: Array<{ host: string; session_id: string; at: number; by: Actor }>;
+  /** `attribution` is absent on every link made before cr-publish (#1393) and on App-side links. */
+  sessions: Array<{ host: string; session_id: string; at: number; by: Actor; attribution?: SessionAttribution }>;
   history: Array<{ at: number; by: Actor; change: string; reason?: string }>;
 }
 
@@ -591,9 +616,14 @@ export class LocalRecord {
   }
 
   // ── Tasks and sessions (MC-07/08) ───────────────────────────────────────────
-  async createTask(input: Parameters<typeof createTask>[0]): Promise<Task> {
+  /**
+   * `quota: "none"` is for a caller that bounds its own tasks (cr-publish: one fixed-size task
+   * per experiment, experiments capped per project), so creating one costs the same however
+   * many session keys the record holds; the default checks the review quota (MC-35).
+   */
+  async createTask(input: Parameters<typeof createTask>[0], options: { quota?: "review" | "none" } = {}): Promise<Task> {
     const task = createTask(input);
-    check(await this.#write(`tasks/${task.id}`, task, true), "task_exists");
+    check(await this.#write(`tasks/${task.id}`, task, true, options.quota ?? "review"), "task_exists");
     return task;
   }
 
@@ -612,23 +642,72 @@ export class LocalRecord {
   }
 
   /** Attribution is explicit. A shared folder or project never merges two tasks (MC-08). */
-  async linkSession(taskId: string, link: { host: string; session_id: string; by: Actor; at: number }): Promise<Task> {
+  async linkSession(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution?: SessionAttribution }): Promise<Task> {
     check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    if (link.attribution !== undefined) {
+      checkAttribution(link.attribution);
+      // The task is the experiment; a session can only be attributed to the task it links to.
+      check(link.attribution.experiment === taskId, "invalid_session_attribution");
+    }
     const task = await this.getTask(taskId);
+    if (link.attribution) check(task.project === link.attribution.project, "invalid_session_attribution");
     const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
-    if (!(await this.#write(key, { task: taskId }, true))) {
+    const attribution = link.attribution ? { ...link.attribution } : undefined;
+    if (!(await this.#write(key, { task: taskId, ...(attribution ? { attribution } : {}) }, true))) {
       check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
       return task;
     }
     return this.saveTask({
       ...task,
-      sessions: [...task.sessions, { host: link.host, session_id: link.session_id, at: link.at, by: link.by }],
+      sessions: [...task.sessions, { host: link.host, session_id: link.session_id, at: link.at, by: link.by, ...(attribution ? { attribution } : {}) }],
       history: [...task.history, { at: link.at, by: link.by, change: `session_linked:${link.host}/${link.session_id}` }],
     });
   }
 
+  /**
+   * A session link written as its per-session key only (cr-publish #1393: participant
+   * sessions opened from a published test link). Constant cost per call, whatever the record
+   * holds: the task document is read once and never rewritten (it would otherwise grow by one
+   * entry per open), and the review quota is not scanned, because the caller bounds how many
+   * such keys exist (one fixed-size key per session, capped per link). Every read of a
+   * session (`taskForSession`, `sessionAttribution`, `sessionLinks`) uses this key.
+   * `created` is false when the session was already linked to this task (an idempotent retry).
+   */
+  async linkSessionKey(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution: SessionAttribution }): Promise<{ created: boolean }> {
+    check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    checkAttribution(link.attribution);
+    check(link.attribution.experiment === taskId, "invalid_session_attribution");
+    const task = await this.getTask(taskId);
+    check(task.project === link.attribution.project, "invalid_session_attribution");
+    const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
+    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at }, true, "none")) return { created: true };
+    check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
+    return { created: false };
+  }
+
   async taskForSession(host: string, sessionId: string): Promise<string | null> {
     return (await this.#read<{ task: string }>(`sessions/${enc(host)}/${enc(sessionId)}`))?.task ?? null;
+  }
+
+  /**
+   * A session's attribution, read from its per-session key (written once, atomically), not
+   * from `task.sessions`. null when the session is not linked or was linked without one.
+   */
+  async sessionAttribution(host: string, sessionId: string): Promise<SessionAttribution | null> {
+    return (await this.#read<{ attribution?: SessionAttribution }>(`sessions/${enc(host)}/${enc(sessionId)}`))?.attribution ?? null;
+  }
+
+  /** Every session linked on one host, from the per-session keys (cr-publish CR-73 channel reads). */
+  async sessionLinks(host: string): Promise<Array<{ session_id: string; task: string; attribution: SessionAttribution | null }>> {
+    check(text(host, 100), "invalid_host");
+    const prefix = `sessions/${enc(host)}/`;
+    const out: Array<{ session_id: string; task: string; attribution: SessionAttribution | null }> = [];
+    for (const k of await this.#keys(prefix)) {
+      const v = await this.#read<{ task: string; attribution?: SessionAttribution }>(k);
+      if (!v) continue;
+      out.push({ session_id: decodeURIComponent(k.slice(prefix.length)), task: v.task, attribution: v.attribution ?? null });
+    }
+    return out;
   }
 
   // ── Observations (MC-08/30/34) ──────────────────────────────────────────────

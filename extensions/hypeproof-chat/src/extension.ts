@@ -579,6 +579,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.browserResults", () => provider.showBrowserResults()),
     // cr-verify — "Test my product" (CR-12). Gated in the manifest, re-checked in the handler.
     vscode.commands.registerCommand("hypeproof-chat.testMyProduct", () => provider.testMyProduct()),
+    // cr-publish — "Publish for user test" (CR-17). Gated in the manifest, re-checked in the handler.
+    vscode.commands.registerCommand("hypeproof-chat.publishTestVersion", () => provider.publishTestVersion()),
     // CR-10 — delete the stored browser-result bytes. Gated on "bytes are stored", NOT on
     // the CR switch: what an earlier switch-on stored stays deletable after it goes off.
     vscode.commands.registerCommand("hypeproof-chat.clearBrowserResultBytes", () => provider.clearStoredBrowserResults()),
