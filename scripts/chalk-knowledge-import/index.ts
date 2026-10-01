@@ -120,6 +120,8 @@ function parseVocabTable(section: string): VocabEntry[] {
   const re = /^\|\s+`?([a-z][a-z0-9-]*)`?\s+\|\s+(.+?)\s+\|/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(section)) !== null) {
+    // Skip the table header row (key / label).
+    if (m[1] === "key") continue;
     entries.push({ key: m[1], label: m[2].replace(/\*\*/g, "").trim() });
   }
   return entries;

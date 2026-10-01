@@ -104,6 +104,51 @@ else
   fail "TOKEN_JSON redact pattern not found — token may be printed in plaintext on failure"
 fi
 
+# 13. No '수업 참여' (old student-join UI step removed in #1295)
+if grep -q '수업 참여' "$SCRIPT"; then
+  fail "old '수업 참여' instruction found in script (must be removed)"
+else
+  ok "no '수업 참여' instruction in script"
+fi
+
+# 14. No 'Paste the token' (old manual-paste instruction removed in #1295)
+if grep -q 'Paste the token' "$SCRIPT"; then
+  fail "old 'Paste the token' instruction found in script (must be removed)"
+else
+  ok "no 'Paste the token' instruction in script"
+fi
+
+# 15. No pbcopy (clipboard copy removed in #1295; token injected via file)
+if grep -q 'pbcopy' "$SCRIPT"; then
+  fail "pbcopy still present in script (must be removed)"
+else
+  ok "no pbcopy in script"
+fi
+
+# 16. History clear — positive contrast: hypeproofChat.history% rows are deleted
+# Uses a temporary SQLite DB that mimics the workspaceStorage state.vscdb schema.
+_TMP_DB="$(mktemp /tmp/review-pr-test-state.XXXXXX.vscdb)"
+sqlite3 "$_TMP_DB" "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT);" 2>/dev/null
+sqlite3 "$_TMP_DB" "INSERT INTO ItemTable VALUES ('hypeproofChat.history', 'data1');" 2>/dev/null
+sqlite3 "$_TMP_DB" "INSERT INTO ItemTable VALUES ('hypeproofChat.history:bucket1', 'data2');" 2>/dev/null
+sqlite3 "$_TMP_DB" "INSERT INTO ItemTable VALUES ('other.key', 'data3');" 2>/dev/null
+sqlite3 "$_TMP_DB" "DELETE FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null
+_HIST_COUNT="$(sqlite3 "$_TMP_DB" "SELECT COUNT(*) FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null || echo 1)"
+if [[ "$_HIST_COUNT" -eq 0 ]]; then
+  ok "sqlite3 positive contrast: hypeproofChat.history% rows deleted"
+else
+  fail "sqlite3 positive contrast: hypeproofChat.history% rows not deleted (count=$_HIST_COUNT)"
+fi
+
+# 17. History clear — negative contrast: non-history rows are preserved
+_OTHER_COUNT="$(sqlite3 "$_TMP_DB" "SELECT COUNT(*) FROM ItemTable WHERE key = 'other.key';" 2>/dev/null || echo 0)"
+if [[ "$_OTHER_COUNT" -eq 1 ]]; then
+  ok "sqlite3 negative contrast: other.key row preserved after history delete"
+else
+  fail "sqlite3 negative contrast: other.key row missing (count=$_OTHER_COUNT)"
+fi
+rm -f "$_TMP_DB"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]

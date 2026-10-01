@@ -542,7 +542,7 @@ export async function execSavePlan(
     const result = await issuerFetch(
       ctx,
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
-      { method: "PUT", body: { html, ...extras, expected_revision, request_id } },
+      { method: "PUT", body: { html, file: file ?? "lesson", ...extras, expected_revision, request_id } },
     ) as Record<string, unknown>;
     return result;
   } catch (e) {
