@@ -247,7 +247,7 @@ chalkCourses.put(
       vocabJson = JSON.stringify({
         goals: v.goals,
         conditions: v.conditions,
-        learner_level: typeof v.learner_level === "string" ? v.learner_level : "any",
+        learner_level: typeof v.learner_level === "string" ? v.learner_level : undefined,
         has_guidance: typeof v.has_guidance === "boolean" ? v.has_guidance : undefined,
       });
     }

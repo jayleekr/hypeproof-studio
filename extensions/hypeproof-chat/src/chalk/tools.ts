@@ -347,7 +347,7 @@ async function hasLocalChanges(filePath: string): Promise<boolean> {
 export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
   name: "chalk_set_inputs",
   description:
-    "강의 생성기 입력값(학습 조건·목표·교수 모형 등)을 설정합니다. 이후 chalk_generator_brief로 지식 기반 브리프를 생성합니다.",
+    "강의 생성기 입력값(학습 조건·목표·교수 모형 등)을 설정합니다. vocab.goals·vocab.conditions는 제품 지식의 어휘 키로 지정합니다 — 키 목록은 chalk_get_knowledge(vocab 문서)로 먼저 확인하세요. 이후 chalk_generator_brief로 지식 기반 브리프를 생성합니다.",
   inputSchema: schema(
     {
       cohort: { ...str, description: "코호트 ID" },
@@ -368,14 +368,23 @@ export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
       vocab: {
         type: "object",
         properties: {
-          goals: { type: "array", items: { type: "string" }, description: "어휘 목표 키 목록" },
-          conditions: { type: "array", items: { type: "string" }, description: "어휘 조건 키 목록" },
+          goals: {
+            type: "array",
+            items: { type: "string" },
+            description: "목표 어휘 키 목록 — chalk_get_knowledge로 확인한 키만 사용",
+          },
+          conditions: {
+            type: "array",
+            items: { type: "string" },
+            description: "조건 어휘 키 목록 — chalk_get_knowledge로 확인한 키만 사용",
+          },
         },
+        required: ["goals", "conditions"],
         additionalProperties: false,
-        description: "어휘 필터 (선택)",
+        description: "어휘 필터 (필수) — 목표와 조건은 제품 지식의 어휘 키로 지정합니다",
       },
     },
-    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format"],
+    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format", "vocab"],
   ),
 };
 
@@ -445,7 +454,10 @@ export async function execGeneratorBrief(
       const b = e.body as Record<string, unknown> | null;
       const code = typeof b?.code === "string" ? b.code : null;
       if (e.status === 409) {
-        if (code === "inputs_missing") return { error: "inputs_missing", message: "입력값이 없습니다. chalk_set_inputs로 먼저 입력값을 설정하세요." };
+        if (code === "inputs_missing") {
+          const msg = typeof b?.error === "string" ? b.error : "입력값이 없습니다. chalk_set_inputs로 먼저 입력값을 설정하세요.";
+          return { error: "inputs_missing", message: msg };
+        }
         if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
         if (code === "knowledge_incomplete") return { error: "knowledge_incomplete", message: "지식이 불완전합니다. 지식 버전을 확인하세요." };
         if (code === "knowledge_incompatible") return { error: "knowledge_incompatible", message: "지식이 호환되지 않습니다. 다른 지식 버전을 선택하세요.", field: (b as Record<string, unknown>)?.field, unranked: (b as Record<string, unknown>)?.unranked };
