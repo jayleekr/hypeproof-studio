@@ -1,0 +1,10 @@
+decideMode verification — 2026-10-01T13:34:00.431Z
+────────────────────────────────────────────────────────────
+✓ [student] rehearsal token (rehearsal claim, exp +1h, status null)
+✓ [student] class token (exp +8h, status ok)
+✓ [instructor] expired token (exp -1s, status null)
+✓ [instructor] hard-rejected (status expired)
+✓ [student] unreachable (status unreachable) — must stay student
+✓ [instructor] no token — instructor opens
+────────────────────────────────────────────────────────────
+6 passed, 0 failed

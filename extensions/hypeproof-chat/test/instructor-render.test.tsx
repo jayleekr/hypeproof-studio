@@ -286,6 +286,36 @@ t("[positive control] student (instructor=false) + view → HelpRequest mounted"
   assertAbsent(instructorHtml, "hp-help", "instructor must NOT see hp-help");
 });
 
+// ── (f) student-slot-first — instructor badge absent when student is active ───
+// Simulates the postConfig outcome when decideMode returns "student":
+//   isInstructor=false is sent in the config, so ChatPanel renders the student view.
+// Regression guard for #1298 A-01: instructor panel must NOT appear while a student
+// token is active, even if an issuer token is stored.
+console.log("=== (f) student-slot-first — instructor badge absent for active student ===");
+
+t("[student priority] ChatPanel with instructor=false, lesson → MissionHeader present", () => {
+  const html = renderToStaticMarkup(
+    <ChatPanel {...BASE_PROPS} config={CONFIG_WITH_LESSON} instructor={false} />
+  );
+  assertContains(html, "hp-mission-growth", "student with lesson must see MissionHeader");
+  assertAbsent(html, "hps-instructor-badge", "instructor badge must be absent when student is active");
+});
+
+t("[student priority] ChatPanel with instructor=false → no instructor strip", () => {
+  const html = renderToStaticMarkup(
+    <ChatPanel {...BASE_PROPS} config={CONFIG_WITH_PROFILE} instructor={false} />
+  );
+  assertAbsent(html, "hps-instructor-badge", "instructor badge must be absent for student panel");
+});
+
+t("[positive control] instructor=true → instructor badge present (confirms (f) is non-vacuous)", () => {
+  const html = renderToStaticMarkup(
+    <InstructorChatPanel {...BASE_PROPS} config={CONFIG_WITH_PROFILE} />
+  );
+  assertContains(html, "hps-instructor-badge", "instructor badge must be present in instructor mode");
+  assertAbsent(html, "hp-mission-growth", "MissionHeader must be absent in instructor mode");
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 const total = pass + fail;
 console.log(`\n${total} render tests: ${pass} passed, ${fail} failed`);

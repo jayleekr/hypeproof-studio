@@ -4303,17 +4303,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #1298 A-01 — student slot takes priority. If the student token is active
     // (present, not expired, not hard-rejected), skip the instructor check entirely
     // to prevent the instructor panel from flashing during a rehearsal.
+    // profileFetched: ensureProfile() completed and recorded an answer (ok or failure).
+    // Distinct from "token exists" to handle the connections.matchesService=false early-return.
+    const profileFetched = !!token && (profile !== null || this.lastProfileFailure !== null);
     const studentProfileStatus = profileFailureToStatus(
       this.lastProfileFailure,
       !!token,
-      !!token, // ensureProfile() ran (and completed) iff token exists
+      profileFetched,
     );
     const panelMode = decideMode({ studentToken: token ?? undefined, studentProfileStatus });
     // Instructor auth always uses the issuer token slot, never the student token.
     const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
-    const isInstructor = panelMode === "instructor"
-      ? await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl)
-      : false;
+    let isInstructor: boolean;
+    if (panelMode === "instructor") {
+      isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    } else {
+      // Student slot active: clear any cached instructor state so that handleSend and other
+      // callers checking this._instructorMode.isInstructor === true see false, not a stale true.
+      this._instructorMode.reset();
+      isInstructor = false;
+    }
     // #1298 — on the auto-read path (postConfig/refresh), act on the whoami result.
     // The setInstructorToken command has its own rejection handler; this covers the background refresh path.
     if (issuerToken) {
