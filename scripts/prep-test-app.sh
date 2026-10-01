@@ -37,3 +37,5 @@ if ! codesign --force --deep --sign - "$REAL" >/dev/null 2>&1; then
   echo "⚠ ad-hoc re-sign failed; the app may refuse to launch" >&2
 fi
 echo "▶ prepared $REAL (LSUIElement=1: no Dock icon, never takes focus)"
+echo "  launching it outside e2e/fixtures/app.ts? pass --use-inmemory-secretstorage and a"
+echo "  temporary --user-data-dir, or macOS will ask for the login keychain password."

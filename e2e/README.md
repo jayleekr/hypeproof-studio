@@ -107,8 +107,11 @@ composites no frames). To run those without taking over the Mac:
    screen locks and the gate waits. Exit 75 means "retry later", not a failure.
 
 Agents and scripts that launch the app outside the fixture must apply the same
-quiet stash and use a prepared copy; never launch `/Applications/HypeProof Studio.app`
-from automation.
+quiet stash, use a prepared copy, and pass `--use-inmemory-secretstorage` with a
+temporary `--user-data-dir`. Without that switch the copy reads the shared
+"HypeProof Studio Safe Storage" keychain item, and because the copy is ad-hoc
+re-signed macOS asks for the login keychain password in the middle of your work.
+Never launch `/Applications/HypeProof Studio.app` from automation.
 
 ## Run
 
