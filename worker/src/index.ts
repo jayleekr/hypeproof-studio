@@ -16,6 +16,8 @@ import { classroomOpsApp } from "./routes/classroom-ops";
 import { classroomCollectApp } from "./routes/classroom-collect";
 import { classroomReportsRunner } from "./routes/classroom-reports";
 import { classroomDeliveryWebhooks, classroomReportLinks } from "./routes/classroom-delivery";
+import { curriculum } from "./routes/curriculum";
+import { isTestOriginRequest, testOriginApp } from "./routes/curriculum-test-origin";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { runClassroomErasureRecovery, runClassroomRetention } from "./lib/classroom-erasure";
@@ -32,6 +34,16 @@ const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 // header + structured error body so operators can correlate user reports
 // with wrangler tail logs.
 app.use("*", requestId);
+
+// cr-publish (#1393; recon §6) — a published test version's origin is dispatched by host
+// before every API route, so nothing of the API is reachable on it. Unset HPS_TEST_ORIGIN
+// (the default) means no request is a test-origin request.
+app.use("*", async (c, next) => {
+  if (!isTestOriginRequest(c.env, c.req.url)) return next();
+  let ctx: Parameters<typeof testOriginApp.fetch>[2];
+  try { ctx = c.executionCtx; } catch { ctx = undefined; }
+  return testOriginApp.fetch(c.req.raw, c.env, ctx);
+});
 
 // #258 — fail closed (503 in production) on token-authenticated routes when
 // the signing secret is missing/weak/placeholder. /v1/report is deliberately
@@ -50,6 +62,7 @@ app.use('/v1/observations/*', signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);
 app.use("/v1/classroom/*", signingSecretGuard);
+app.use("/v1/curriculum/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 for(const path of ['/v1/messages','/v1/messages/count_tokens','/v1/chat/completions','/v1/observations/assess'])app.use(path,nativeTrialBudget);
 
@@ -103,6 +116,8 @@ app.route("/v1/classroom/ops", classroomOpsApp);
 // #1012 · #751 G2 — the rehearsal App report; its own learner-code check, before the sharing router's `*` middleware.
 app.route('/v1/classroom/rehearsal', rehearsalReport);
 app.route("/v1/classroom", classroomStudent);
+// cr-publish (#1393) — Publish for User Test, behind curriculum_runtime.enabled (answers as an unknown route when off).
+app.route("/v1/curriculum", curriculum);
 app.route("/admin", admin);
 
 app.notFound((c) =>

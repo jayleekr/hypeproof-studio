@@ -2990,12 +2990,69 @@
       ]
     },
     {
+      "id": "ST-IMP-CR-PUBLISH",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/curriculum.ts"
+        },
+        {
+          "path": "worker/src/routes/curriculum-test-origin.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/venture.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/store.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/publish-scan.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/test-origin.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/session-token.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/participant-record.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/participant-snippet.ts"
+        },
+        {
+          "path": "worker/migrations/0032-curriculum-runtime-publish.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishSet.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/testQr.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/PublishPanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CR",
       "stage": "test",
       "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-CR",
-        "ST-DES-CR"
+        "ST-DES-CR",
+        "ST-IMP-CR-PUBLISH"
       ],
       "sources": [
         {
@@ -3018,6 +3075,30 @@
         },
         {
           "path": "docs/testing/curriculum-runtime-dev.md"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-evidence.md"
+        },
+        {
+          "path": "e2e/curriculum-runtime/publish-app.spec.ts"
+        },
+        {
+          "path": "worker/test/cr-publish.test.mjs"
+        },
+        {
+          "path": "worker/test/harness/curriculum.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-publish.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/test-qr.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/publish-panel.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/publish-runtime.real.mjs"
         }
       ]
     },

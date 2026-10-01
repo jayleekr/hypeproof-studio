@@ -1297,3 +1297,56 @@ CREATE TABLE IF NOT EXISTS chalk_course_inputs (
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
+
+-- cr-publish (#1393) — Venture Memory: migration 0032-curriculum-runtime-publish.sql.
+CREATE TABLE IF NOT EXISTS cr_projects (
+  id         TEXT PRIMARY KEY,
+  cohort_id  TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_projects_cohort ON cr_projects(cohort_id);
+
+CREATE TABLE IF NOT EXISTS cr_hypotheses (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_hypotheses_project ON cr_hypotheses(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_product_versions (
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  id         TEXT NOT NULL,
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS cr_experiments (
+  id                 TEXT PRIMARY KEY,
+  project_id         TEXT NOT NULL REFERENCES cr_projects(id),
+  hypothesis_id      TEXT NOT NULL REFERENCES cr_hypotheses(id),
+  product_version_id TEXT NOT NULL,
+  doc                TEXT NOT NULL,
+  revision           INTEGER NOT NULL DEFAULT 1,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_experiments_project ON cr_experiments(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_test_links (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES cr_projects(id),
+  experiment_id TEXT NOT NULL REFERENCES cr_experiments(id),
+  doc           TEXT NOT NULL,
+  expires_at    INTEGER NOT NULL,
+  revoked_at    INTEGER,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_test_links_experiment ON cr_test_links(experiment_id);
