@@ -294,6 +294,51 @@ else
   ok "CDP port: --cdp-port gated on HPS_REVIEW_CDP_PORT (absent env → not passed)"
 fi
 
+# 33. cleanup: Dev app shutdown uses TERM → wait loop → KILL (not bare kill).
+# Verify the TERM+wait+KILL pattern exists in cleanup().
+CLEANUP_BODY="$(awk '/^cleanup\(\)/{found=1} found{print} found && /^\}/{exit}' "$SCRIPT")"
+if echo "$CLEANUP_BODY" | grep -q 'kill -9.*DEV_APP_PID' && \
+   echo "$CLEANUP_BODY" | grep -q 'sleep 1' && \
+   echo "$CLEANUP_BODY" | grep -qE 'kill.*DEV_APP_PID' ; then
+  ok "cleanup: TERM → wait loop → SIGKILL pattern present for Dev app"
+else
+  fail "cleanup: missing TERM→wait→SIGKILL pattern for Dev app (bare 'kill' only?)"
+fi
+
+# 34. studio-dev.py _clear_stale_ipc_socket: function defined and called.
+DEV_PY="$(dirname "$SCRIPT")/studio-dev.py"
+if [[ -f "$DEV_PY" ]]; then
+  if grep -q '_clear_stale_ipc_socket' "$DEV_PY"; then
+    if grep -q '_clear_stale_ipc_socket(state' "$DEV_PY"; then
+      ok "studio-dev.py: _clear_stale_ipc_socket defined and called in launch()"
+    else
+      fail "studio-dev.py: _clear_stale_ipc_socket defined but not called in launch()"
+    fi
+  else
+    fail "studio-dev.py: _clear_stale_ipc_socket not found"
+  fi
+else
+  warn "studio-dev.py not found at $DEV_PY — skipping socket cleanup check"
+fi
+
+# 35. studio-dev.py socket cleanup: live-PID guard present.
+if [[ -f "$DEV_PY" ]]; then
+  if grep -q 'os.kill(locked_pid, 0)' "$DEV_PY" && grep -q 'ProcessLookupError' "$DEV_PY"; then
+    ok "studio-dev.py: live-PID safety guard present in _clear_stale_ipc_socket"
+  else
+    fail "studio-dev.py: live-PID guard (os.kill + ProcessLookupError) missing"
+  fi
+fi
+
+# 36. review-pr.sh: 거짓 Ready guard (15 s survival check) present.
+if grep -q 'Waiting 15 s to verify Dev app survival' "$SCRIPT" && \
+   grep -qE 'sleep 15' "$SCRIPT" && \
+   grep -qE 'exit 1' "$SCRIPT"; then
+  ok "review-pr.sh: 거짓 Ready guard (15 s survival + exit 1 on death) present"
+else
+  fail "review-pr.sh: 거짓 Ready guard missing (need 15 s sleep + exit 1 path)"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]

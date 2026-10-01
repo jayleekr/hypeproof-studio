@@ -109,6 +109,14 @@ cleanup() {
   if [[ -n "${DEV_APP_PID:-}" ]] && kill -0 "$DEV_APP_PID" 2>/dev/null; then
     echo "Closing Dev app (PID $DEV_APP_PID)..."
     kill "$DEV_APP_PID" 2>/dev/null || true
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 1
+      kill -0 "$DEV_APP_PID" 2>/dev/null || break
+    done
+    if kill -0 "$DEV_APP_PID" 2>/dev/null; then
+      echo "Dev app did not exit after SIGTERM; sending SIGKILL (PID $DEV_APP_PID)..."
+      kill -9 "$DEV_APP_PID" 2>/dev/null || true
+    fi
   fi
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
   [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
@@ -431,6 +439,11 @@ else
   DEV_APP_PID="$(echo "$DEV_APP_RAW" | grep -oE 'Development process started: [0-9]+' | grep -oE '[0-9]+$' || true)"
   T5_END=$(ms)
   echo "studio-dev.py run done in $(( T5_END - T5 ))ms (dev app PID: ${DEV_APP_PID:-unknown})"
+  DEV_APP_LOG="$HOME/Library/Application Support/HypeProof Studio Development/$(python3 -c "
+import hashlib, sys
+from pathlib import Path
+print(hashlib.sha256(str(Path(sys.argv[1]).resolve()).encode()).hexdigest()[:12])
+" "$WORKTREE_DIR")/app.log"
 
   # ── Step 6: instructions ────────────────────────────────────────────────────
   echo ""
@@ -443,6 +456,24 @@ else
   echo "  3. chalk_set_inputs 호출 시 로그에 찍힌 강의 ID(${DRAFT_COURSE})를 course 인자로 사용"
   echo ""
   echo "When done reviewing, press Ctrl+C to clean up."
+
+  # ── 거짓 Ready guard: 15 s survival + initialization log check ──────────────
+  if [[ -n "${DEV_APP_PID:-}" ]]; then
+    echo "Waiting 15 s to verify Dev app survival..."
+    sleep 15
+    if ! kill -0 "$DEV_APP_PID" 2>/dev/null; then
+      echo "ERROR: Dev app (PID $DEV_APP_PID) exited within 15 s of launch." >&2
+      if [[ -f "$DEV_APP_LOG" ]]; then
+        echo "--- app.log (last 20 lines) ---" >&2
+        tail -n 20 "$DEV_APP_LOG" >&2
+      fi
+      exit 1
+    fi
+    if [[ -f "$DEV_APP_LOG" ]] && ! grep -q "update#setState" "$DEV_APP_LOG"; then
+      echo "WARNING: 'update#setState disabled' not yet in app.log; app may still be initializing." >&2
+    fi
+    echo "Dev app alive after 15 s (PID $DEV_APP_PID)."
+  fi
 
   # Wait for the wrangler dev background job (cleanup runs on exit/INT/TERM).
   # || true: prevents a non-zero exit from wrangler from triggering the ERR trap
