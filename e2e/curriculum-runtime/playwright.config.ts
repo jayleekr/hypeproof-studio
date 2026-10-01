@@ -11,6 +11,10 @@ export const CR_APP_PORT = Number(process.env.HPS_CR_APP_PORT || 18931);
 // Read by fixtures/app.ts when it is imported by the spec (worker processes inherit this env).
 process.env.HPS_E2E_TOKEN_FILE ||= path.join(here, "../test-results/cr-app/token.txt");
 process.env.HPS_E2E_PROXY_URL ||= `http://127.0.0.1:${CR_APP_PORT}/v1`;
+// Quiet mode stays on (off-screen, shown inactive, never focusable), but the app is not
+// hidden: a hidden app's integrated browser paints no frames, so every CR observation's
+// screenshot times out ("CDP Page.captureScreenshot timed out", run of 2026-10-01).
+process.env.HPS_QUIET_NO_HIDE ||= "1";
 
 export default defineConfig({
   testDir: here,

@@ -2,7 +2,7 @@
 
 Status: run record, 2026-09-30. Item `cr-browser`, epic [#1388](https://github.com/jayleekr/hypeproof-studio/issues/1388). Row definitions: [curriculum-runtime.md](curriculum-runtime.md). No row here is a completion; completion needs the ledger record and a reviewer other than the implementer (plan, "What done means").
 
-No real-device run was made: no Studio app run with this branch reached a CR surface, no reference-Mac timing, no phone.
+No real-device run was made: no Studio app run with this branch reached a CR surface, no reference-Mac timing, no phone. (Until 2026-10-01: the section "Finish" records the in-app runs and supersedes the requirement status and NOT RUN list of the sections before it.)
 
 ## What was run
 
@@ -93,7 +93,7 @@ The real-Chromium run found three instrument errors before any product verdict, 
 | **CR-59** (preview refresh p50 < 2 s) | **not met, not claimed.** Synthetic CR-T55 only (p50 347–353 ms, headless Chromium with Studio's serving code); the app run on the reference Mac is NOT RUN, and this branch changes nothing on the refresh path |
 | **CR-60** (element capture < 1 s) | **not met, not claimed.** Only the headless-Chromium p50 exists; recon F8 measured 2.0–3.0 s crops in the app on `origin/main`, which is evidence against the target there |
 
-The ledger keeps CR-59 and CR-60 on this item's scope (the plan assigns them here); they stay open until CR-T55 and CR-T56 run in the app on the reference Mac. Moving them to a follow-up item needs Jay's consent and was not done.
+The ledger keeps CR-59 and CR-60 on this item's scope (the plan assigns them here); they stay open until CR-T55 and CR-T56 run in the app on the reference Mac. Moving them to a follow-up item needs Jay's consent and was not done. (Superseded 2026-10-01: Jay moved both to `cr-e2e`, decision 9; see "Finish" below.)
 
 **Claim for the PR and the ledger.** No requirement of this item is complete. The PR refers to #1391 and does not close it; no `completion` record is written for `cr-browser` until the app-layer rows run and the stored-schema decision is made.
 
@@ -192,11 +192,60 @@ Planted defects, one at a time (scratch runner; the real run for the model-text 
 
 The first full `worker npm test` of round 3 exited 0. On the round-2 tree a reviewer saw one exit 1 from `classroom-ops-delivery.test.mjs` (AT-31: the substring `4821` can occur in a random hex digest); it passed on rerun and is unrelated to this branch, which touches no classroom file.
 
+## Finish (2026-10-01, `feat/cr-browser-finish`)
+
+Two decisions by Jay on 2026-10-01 unblocked the rest: decision 8 allows additive optional keys on `hps-observation/1`, decision 9 moves CR-59 and CR-60 to `cr-e2e`.
+
+- Commits: `b95f28ab` (CR-10 persistence), `d605e440` (09-preview measures the path the cohort takes, recon F1), `62045bb2` (three in-app defects), `d3de6f5a` (in-app spec), `fc9602b6` (ledger), then this record.
+- Machine: Apple M3 Pro, macOS 15.7.4, screen unlocked, Node 22.22.1. App: a scratch copy of HypeProof Studio 0.1.51 (`d4db9049`) with the extension and webview built from `fc9602b6` injected (`e2e/classroom/mac-devhost.mjs reinject`, 4 bundle hashes match), marked `LSUIElement` so it never activates. Every app run went through the e2e fixture's quiet mode (off-screen, shown inactive, not focusable, in-memory secret storage) and started only after 5 minutes without keyboard or mouse input.
+- Evidence classes (MC-38): **live-host** for the App (the integrated browser, the App's proxy loop, the local record, the command palette); **synthetic** for the account, the session and the model (`e2e/curriculum-runtime/app-service.mjs`: the real Service router over HTTP, a scripted agent as the provider). The rows below prove transport, enforcement and browser behaviour in the App, never a real model's judgement.
+
+### CR-10 under decision 8
+
+Browser results are `tool_result` events tagged `hps-browser-result/1` with the optional keys `artifact_version`, `screenshot_digest` and `trace_digest` (`BROWSER_RESULT_REF_KEYS`). `legacy-observation.ts` accepts them only on a `tool_result`, as sha256 digests, and byte digests only next to the version; records without them read unchanged. The bytes are `blobs/` entries of the same local record (`LocalRecord.putBlob`), and a digest is named only after its bytes were read back. `hypeproof-chat.browserResults` (behind the switch) reads the stored results back and labels each "현재 버전", "이전 버전" or "버전 확인 안 됨". Assessment uploads leave the keys out (`assessmentBatch`), so a Service deployed before decision 8 does not refuse a batch. Unit and D1-free tests: `worker/test/cr-browser-refs.test.mjs`, `extensions/hypeproof-chat/test/cr-host.smoke.mjs`.
+
+### In-app rows (`e2e/curriculum-runtime/app-layer.spec.ts`)
+
+Four consecutive gated runs at the final tree (11:47–11:50), each `2 passed`:
+
+| Row | Positive | Negative control (in the same run) |
+|---|---|---|
+| CR-T02 (in-app) | switch on: `browser_observe`, `browser_select`, `browser_scroll`, `browser_hover`, `browser_reload` offered; both CR commands in the palette | switch off: none of the five tools and neither command; the existing `browser_navigate` and "HTML 미리보기" still found (instrument control) |
+| CR-T07 | five steps reach "주문이 완료되었어요" | planted disabled step 4 stops at 4 |
+| CR-T08 | planted console error reported once, at action 4 (flow step 3; the opening navigate is action 1) | clean and chatty (`console.log`/`info`) flows report none |
+| CR-T63 | orange outline in 36 of 93 frames sampled during the flow; a tool line was `running` during a step | the last 5 frames after the flow carry no outline; no running tool line after |
+| CR-T09 | pick of "주문 시작": chip `index.html:23`, crop attached, the next request starts with exactly the previewed text and carries the image; the pick did not press the button | a script-made element reads "소스 위치: 찾지 못함"; a removed element sends nothing and no image |
+| CR-T10 (app) | results read back as "현재 버전 · sha256:04cdec9f…"; 32 `blobs/` entries on the local record | after `index.html` changes the same results read "이전 버전" and none "현재 버전" |
+
+The first gated run (11:45) hid the app after the workbench was ready (`app.hide()`), and every observation failed with `CDP Page.captureScreenshot timed out`: a hidden app's integrated browser paints no frames, like a locked screen (F7). The CR config now sets `HPS_QUIET_NO_HIDE=1`; the window stays off-screen and unfocusable. That run is also the instrument's control: no painting turns CR-T07 red at step 1.
+
+The three product defects the earlier, visible in-app runs found are fixed in `62045bb2`, each with a smoke whose planted revert turns it red (scratch mutation run): the navigating executor kept by the control (`cr-switch`), a same-origin tab driven instead of duplicated (`cr-switch`), step numbers restarting per turn (`experiment-browser`, `cr-host`).
+
+### F1 (09-preview)
+
+`e2e/tests/09-preview.spec.ts` on the same app copy, gated and quiet, against `scripts/dev-stack.sh`: 3 passed (REQ-D1/D3/D6, REQ-D4, REQ-D5). Its planted control (a canned turn without HTML fails both checks with "no preview opened") is in `d605e440`.
+
+### Gates at the final code (exit codes)
+
+`packages/measurement` test 0 · `worker` test 0 · `test:authoring:d1` 0 · `test:classroom:d1` 0 · `test:native-trial:d1` 0 · `test:classroom-ops:d1` 0 · `worker` typecheck 0 · `chalk` test 0 · `chalk` typecheck 0 · `validate-profiles` 0 · cohort-harness self-test 0 · extension typecheck 0 · extension `npm test` 0 · installer smokes 0 · `cr-traceability.test.mjs` 0 · `e2e` `test:cr-browser` (real Chromium) 0 · `next-work.py --check` 0 · `check-registry.py` 0 · `align.py check --doc curriculum-runtime` 0.
+
+### Requirement status at the finish
+
+| Requirement | Status |
+|---|---|
+| CR-02, CR-07, CR-08, CR-09, CR-68 | in-app rows above pass with their controls (CR-68 through CR-T63) |
+| CR-03, CR-04, CR-05, CR-06, CR-11 | synthetic rows (real Chromium) as before; exercised in the App by the CR-T07 flow |
+| CR-10 | persisted as artifact references with version and stored bytes, read back and labelled by version in the product; unit and in-app rows pass |
+| CR-59, CR-60 | moved to `cr-e2e` (decision 9); not claimed here |
+
+**Claim for the PR.** Every requirement `cr-browser` owns after decision 9 has evidence at the layer its row names; the PR can close #1391. The completion record is written by the record-only PR after merge, with a reviewer other than the implementer.
+
 ## NOT RUN
 
-- Every CR-T row in the Studio app (Playwright e2e and real Mac): CR-T02 switch-on walk, CR-T07, CR-T08, CR-T09, CR-T63, and the timings CR-T55, CR-T56.
-- Recon F8 (the `origin/main` build starving the browser tab: wheel, pick, crop). It needs an unlocked screen; every app run here was locked (F7).
+- The timings CR-T55 and CR-T56 in the app (now `cr-e2e`, decision 9).
+- Recon F8 on the `origin/main` build (wheel, pick, crop starvation). The in-app CR-T09 pick and crop pass on this branch; no separate F8 measurement was made.
 - Any real device or phone.
+- A real model behind the in-app rows (the agent is scripted).
 
 ## Manual demo procedure (PRD §15)
 
@@ -215,7 +264,7 @@ The first full `worker npm test` of round 3 exited 0. On the round-2 tree a revi
 - F8 is unresolved: on the `origin/main` build the recon measured crops of 2.0–3.0 s and missed picks in the app. CR-60's 1 s target in the app is unverified; the synthetic p50 is not evidence for it.
 - The element crop reaches the coach only where the cohort has `input.image_paste`; otherwise the chip says no image goes.
 - SDK-path result recording pairs each browser `tool_result` with the oldest pending result, which assumes browser tools run one at a time.
-- Step numbers count per `BrowserControl`. With the switch on both runtimes drive the provider's long-lived control (round 3), so steps count across turns; with it off a proxy turn has its own control. Records captured outside an agent step carry step `null`.
+- Step numbers count per `BrowserControl`. With the switch on both runtimes drive the provider's long-lived control (round 3), so steps count across turns; with it off a proxy turn has its own control. (Fixed in the finish: both runtimes call `crNewTurn()` at the start of a turn, so steps restart at 1.) Records captured outside an agent step carry step `null`.
 - Indirect escapes (CR-11): the load is stopped when the navigation is requested and the tab is taken back to where the step started, but the other origin may already have received the request (the real run saw 2 requests reach it across 3 attempts). Nothing of that page is observed, returned or recorded.
 - The CR-11 guard enforces only during an agent step and for 5 s after it (`ESCAPE_TAIL_MS`), on either runtime: since round 3 the proxy turn no longer closes the CDP session at its end (`proxyTurnBrowser`), so the tail and a pending escape outlive the turn. Closing the shared control (the tab changes, the panel is disposed) still ends the guard. The driven tab is also the student's preview, so outside that window their own navigations are not undone; the agent's next call is then refused by the ordinary scope check. A page timer that leaves more than 5 s after the last step is caught that way, not stopped.
 - New windows are closed through `Target.getTargets` / `Target.closeTarget` on the page session, and only windows that were not open when the step began (round 3): a window the student opened earlier is left alone. One the student opens during a step or its 5 s tail is indistinguishable from the agent's and is closed. That works on real Chromium (Playwright build); how the Studio shell's integrated browser routes a popup, and whether those calls reach it there, is not verified. The other origin may receive the popup's first request before it is closed.
@@ -225,7 +274,7 @@ The first full `worker npm test` of round 3 exited 0. On the round-2 tree a revi
 - A log attached after the page loaded (the first CR call of a turn) recovers load-time HTTP errors from the document's Resource Timing (Chromium 109+); load-time network errors without a status (refused connection, DNS) are not recoverable, so such an observation says "확인된 것 없음" and points to `browser_reload`.
 - An id-less `Log` entry that arrives within 1 s of a main-frame commit is dropped rather than attributed (it may be the previous document's).
 - The artifact version's file set holds static references only (HTML, CSS, JS imports). Files a page loads dynamically (`fetch('menu.json')`, an image `src` built in script) are not in it, so editing only such a file does not produce a new version, and results before and after the edit carry the same version (recon R4's definition; partial coverage of CR-10's "marked as belonging to the earlier version").
-- Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later.
+- Screenshots and traces are referenced by content digest on the record; the bytes themselves are not stored anywhere, so a digest cannot be resolved to an image later. (Fixed in the finish: the bytes are `blobs/` entries of the same local record, `LocalRecord.putBlob`.)
 - CR-10 persistence needs an observation recorder, which the App builds only when the profile names `observation.format`. The validator now fails a profile with the switch on and no format (`cr_without_observation_format`); a profile that bypassed the validator would still drop browser results silently.
 - The page-level indicator is the overlay outline; the chat-panel half is the tool-log line (`browserToolLogLine`, now labelled for the five CR tools). `CrHooks.onIndicator` is not wired in the product.
 - The artifact version re-reads the file set on every observation (no cache).

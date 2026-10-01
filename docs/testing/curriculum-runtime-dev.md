@@ -17,7 +17,7 @@ cd e2e
 HPS_APP_PATH="<app copy>" npx playwright test -c curriculum-runtime/playwright.config.ts
 ```
 
-The run stays in the background: quiet mode is the default (`e2e/README.md`, "Quiet mode"), so the window sits off-screen, is shown inactive and is hidden once the workbench is ready, and the `LSUIElement` copy never activates. It still needs an **unlocked** screen (the integrated browser paints no frames on a locked one, recon F7), so `scripts/e2e-quiet.sh`, which waits for the lock, cannot run it; start it when you step away without locking. `HPS_QUIET=0` shows the window for debugging and takes focus. Never point `HPS_APP_PATH` at `/Applications/HypeProof Studio.app`.
+The run stays in the background: quiet mode is the default (`e2e/README.md`, "Quiet mode"), so the window sits off-screen, is shown inactive and is never focusable, and the `LSUIElement` copy never activates. This config sets `HPS_QUIET_NO_HIDE=1`: a hidden app's integrated browser paints no frames and every observation's screenshot times out. It still needs an **unlocked** screen (the integrated browser paints no frames on a locked one, recon F7), so `scripts/e2e-quiet.sh`, which waits for the lock, cannot run it; start it when you step away without locking. `HPS_QUIET=0` shows the window for debugging and takes focus. Never point `HPS_APP_PATH` at `/Applications/HypeProof Studio.app`.
 
 It starts its own local Service (`e2e/curriculum-runtime/app-service.mjs`: the real Service router, the `canary-sdk-contract` profile with the switch set in that process only, a scripted agent as the model) and writes `e2e/test-results/cr-app/result.json`.
 
