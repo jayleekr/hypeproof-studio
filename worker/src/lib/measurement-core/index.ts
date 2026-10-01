@@ -14,3 +14,4 @@ export * from "./normalize.ts";
 export * from "./capability-models.ts";
 export * from "./interpretation.ts";
 export * from "./local-record.ts";
+export * from "./verification.ts";

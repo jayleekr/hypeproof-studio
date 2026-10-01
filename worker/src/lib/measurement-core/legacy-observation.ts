@@ -52,6 +52,7 @@ import {
   type SourceKind,
   type SourceState,
 } from "./learning-events.ts";
+import { isVersionArtifact } from "./verification.ts";
 
 export const OBSERVATION_FORMAT = "hps-observation/1";
 export const OBSERVATION_FORMAT_V2 = "hps-observation/2";
@@ -479,8 +480,10 @@ export function observableAssets(
   const executed = batch.events.some(
     (e) => e.kind === "tool_result" && e.outcome === "success",
   );
+  // A version-artifact event (cr-verify: the file-set version a verification ran on) is
+  // not a revision of a file; counting it would make one write plus one test "revised".
   const versions = new Set(
-    batch.events.filter((e) => e.kind === "artifact").map((e) => e.sha256),
+    batch.events.filter((e) => e.kind === "artifact" && !isVersionArtifact(e)).map((e) => e.sha256),
   );
   const met = { executed, revised: versions.size >= 2 };
   return capabilityKeys(model).filter((key) => {
