@@ -35,6 +35,8 @@ export interface ParticipantSession {
   /** Per task label: started and/or completed in this session. */
   tasks: Record<string, { started: boolean; completed: boolean }>;
   milestones: string[];
+  /** Task and milestone events whose name the experiment did not declare: kept without the name (CR-67). */
+  unnamed: number;
   /** Event ids of this session, for references (`event:<session>/<id>`). */
   event_ids: string[];
 }
@@ -77,6 +79,7 @@ export function participantSessions(experimentId: string, links: readonly Sessio
       inputs: evs.filter((e) => e.kind === "input").length,
       tasks,
       milestones,
+      unnamed: evs.filter((e) => (e.kind === "task_start" || e.kind === "task_complete" || e.kind === "milestone") && !e.label).length,
       event_ids: evs.map((e) => e.id),
     });
   }

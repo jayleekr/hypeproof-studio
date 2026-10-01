@@ -1383,3 +1383,11 @@ CREATE TABLE IF NOT EXISTS cr_cohort_controls (
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- cr_experiment_records: when an experiment's last manual record, draft or draft review was
+-- written (decision 6). An experiment ends at the later of this and its last link's end; one
+-- with no row and no link holds nothing to delete and is never swept. A time, never a copy.
+CREATE TABLE IF NOT EXISTS cr_experiment_records (
+  experiment_id  TEXT PRIMARY KEY REFERENCES cr_experiments(id),
+  last_record_at INTEGER NOT NULL
+);

@@ -10,6 +10,9 @@
 -- cr_cohort_controls: the admin's per-cohort data controls and team budget ceilings (CR-70),
 -- one hps-venture/1 `cohort_controls` document per cohort with a revision.
 --
+-- cr_experiment_records: the time of an experiment's last manual record or draft, so the
+-- automatic deletion (decision 6) counts it as part of when the experiment ended.
+--
 -- Additive and re-runnable. Applying it in production is Jay's decision (recon §9).
 
 CREATE TABLE IF NOT EXISTS cr_link_rates (
@@ -26,4 +29,12 @@ CREATE TABLE IF NOT EXISTS cr_cohort_controls (
   revision   INTEGER NOT NULL DEFAULT 1,
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+-- cr_experiment_records: when an experiment's last manual record, draft or draft review was
+-- written (decision 6). An experiment ends at the later of this and its last link's end; one
+-- with no row and no link holds nothing to delete and is never swept. A time, never a copy.
+CREATE TABLE IF NOT EXISTS cr_experiment_records (
+  experiment_id  TEXT PRIMARY KEY REFERENCES cr_experiments(id),
+  last_record_at INTEGER NOT NULL
 );

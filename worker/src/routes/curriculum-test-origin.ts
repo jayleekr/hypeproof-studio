@@ -256,19 +256,17 @@ async function recordEvents(c: Ctx, linkId: string): Promise<Response> {
   if (!session && (await record.sessionDeleted(PUBLISHED_HOST, claims.session))) return refused(409, "session_deleted");
   if (!session || session.task !== experiment.id || !session.attribution || session.attribution.link !== link.id) return refused(409, "session_not_open");
   if (session.attribution.product_version !== version.id) return refused(409, "session_version_mismatch");
-  // The session's own window first (CR-80's isolation on this path): one session re-sending
+  // The session's own window first (per-session isolation on this path): one session re-sending
   // cannot spend the link's shared window that other participants' events need.
   if (!(await admitLinkRate(c.env.HPS_DB, link.id, `session:${claims.session}`, now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerSessionWindow))) return refused(429, "rate_limited");
   if (!(await admitLinkRate(c.env.HPS_DB, link.id, "event", now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerWindow))) return refused(429, "rate_limited");
-  const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now });
+  const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now, pagePaths: new Set(version.files.map((f) => f.path)) });
   if (!built.ok) return refused(built.code === "session_event_limit" || built.code === "too_many_events" ? 413 : 400, built.code);
-  // Every event of the batch named an undeclared label: nothing to store.
-  if (built.events.length === 0) return new Response(null, { status: 204, headers: baseHeaders() });
   try {
     await appendParticipantEvents(record, experiment.id, claims.session, built.events);
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
-    if (code === "conflicting_event" || code === "conflicting_sequence") return refused(409, code);
+    if (code === "conflicting_event" || code === "conflicting_sequence" || code === "session_deleted" || code === "session_not_open") return refused(409, code);
     if (/^(invalid_|missing_|identity_field|unsupported_)/.test(code)) return refused(400, code);
     throw e;
   }

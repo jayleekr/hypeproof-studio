@@ -354,7 +354,7 @@ export type RefResolution = "ok" | "missing" | "deleted" | "foreign";
 
 export interface DraftRefusal {
   item: string;
-  code: "missing_source_refs" | "unresolved_source_ref" | "deleted_source_ref" | "foreign_source_ref" | "return_without_sessions" | "return_count_mismatch" | "return_sessions_not_one_device";
+  code: "missing_source_refs" | "unresolved_source_ref" | "deleted_source_ref" | "foreign_source_ref" | "return_without_sessions" | "return_count_mismatch" | "return_sessions_not_one_device" | "return_not_measured";
   ref?: string;
 }
 

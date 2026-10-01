@@ -265,8 +265,8 @@ const PSEUDONYM = /^pp-[0-9a-f]{32}$/;
  *     inherited `attribution`, and a `source_state` of `real` (a served session) or
  *     `simulated` (a rehearsal); SX-46 still asks `real` for provenance, which the Service
  *     writes (the pseudonym, the time, the link);
- *   - `target` only on `click` / `input`, `input_value` only on `input`, a `label` on
- *     exactly the task and milestone kinds;
+ *   - `target` only on `click` / `input`, `input_value` only on `input`, a `label` only on
+ *     the task and milestone kinds (optional there: an undeclared name is not stored);
  *   - a manual record is `external_feedback_received` with one `note_kind`; an external
  *     source names its `locator`, the others do not;
  *   - no identity-like key at any depth (`identity_field`, CR-65).
@@ -311,7 +311,9 @@ function checkParticipantFields(e: Record<string, unknown>): void {
   }
   if (e.input_value !== undefined) check(kind === "input" && typeof e.input_value === "string" && e.input_value.length <= 2000, "invalid_participant_event");
   const labelled = kind === "task_start" || kind === "task_complete" || kind === "milestone";
-  check(labelled ? str(e.label, 80) : e.label === undefined, "invalid_label");
+  // A task or milestone event may carry no label: the Service keeps the fact and drops a name
+  // the experiment did not declare (CR-67). Additive: every older record still reads.
+  check(labelled ? e.label === undefined || str(e.label, 80) : e.label === undefined, "invalid_label");
   check(e.student_text === undefined, "invalid_participant_event");
 }
 

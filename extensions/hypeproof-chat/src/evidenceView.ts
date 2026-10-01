@@ -15,6 +15,8 @@ export interface EvidenceSessionView {
   inputs: number;
   tasks: Record<string, { started: boolean; completed: boolean }>;
   milestones: string[];
+  /** Task and milestone events whose name was not declared: recorded without the name. */
+  unnamed?: number;
 }
 
 export interface EvidenceNoteView {

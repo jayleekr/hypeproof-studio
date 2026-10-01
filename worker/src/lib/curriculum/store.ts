@@ -380,45 +380,65 @@ export async function releaseErasedSession(db: DB, linkId: string, sessionId: st
 }
 
 /**
- * A manual record or draft was added to an experiment: its row's `updated_at` moves, which is
- * when an experiment with no link ends for automatic deletion (`experimentsDueForDeletion`).
+ * A manual record, a draft or a draft review was written for an experiment: its last-record
+ * time moves (`cr_experiment_records`), which counts toward when the experiment ended for
+ * automatic deletion (`experimentsDueForDeletion`). Never moved by a status change.
  */
 export async function touchExperiment(db: DB, experimentId: string, now: number): Promise<void> {
-  await db.prepare("UPDATE cr_experiments SET updated_at = MAX(updated_at, ?) WHERE id = ?").bind(now, experimentId).run();
+  await db
+    .prepare("INSERT INTO cr_experiment_records (experiment_id, last_record_at) VALUES (?, ?) ON CONFLICT(experiment_id) DO UPDATE SET last_record_at = MAX(cr_experiment_records.last_record_at, excluded.last_record_at)")
+    .bind(experimentId, now)
+    .run();
+}
+
+/** The sweep deleted what an experiment that never had a link held: nothing is left to date. */
+export async function forgetExperimentRecords(db: DB, experimentId: string): Promise<void> {
+  await db.prepare("DELETE FROM cr_experiment_records WHERE experiment_id = ?").bind(experimentId).run();
 }
 
 /** Are the curriculum-runtime tables there (migrations 0032 and 0033 applied)? One read of the schema, no table touched. */
 export async function curriculumTablesPresent(db: DB): Promise<boolean> {
-  const r = await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('cr_experiments', 'cr_projects', 'cr_test_links', 'cr_cohort_controls', 'cr_link_rates')").first<{ n: number }>();
-  return Number(r?.n ?? 0) === 5;
+  const names = ["cr_experiments", "cr_projects", "cr_test_links", "cr_cohort_controls", "cr_link_rates", "cr_experiment_records"];
+  const r = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN (${names.map(() => "?").join(", ")})`).bind(...names).first<{ n: number }>();
+  return Number(r?.n ?? 0) === names.length;
 }
 
 /**
  * Experiments whose test data is due for deletion (Jay's decision 6): the experiment ended at
- * least the cohort's period ago and its data has not been deleted yet. An experiment with
- * links ends when every link has ended (revoked, or past its expiry). An experiment with no
- * link can still hold manual records (interview notes and quotes about outside people, an
- * outside alternative observed through notes only), so it is not exempt: it ends at its last
- * record, the row's `updated_at`, which every note and draft moves (`touchExperiment`).
+ * least the cohort's period ago and its data has not been deleted yet. An experiment ends at
+ * the later of its last link's end (revoked, or past its expiry) and its last manual record,
+ * draft or draft review (`touchExperiment`), so a note written after the link ended keeps the
+ * data for the full period from that note. An experiment with a live link has not ended. One
+ * with no link and no record holds nothing to delete and is not due: a planned experiment,
+ * a draft, or one waiting for a later week stays as it is. `had_links` tells the caller whether
+ * the experiment ever ran with participants (the sweep closes only those).
  */
-export async function experimentsDueForDeletion(db: DB, now: number, periodFor: (cohortId: string) => number): Promise<Array<{ experiment: Experiment; project: Project; ended_at: number }>> {
+export async function experimentsDueForDeletion(
+  db: DB,
+  now: number,
+  periodFor: (cohortId: string) => number,
+): Promise<Array<{ experiment: Experiment; project: Project; ended_at: number; had_links: boolean }>> {
   const rows = await db
     .prepare(
-      "SELECT e.doc AS doc, p.doc AS project_doc, CASE WHEN COUNT(l.id) = 0 THEN e.updated_at ELSE MAX(COALESCE(l.revoked_at, l.expires_at)) END AS ended_at, " +
+      "SELECT e.doc AS doc, p.doc AS project_doc, r.last_record_at AS last_record_at, COUNT(l.id) AS links, MAX(COALESCE(l.revoked_at, l.expires_at)) AS link_end, " +
         "MAX(CASE WHEN l.id IS NOT NULL AND l.revoked_at IS NULL AND l.expires_at > ? THEN 1 ELSE 0 END) AS live " +
-        "FROM cr_experiments e JOIN cr_projects p ON p.id = e.project_id LEFT JOIN cr_test_links l ON l.experiment_id = e.id GROUP BY e.id",
+        "FROM cr_experiments e JOIN cr_projects p ON p.id = e.project_id LEFT JOIN cr_experiment_records r ON r.experiment_id = e.id LEFT JOIN cr_test_links l ON l.experiment_id = e.id GROUP BY e.id",
     )
     .bind(now)
-    .all<{ doc: string; project_doc: string; ended_at: number; live: number }>();
-  const out: Array<{ experiment: Experiment; project: Project; ended_at: number }> = [];
+    .all<{ doc: string; project_doc: string; last_record_at: number | null; links: number; link_end: number | null; live: number }>();
+  const out: Array<{ experiment: Experiment; project: Project; ended_at: number; had_links: boolean }> = [];
   for (const r of rows.results ?? []) {
     if (Number(r.live) > 0) continue;
+    const hadLinks = Number(r.links) > 0;
+    const lastRecord = r.last_record_at === null || r.last_record_at === undefined ? null : Number(r.last_record_at);
+    if (!hadLinks && lastRecord === null) continue;
     const experiment = parse<Experiment>(r);
     const project = parse<Project>({ doc: r.project_doc });
     if (!experiment || !project || experiment.data_deleted_at !== undefined) continue;
-    if (now - Number(r.ended_at) >= periodFor(project.cohort_id)) out.push({ experiment, project, ended_at: Number(r.ended_at) });
+    const endedAt = Math.max(hadLinks ? Number(r.link_end) : -Infinity, lastRecord ?? -Infinity);
+    if (now - endedAt >= periodFor(project.cohort_id)) out.push({ experiment, project, ended_at: endedAt, had_links: hadLinks });
   }
-  return out;
+  return out.sort((a, b) => a.ended_at - b.ended_at);
 }
 
 // CR-70 — per-cohort data controls and team ceilings, set by the admin.

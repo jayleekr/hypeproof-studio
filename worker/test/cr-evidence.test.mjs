@@ -10,10 +10,15 @@
 // sample that must pass and a planted defect that must be caught.
 //
 // Run: node --experimental-strip-types --experimental-sqlite test/cr-evidence.test.mjs [--d1]
+//
+// --d1 opens a new local socket per Miniflare round trip, about 15,000 in one run, which stay in
+// TIME_WAIT for about a minute. Another --d1 suite started right after it can then fail with
+// EADDRNOTAVAIL (a false red); wait a minute between them. CI keeps this step last for that reason.
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import vm from "node:vm";
 import { localCurriculum, memoryR2 } from "./harness/curriculum.mjs";
 import { TEST_SECRET } from "./harness/index.mjs";
@@ -40,14 +45,43 @@ async function test(name, fn) {
   }
 }
 
+/**
+ * Local sockets in TIME_WAIT, or null when they cannot be counted. Miniflare opens a new
+ * connection per D1/R2 round trip (its runtime dispatcher sets `reset: true`), so one --d1 run
+ * leaves thousands of them; past the ephemeral port range a call fails with EADDRNOTAVAIL.
+ */
+function socketsWaiting() {
+  try {
+    let n = 0;
+    for (const f of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      try {
+        n += readFileSync(f, "utf8").split("\n").filter((l) => l.split(/\s+/)[4] === "06").length;
+      } catch {}
+    }
+    if (n > 0 || process.platform === "linux") return n;
+    return execFileSync("netstat", ["-an", "-p", "tcp"], { encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter((l) => l.includes("TIME_WAIT")).length;
+  } catch {
+    return null;
+  }
+}
+/** Before a --d1 fixture: let closed sockets drain when many are waiting (at most two minutes). */
+async function drainSockets(limit = 8000) {
+  for (let waited = 0; waited < 120_000; waited += 2000) {
+    const n = socketsWaiting();
+    if (n === null || n < limit) return;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 let mf = null;
 async function fixture(opts = {}) {
   if (!D1_MODE) return localCurriculum(opts);
+  await drainSockets();
   const { createMiniflare } = await import("./harness/miniflare.mjs");
   const compatibilityDate = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
   mf ??= createMiniflare({ modules: true, script: 'export default {fetch(){return new Response("local test")}}', compatibilityDate, d1Databases: ["HPS_DB"], r2Buckets: ["HPS_TRACES"] });
   const db = await mf.getD1Database("HPS_DB");
-  for (const t of ["cr_link_rates", "cr_cohort_controls", "cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
+  for (const t of ["cr_experiment_records", "cr_link_rates", "cr_cohort_controls", "cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
   for (const m of ["0032-curriculum-runtime-publish", "0033-curriculum-runtime-evidence"]) {
     const sql = readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), "utf8");
     for (let i = 0; i < 2; i++) for (const s of sql.replace(/^--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run();
@@ -201,6 +235,11 @@ async function storedEvents(f, s) {
 async function evidence(f, s, token = s.token) {
   const r = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/evidence`, { token });
   return r;
+}
+/** Every key of the Project's record under `sub` (relative keys). */
+async function recordKeys(f, s, sub) {
+  const prefix = `curriculum/${encodeURIComponent(s.project.cohort_id)}/${encodeURIComponent(s.project.id)}/`;
+  return (await f.r2.list({ prefix: prefix + sub })).objects.map((o) => o.key.slice(prefix.length));
 }
 /** Raw records of an experiment by key, with their bytes' sha256 (CR-T26). */
 async function rawHashes(f, s) {
@@ -464,6 +503,8 @@ await test("CR-T25: a draft whose three observed statements cite real events and
   try {
     const s = await withEvidence(f);
     const elsewhere = await withEvidence(f);
+    const sib = await sibling(f, s);
+    const sibSession = (await participant(f, { seed: 140 }).tab().load(sib.url)).cfg.session_id;
     const ev = (await storedEvents(f, s)).find((e) => e.kind === "task_start" && e.participant.session_id === s.sessions[0]);
     const good = [
       { id: "a", section: "observation", text: "세 명 중 둘이 주문하기에서 멈췄다", source_refs: s.sessions.map((x) => `session:${x}`), review: "draft" },
@@ -483,10 +524,11 @@ await test("CR-T25: a draft whose three observed statements cite real events and
       { id: "x1", section: "observation", text: "아무도 주문하지 못했다", source_refs: ["session:ps-" + "f".repeat(32)], review: "draft" },
       { id: "x2", section: "observation", text: "다른 팀 참가자도 멈췄다", source_refs: [`session:${elsewhere.sessions[0]}`], review: "draft" },
       { id: "x3", section: "observation", text: "세 번째 참가자는 포기했다", source_refs: [`session:${s.sessions[2]}`], review: "draft" },
+      { id: "x4", section: "observation", text: "다음 실험 참가자도 멈췄다", source_refs: [`session:${sibSession}`], review: "draft" },
     ];
     const bad = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "ai", items: planted } });
     assert.equal(bad.status, 422, bad.text);
-    assert.deepEqual(bad.json.error.refusals.map((r) => [r.item, r.code]).sort(), [["x1", "unresolved_source_ref"], ["x2", "unresolved_source_ref"], ["x3", "deleted_source_ref"]], "exactly the three planted statements");
+    assert.deepEqual(bad.json.error.refusals.map((r) => [r.item, r.code]).sort(), [["x1", "unresolved_source_ref"], ["x2", "unresolved_source_ref"], ["x3", "deleted_source_ref"], ["x4", "foreign_source_ref"]], "exactly the planted statements (a sibling experiment's session is foreign)");
     // An observed statement with no reference at all is refused as well, and an AI cannot mark its own item reviewed.
     const none = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "ai", items: [{ id: "n", section: "observation", text: "다들 좋아했다", source_refs: [], review: "draft" }] } });
     assert.deepEqual(none.json.error.refusals, [{ item: "n", code: "missing_source_refs" }]);
@@ -583,6 +625,11 @@ await test("CR-T28: the review input builder reads evidence items; chat history 
     assert.ok(input.claims.length >= 2);
     assert.ok(input.claims.every((c) => c.source_refs.length > 0), "every claim cites records");
     assert.ok(input.claims.some((c) => c.source_refs.includes(`note:${s.note.id}`)));
+    // A rejected interpretation never reaches the Weekly Review; the accepted one does.
+    const d = (await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts`, { method: "POST", token: s.token, body: { author: "ai", items: [{ id: "k", section: "interpretation", text: "메뉴 이름이 낯설다", source_refs: [`note:${s.note.id}`], review: "draft" }, { id: "j", section: "interpretation", text: "가격이 비싸서 멈췄다", source_refs: [`note:${s.note.id}`], review: "draft" }] } })).json.draft;
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/drafts/${d.id}/review`, { method: "POST", token: s.token, body: { revision: 1, actions: [{ item: "k", action: "accept" }, { item: "j", action: "reject" }] } })).status, 201);
+    const texts = (await evidence(f, s)).json.evidence.review_input.claims.map((c) => c.text);
+    assert.ok(texts.includes("메뉴 이름이 낯설다") && !texts.includes("가격이 비싸서 멈췄다"), JSON.stringify(texts));
     // Negative control: a builder that reads chat would produce a claim here; this one does not.
     const leaky = (i) => ({ status: "evidence", claims: (i.chat ?? []).map((m) => ({ text: m.content, source_refs: [] })) });
     assert.notDeepEqual(leaky({ chat: [{ content: "x" }] }), chatOnly, "control: a chat-reading builder is told apart");
@@ -656,6 +703,7 @@ await test("CR-T64: deleting a session or an experiment's test data removes even
     assert.equal(all.json.receipt.kind, "experiment_test_data_deleted");
     assert.ok(all.json.receipt.removed.observations >= 1 && all.json.receipt.removed.sessions >= 2, JSON.stringify(all.json.receipt));
     assert.deepEqual(Object.keys(await rawHashes(f, s)), [], "no event, note or session left");
+    assert.deepEqual(await recordKeys(f, s, "pseudonyms/"), [], "no pseudonym index key left");
     const after = (await evidence(f, s)).json.evidence;
     assert.deepEqual([after.sessions.length, after.notes.length, after.drafts.length], [0, 0, 0]);
     assert.equal((await openEntry(f, s.url)).status, 410, "its links are revoked: nothing can bring data back");
@@ -741,8 +789,13 @@ await test("CR-T67: one pseudonym's three sessions over two days give return cou
     assert.ok(runtime.items.some((i) => i.basis === "per_device_pseudonym" && i.source_refs.length === 3), "the observed item cites the three sessions");
     // Undeclared: not measured, never 0.
     const u = await started(f);
-    await sessionsAt(f, u, [t0, t0 + DAY], pp);
+    const uIds = await sessionsAt(f, u, [t0, t0 + DAY], pp);
     assert.deepEqual((await evidence(f, u)).json.evidence.returns, { status: "not_measured", reason: "not_declared" });
+    // ...and a draft cannot store "zero returns" for it either (SX-33): any return basis or count is refused.
+    const zeroItem = { id: "z", section: "observation", text: "같은 기기에서 다시 온 횟수 0번", source_refs: [`session:${uIds[0]}`], review: "draft" };
+    const zero = await f.api(`/v1/curriculum/experiments/${u.experiment.id}/drafts`, { method: "POST", token: u.token, body: { author: "ai", items: [{ ...zeroItem, basis: "per_device_pseudonym", return_count: 0 }] } });
+    assert.deepEqual([zero.status, zero.json?.error?.refusals?.map((x) => x.code)], [422, ["return_not_measured"]], zero.text);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${u.experiment.id}/drafts`, { method: "POST", token: u.token, body: { author: "ai", items: [{ ...zeroItem, text: "첫 세션이 열렸다" }] } })).status, 201, "control: the same session cited without a return claim is stored");
     // Two experiments with the same pseudonym (planted) are never merged: the Service refuses
     // the second experiment's open of a pseudonym already recorded under the first.
     const s2 = await sibling(f, s, { repeated_use: true });
@@ -959,7 +1012,7 @@ await test("CR-T60 server side: an undeclared experiment stores a fresh Service 
   }
 });
 
-await test("CR-T62 labels: a task or milestone label is stored only when the experiment declared it; a page passing typed text as a label stores none of it", async () => {
+await test("CR-T62 labels: a task or milestone label is stored only when the experiment declared it; an undeclared one keeps the event without its name (counted in the evidence read); a page passing typed text as a label stores none of it", async () => {
   const f = await fixture();
   try {
     const undeclared = await started(f, { labels: null });
@@ -976,10 +1029,17 @@ await test("CR-T62 labels: a task or milestone label is stored only when the exp
       assert.deepEqual(leaks(await storedEvents(f, s)), [], "no typed text in the stored events");
       assert.deepEqual(leaks((await evidence(f, s)).json), [], "none in the evidence read");
     }
-    const kinds = (await storedEvents(f, undeclared)).map((e) => e.kind);
-    assert.ok(!kinds.includes("milestone") && !kinds.includes("task_start"), "undeclared: no labelled event is kept");
-    assert.ok(kinds.includes("session_start") && kinds.includes("page_view"), "the rest of the visit is kept");
-    assert.deepEqual((await storedEvents(f, declared)).filter((e) => e.kind === "task_start").map((e) => e.label), ["주문하기"], "positive: the declared label is stored");
+    const stored = await storedEvents(f, undeclared);
+    const labelled = stored.filter((e) => ["milestone", "task_start", "task_complete"].includes(e.kind));
+    // CR-67: the fact of the task start and the milestone survives, its name does not.
+    assert.deepEqual(labelled.map((e) => e.kind).sort(), ["milestone", "task_start", "task_start"], "undeclared: every task and milestone event is kept");
+    assert.ok(labelled.every((e) => e.label === undefined && !/:/.test(e.text)), "undeclared: kept without a name");
+    assert.ok(stored.some((e) => e.kind === "session_start") && stored.some((e) => e.kind === "page_view"), "the rest of the visit is kept");
+    assert.deepEqual((await evidence(f, undeclared)).json.evidence.sessions.map((x) => x.unnamed), [3], "the evidence read counts the unnamed events");
+    assert.deepEqual((await evidence(f, declared)).json.evidence.sessions.map((x) => x.unnamed), [2], "declared experiment: the two typed labels are unnamed, the declared one is not");
+    const direct = participantEvents({ experiment: { id: undeclared.experiment.id, declarations: {} }, sessionId: "ps-" + "1".repeat(32), link: { attribution: { project: undeclared.project.id, experiment: undeclared.experiment.id, product_version: undeclared.version } }, linkId: undeclared.link.id, events: [{ kind: "task_start", seq: 1, label: typed[1] }, { kind: "task_complete", seq: 2, label: typed[1] }], now: 1 });
+    assert.deepEqual([direct.events.map((e) => [e.kind, e.label, e.text]), direct.labels_dropped], [[["task_start", undefined, "task_start"], ["task_complete", undefined, "task_complete"]], 2], "a start and a finish with an undeclared name are both kept, nameless");
+    assert.deepEqual((await storedEvents(f, declared)).filter((e) => e.kind === "task_start" && e.label).map((e) => e.label), ["주문하기"], "positive: the declared label is stored");
     // Negative control: the pre-fix rule (any label of 80 characters) is caught by the same verdict.
     const keepAll = participantEvents({ experiment: { id: declared.experiment.id, declarations: { labels: [typed[0]] } }, sessionId: "ps-" + "0".repeat(32), link: { attribution: { project: declared.project.id, experiment: declared.experiment.id, product_version: declared.version } }, linkId: declared.link.id, events: [{ kind: "milestone", seq: 1, label: typed[0] }], now: 1 });
     assert.notDeepEqual(leaks(keepAll.events), []);
@@ -1129,9 +1189,146 @@ await test("decision 6, manual records: an experiment with no link and only note
     assert.ok((await runCurriculumRetention(env, at + 31 * DAY)).deleted.includes(s.experiment.id));
     assert.equal((await evidence(f, s)).json.evidence.notes.length, 0, "the quote is gone");
     assert.equal(await (await recordOf(f, s)).resolveEvidenceRef(s.experiment.id, `note:${quote.json.note.id}`), "deleted");
+    // It never ran with participants: its status is left alone, not closed, so the student can still record and publish.
+    const after = (await f.api(`/v1/curriculum/projects/${s.project.id}`, { token: s.token })).json.experiments.find((x) => x.id === s.experiment.id);
+    assert.deepEqual([after.status, after.data_deleted_at], ["running", undefined]);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/notes`, { method: "POST", token: s.token, body: INTERVIEW })).status, 201);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000 } })).status, 201);
   } finally {
     f.close();
   }
+});
+
+await test("decision 6, not swept early: an experiment with no link and no record stays running and can still publish a link; a note written after the link ended keeps the data 30 days from that note; a draft and a draft review count as records", async () => {
+  const f = await fixture();
+  try {
+    const DB = f.env.HPS_DB;
+    const now = Date.now();
+    const statusOf = async (x) => (await f.api(`/v1/curriculum/projects/${x.project.id}`, { token: x.token })).json.experiments.find((e) => e.id === x.experiment.id);
+    // A planned experiment (no link, no record) is not due, however long it waits.
+    const planned = await started(f, { noLink: true });
+    assert.ok(!(await runCurriculumRetention(f.env, now + 400 * DAY)).deleted.includes(planned.experiment.id), "nothing to delete: not due");
+    const p = await statusOf(planned);
+    assert.deepEqual([p.status, p.data_deleted_at], ["running", undefined]);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${planned.experiment.id}/links`, { method: "POST", token: planned.token, body: { expires_at: Date.now() + 3600_000 } })).status, 201, "a link can still be published");
+    // A note written after the link ended: the experiment ends at the note, not at the link.
+    const s = await withEvidence(f);
+    await DB.prepare("UPDATE cr_test_links SET revoked_at = ? WHERE experiment_id = ?").bind(now - 25 * DAY, s.experiment.id).run();
+    assert.ok(!(await runCurriculumRetention(f.env, now + 6 * DAY)).deleted.includes(s.experiment.id), "the link ended 31 days earlier, the note 6: kept");
+    assert.equal((await evidence(f, s)).json.evidence.notes.length, 1);
+    assert.ok((await runCurriculumRetention(f.env, now + 31 * DAY)).deleted.includes(s.experiment.id), "30 days after the note: deleted");
+    assert.equal((await statusOf(s)).status, "closed", "it ran with participants: closed with its data deleted");
+    // A draft and a draft review move the last record too.
+    const d = await started(f, { noLink: true });
+    const n = (await f.api(`/v1/curriculum/experiments/${d.experiment.id}/notes`, { method: "POST", token: d.token, body: INTERVIEW })).json.note;
+    const backdate = () => DB.prepare("UPDATE cr_experiment_records SET last_record_at = ? WHERE experiment_id = ?").bind(now - 25 * DAY, d.experiment.id).run();
+    await backdate();
+    const dr = await f.api(`/v1/curriculum/experiments/${d.experiment.id}/drafts`, { method: "POST", token: d.token, body: { author: "user", items: [{ id: "i", section: "interpretation", text: "메뉴가 많다", source_refs: [`note:${n.id}`], review: "draft" }] } });
+    assert.equal(dr.status, 201, dr.text);
+    assert.ok(!(await runCurriculumRetention(f.env, now + 6 * DAY)).deleted.includes(d.experiment.id), "a draft is a record");
+    await backdate();
+    assert.equal((await f.api(`/v1/curriculum/experiments/${d.experiment.id}/drafts/${dr.json.draft.id}/review`, { method: "POST", token: d.token, body: { revision: 1, actions: [{ item: "i", action: "accept" }] } })).status, 201);
+    assert.ok(!(await runCurriculumRetention(f.env, now + 6 * DAY)).deleted.includes(d.experiment.id), "a draft review is a record");
+    // Control: the same backdated record with nothing after it is due.
+    await backdate();
+    assert.ok((await runCurriculumRetention(f.env, now + 6 * DAY)).deleted.includes(d.experiment.id), "control: due without a later record");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-69 races: an event batch in flight while its session is deleted leaves nothing behind (409 session_deleted); deleting the experiment removes an observation stored under it with no task", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f);
+    const page = await participant(f, { seed: 71 }).tab().load(s.url);
+    const sid = page.cfg.session_id;
+    // The Service's bucket, wrapped: the student's delete lands right before the batch's first event write.
+    const bucket = f.env.HPS_TRACES;
+    let armed = true;
+    f.env.HPS_TRACES = {
+      get: (...a) => bucket.get(...a),
+      list: (...a) => bucket.list(...a),
+      delete: (...a) => bucket.delete(...a),
+      head: (...a) => bucket.head(...a),
+      async put(key, value, opts) {
+        if (armed && key.includes("/observations/") && key.includes(sid)) {
+          armed = false;
+          const del = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/sessions/${sid}`, { method: "DELETE", token: s.token });
+          assert.equal(del.status, 200, del.text);
+        }
+        return bucket.put(key, value, opts);
+      },
+    };
+    let ev;
+    try {
+      ev = await f.raw(new URL(`/l/${s.link.id}/__hp/events`, s.url).href, { method: "POST", body: { token: page.cfg.session_token, events: [{ kind: "milestone", seq: 50, label: "x" }] } });
+    } finally {
+      f.env.HPS_TRACES = bucket;
+    }
+    assert.equal(armed, false, "the delete landed inside the batch's write");
+    assert.deepEqual([ev.status, ev.headers.get("x-hp-refusal")], [409, "session_deleted"]);
+    const left = async (match) => [...(await recordKeys(f, s, "observations/")), ...(await recordKeys(f, s, "assignments/"))].filter((k) => k.includes(match));
+    assert.deepEqual(await left(sid), [], "no event or assignment of the deleted session");
+    // An observation a race stored with no task (the pre-fix path) under the experiment's scope.
+    const stray = "ps-" + "7".repeat(32);
+    const built = participantEvents({ experiment: s.experiment, sessionId: stray, link: { attribution: { project: s.project.id, experiment: s.experiment.id, product_version: s.version, link: s.link.id } }, linkId: s.link.id, events: [{ kind: "milestone", seq: 1, label: "x" }], now: Date.now() });
+    const rec = await recordOf(f, s);
+    const r = await rec.appendObservations(PUBLISHED_HOST, { format: "hps-observation/2", scope: s.experiment.id, session: stray, program: "hps-participant/1", events: built.events }, { quota: "none", gaps: false });
+    assert.equal(r.task, null);
+    assert.equal((await left(stray)).length, 2, "control: the stray event and its task-less assignment are there");
+    // The participant path refuses the same write: the session is not open.
+    await assert.rejects(rec.appendObservations(PUBLISHED_HOST, { format: "hps-observation/2", scope: s.experiment.id, session: stray, program: "hps-participant/1", events: built.events }, { quota: "none", gaps: false, participant: true }), /session_not_open/);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}`, { method: "DELETE", token: s.token })).status, 200);
+    assert.deepEqual(await left(stray), [], "the experiment's deletion takes it too");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-65 on the Service: a declared experiment's pseudonym ends with its link; on a new link of the same experiment it gets a fresh pseudonym and is not counted as a return", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f, { declarations: { repeated_use: true } });
+    const pp = "pp-" + "a".repeat(32);
+    const t0 = Date.UTC(2026, 9, 1, 9);
+    await sessionsAt(f, s, [t0, t0 + DAY], pp);
+    const returnsOf = async () => (await evidence(f, s)).json.evidence.returns.devices.filter((d) => d.pseudonym === pp).map((d) => d.return_count);
+    assert.deepEqual(await returnsOf(), [1], "control: on the same link the device's second session is a return");
+    await f.api(`/v1/curriculum/links/${s.link.id}/revoke`, { method: "POST", token: s.token });
+    const b = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/links`, { method: "POST", token: s.token, body: { expires_at: Date.now() + 3600_000 } });
+    assert.equal(b.status, 201, b.text);
+    const [onB] = await sessionsAt(f, s, [t0 + 2 * DAY], pp, { link: b.json.link });
+    assert.deepEqual(await returnsOf(), [1], "the revoked link's pseudonym does not carry over");
+    const link = await (await recordOf(f, s)).sessionLink(PUBLISHED_HOST, onB);
+    assert.ok(link && /^pp-[0-9a-f]{32}$/.test(link.pseudonym) && link.pseudonym !== pp, "the new link's session is kept under a fresh pseudonym");
+  } finally {
+    f.close();
+  }
+});
+
+await test("page paths: a page_view path is stored only when it names one of the version's files; any other path is stored without it", async () => {
+  const f = await fixture();
+  try {
+    const s = await started(f);
+    const page = await participant(f, { seed: 91 }).tab().load(s.url);
+    const views = async () => (await storedEvents(f, s)).filter((e) => e.kind === "page_view" && e.participant.session_id === page.cfg.session_id).map((e) => e.text);
+    const send = (seq, path) => f.raw(new URL(`/l/${s.link.id}/__hp/events`, s.url).href, { method: "POST", body: { token: page.cfg.session_token, events: [{ kind: "page_view", seq, path }] } });
+    assert.equal((await send(89, "/app.js")).status, 204);
+    assert.ok((await views()).includes("page_view: /app.js"), "control: a published file's path is kept");
+    assert.equal((await send(90, "/주문메모-땅콩알레르기")).status, 204);
+    assert.equal((await views()).filter((t) => t === "page_view").length, (await views()).length - 1, "every other view is stored without a path");
+    assert.ok(!JSON.stringify(await storedEvents(f, s)).includes("땅콩"), "the made-up path is not stored");
+  } finally {
+    f.close();
+  }
+});
+
+await test("snippet size: each half of the participant snippet stays under 2 KB", async () => {
+  const size = (x) => new TextEncoder().encode(x).length;
+  assert.ok(size(PARTICIPANT_SNIPPET) < 2048, `session half ${size(PARTICIPANT_SNIPPET)}`);
+  assert.ok(size(PARTICIPANT_EVENTS_SNIPPET) < 2048, `event half ${size(PARTICIPANT_EVENTS_SNIPPET)}`);
+  assert.ok(!(size(PARTICIPANT_EVENTS_SNIPPET + "x".repeat(10)) < 2048), "control: ten more bytes would cross the limit");
 });
 
 if (mf) await mf.dispose();

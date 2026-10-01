@@ -592,6 +592,22 @@ curriculum.get("/experiments/:id/evidence", async (c) => {
   return c.json({ evidence: await experimentEvidence(r.record, r.experiment, Date.now()) });
 });
 
+/**
+ * Was the experiment's test data deleted while this request was writing (CR-69, decision 6)?
+ * A note or draft written after the delete read the experiment would otherwise outlive it in
+ * a fresh task. When it was, what the record holds for the experiment now goes too.
+ */
+async function deletedMeanwhile(c: Ctx, r: { experiment: { id: string }; record: { deleteTask(id: string, input: { by: "user"; at: number }): Promise<unknown> } }): Promise<boolean> {
+  const fresh = await getExperiment(c.env.HPS_DB, r.experiment.id);
+  if (fresh?.data_deleted_at === undefined) return false;
+  try {
+    await r.record.deleteTask(r.experiment.id, { by: "user", at: Date.now() });
+  } catch (e) {
+    if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
+  }
+  return true;
+}
+
 /** A manual record (CR-24): five kinds, the provenance each needs and the student's source state; nothing guessed. */
 curriculum.post("/experiments/:id/notes", async (c) => {
   const s = await student(c);
@@ -617,7 +633,8 @@ curriculum.post("/experiments/:id/notes", async (c) => {
     if (/^(invalid_|missing_|identity_field|ai_text_as_student|unsupported_)/.test(code)) return refuse(c, 400, code);
     throw e;
   }
-  // The experiment's last record moved (when one with no link ends, decision 6).
+  if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
+  // The experiment's last record moved (when it ends for automatic deletion, decision 6).
   await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ note: built.event }, 201);
 });
@@ -660,13 +677,14 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
   }
   let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
   try {
-    saved = await r.record.saveEvidenceDraft(r.experiment.id, draft, { quota: "none" });
+    saved = await r.record.saveEvidenceDraft(r.experiment.id, draft, { quota: "none", repeatedUse: r.experiment.declarations?.repeated_use === true });
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
     if (/^(invalid_|unsupported_|missing_)/.test(code)) return refuse(c, 400, code);
     throw e;
   }
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
+  if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
   await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ draft: saved.draft }, 201);
 });
@@ -694,8 +712,12 @@ curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
   } catch (e) {
     return refuse(c, 400, e instanceof Error ? e.message : "invalid_review");
   }
-  const saved = await r.record.saveEvidenceDraft(r.experiment.id, next, { quota: "none" });
+  if (r.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
+  const now = Date.now();
+  const saved = await r.record.saveEvidenceDraft(r.experiment.id, next, { quota: "none", repeatedUse: r.experiment.declarations?.repeated_use === true });
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
+  if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ draft: saved.draft }, 201);
 });
 

@@ -3189,7 +3189,10 @@
         "extensions/hypeproof-chat/package.json",
         "extensions/hypeproof-chat/webview-ui/src/EvidencePanel.tsx",
         "extensions/hypeproof-chat/webview-ui/src/App.tsx",
-        "extensions/hypeproof-chat/webview-ui/src/styles.css"
+        "extensions/hypeproof-chat/webview-ui/src/styles.css",
+        "extensions/hypeproof-chat/src/publishSession.ts",
+        "extensions/hypeproof-chat/src/publishView.ts",
+        "extensions/hypeproof-chat/webview-ui/src/PublishPanel.tsx"
       ],
       "verification_inputs": [
         "docs/testing/curriculum-runtime-2026-10-02-evidence-capture.md",

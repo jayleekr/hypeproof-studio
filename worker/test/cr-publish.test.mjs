@@ -48,7 +48,7 @@ async function fixture(opts = {}) {
   mf ??= createMiniflare({ modules: true, script: 'export default {fetch(){return new Response("local test")}}', compatibilityDate, d1Databases: ["HPS_DB"] });
   const db = await mf.getD1Database("HPS_DB");
   // cr-evidence (#1394) adds 0033 (per-link rate windows, cohort controls), which the publish routes read too.
-  for (const t of ["cr_link_rates", "cr_cohort_controls", "cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
+  for (const t of ["cr_experiment_records", "cr_link_rates", "cr_cohort_controls", "cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
   for (const m of ["0032-curriculum-runtime-publish", "0033-curriculum-runtime-evidence"]) {
     const sql = readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), "utf8");
     for (let i = 0; i < 2; i++) for (const s of sql.replace(/^--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run();
@@ -544,7 +544,9 @@ const PRD_SAMPLE = { id: "exp_001", project_id: "prj_abc", week: 2, hypothesis_i
 /** Experiment or hypothesis tables outside the Venture Memory storage (migration 0032's cr_* tables). */
 function strayTables(sql) {
   const names = [...sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+([A-Za-z0-9_]+)/gi)].map((m) => m[1]);
-  return names.filter((n) => /experiment|hypothes/i.test(n) && !["cr_experiments", "cr_hypotheses"].includes(n));
+  // cr_experiment_records (cr-evidence, migration 0033) holds one time per experiment (its last
+  // manual record, for decision 6's deletion), never an experiment record or a copy of one.
+  return names.filter((n) => /experiment|hypothes/i.test(n) && !["cr_experiments", "cr_hypotheses", "cr_experiment_records"].includes(n));
 }
 
 await test("CR-T80: the PRD §10.1 sample validates; any one field removed is refused; starting a test stores the hypothesis and one Experiment whose ids resolve; an unresolved hypothesis is refused; no stray table", async () => {

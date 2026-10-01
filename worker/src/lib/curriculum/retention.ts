@@ -2,21 +2,28 @@
 //
 // Decision 6 (2026-10-01): participant records (minors included) keep anonymous ids only, no
 // raw input by default, and are deleted automatically 30 days after the experiment ends, with
-// a per-cohort override (`cr_cohort_controls.retention_days_after_end`). An experiment ends
-// when its last link ended (revoked, or past its expiry); its test data then goes exactly the
-// way the student's delete action takes it (`deleteTask` and its tombstone; links revoked,
-// counters reset, the Experiment record closed with `data_deleted_at`).
+// a per-cohort override (`cr_cohort_controls.retention_days_after_end`). An experiment ends at
+// the later of its last link's end (revoked, or past its expiry) and its last manual record,
+// draft or draft review (store.ts `experimentsDueForDeletion`): a note written after the link
+// ended keeps the data for the full period from that note.
 //
-// An experiment with no link ends at its last manual record or draft (store.ts
-// `experimentsDueForDeletion`): interview notes and quotes about outside people go too.
+// An experiment that ran with participants (it had a link) then goes exactly the way the
+// student's delete action takes it (`deleteTask` and its tombstone; links revoked, counters
+// reset, the Experiment record closed with `data_deleted_at`). One that never had a link and
+// holds only manual records (interview notes and quotes about outside people) has those
+// records deleted, and its status is left alone: it never ran, so it is not closed, and the
+// student can still publish a link for it. One with no link and no record holds nothing and
+// is never due, so an experiment planned for a later week is not touched.
 //
 // Runs on the daily tick, gated on the tables being there, not on a test origin: projects,
 // experiments and notes need no test origin, so a Service without one can still hold manual
 // records. Where migrations 0032/0033 are not applied (production today) one read of the
-// schema answers and nothing else runs.
+// schema answers and nothing else runs. At most `limit` experiments per tick, the longest
+// ended first; one that fails is logged and the rest still run, and the next tick takes
+// what is left.
 
 import type { Env } from "../../env";
-import { allCohortControls, closeExperimentAfterDeletion, curriculumTablesPresent, DEFAULT_RETENTION_DAYS, experimentsDueForDeletion } from "./store";
+import { allCohortControls, closeExperimentAfterDeletion, curriculumTablesPresent, DEFAULT_RETENTION_DAYS, experimentsDueForDeletion, forgetExperimentRecords } from "./store";
 import { participantRecord, type R2Like } from "./participant-record";
 
 const DAY = 24 * 3600_000;
@@ -26,15 +33,24 @@ export async function runCurriculumRetention(env: Env, now: number, limit = 25):
   const controls = await allCohortControls(env.HPS_DB);
   const due = await experimentsDueForDeletion(env.HPS_DB, now, (cohort) => (controls.get(cohort)?.retention_days_after_end ?? DEFAULT_RETENTION_DAYS) * DAY);
   const deleted: string[] = [];
-  for (const { experiment, project } of due.slice(0, limit)) {
-    const record = participantRecord(env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+  let failed = 0;
+  for (const { experiment, project, had_links } of due.slice(0, limit)) {
     try {
-      await record.deleteTask(experiment.id, { by: "user", at: now });
+      const record = participantRecord(env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
+      try {
+        await record.deleteTask(experiment.id, { by: "user", at: now });
+      } catch (e) {
+        if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
+      }
+      if (had_links) await closeExperimentAfterDeletion(env.HPS_DB, experiment, now);
+      else await forgetExperimentRecords(env.HPS_DB, experiment.id);
+      deleted.push(experiment.id);
     } catch (e) {
-      if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
+      failed++;
+      console.error(JSON.stringify({ event: "curriculum_retention_failed", experiment: experiment.id, error: e instanceof Error ? e.message : String(e) }));
     }
-    await closeExperimentAfterDeletion(env.HPS_DB, experiment, now);
-    deleted.push(experiment.id);
   }
+  const left = Math.max(0, due.length - limit) + failed;
+  if (left > 0) console.warn(JSON.stringify({ event: "curriculum_retention_left", due: due.length, deleted: deleted.length, left }));
   return { ran: true, deleted };
 }

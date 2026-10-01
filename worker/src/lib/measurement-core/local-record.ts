@@ -616,6 +616,13 @@ export class LocalRecord {
     }
   }
 
+  /** The keys the named tombstones list (a participant batch reads only its session's and its task's). */
+  async #deletedFor(tombstones: readonly string[]): Promise<Set<string>> {
+    const keys = new Set<string>();
+    for (const k of tombstones) for (const e of (await this.#read<{ evidence: string[] }>(k))?.evidence ?? []) keys.add(e);
+    return keys;
+  }
+
   async #deletedEvidence(): Promise<Set<string>> {
     const keys = new Set<string>();
     for (const k of await this.#keys("deleted/")) for (const e of (await this.#read<{ evidence: string[] }>(k))?.evidence ?? []) keys.add(e);
@@ -692,11 +699,17 @@ export class LocalRecord {
     const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
     // A session erased by `deleteSession` never comes back through a replayed open (CR-69).
     check(!(await this.sessionDeleted(link.host, link.session_id)), "session_deleted");
-    // CR-65: one pseudonym belongs to one experiment. Its index key is written once; a pseudonym
-    // already recorded under another task of this record is refused.
+    // CR-65: one pseudonym belongs to one experiment, and to the one link it was made under (it
+    // ends when that link expires or is revoked). Its index key is written once; a pseudonym
+    // already recorded under another task of this record, or under another link, is refused.
     if (link.pseudonym) {
       const pKey = `pseudonyms/${enc(link.host)}/${link.pseudonym}`;
-      if (!(await this.#write(pKey, { task: taskId }, true, "none"))) check((await this.#read<{ task: string }>(pKey))?.task === taskId, "pseudonym_in_other_experiment");
+      const owner = link.attribution.link ? { task: taskId, link: link.attribution.link } : { task: taskId };
+      if (!(await this.#write(pKey, owner, true, "none"))) {
+        const held = await this.#read<{ task: string; link?: string }>(pKey);
+        check(held?.task === taskId, "pseudonym_in_other_experiment");
+        check(!held?.link || !link.attribution.link || held.link === link.attribution.link, "pseudonym_from_other_link");
+      }
     }
     if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) return { created: true };
     check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
@@ -765,12 +778,22 @@ export class LocalRecord {
        * duplicate, not a conflict.
        */
       sameEvent?: (stored: ObservationEvent, incoming: ObservationEvent) => boolean;
+      /**
+       * A participant session's batch (cr-evidence, CR-69): the session must be linked when the
+       * batch is written (`session_deleted` / `session_not_open` otherwise, nothing written),
+       * only its own and its task's tombstones are read (not every deletion in the record), and
+       * when the session was erased while the batch was being written, what the batch wrote is
+       * removed again and `session_deleted` is thrown.
+       */
+      participant?: boolean;
     } = {},
   ): Promise<{ task: string | null; stored: number; duplicates: number; refused_deleted: number; exclusions: ExclusionNote[]; missing: number[] }> {
     check(text(host, 100), "invalid_host");
     const { batch, missing } = validateObservation(value);
     const task = await this.taskForSession(host, batch.session);
-    const deleted = await this.#deletedEvidence();
+    if (options.participant && task === null) throw new Error((await this.sessionDeleted(host, batch.session)) ? "session_deleted" : "session_not_open");
+    const deleted = options.participant ? await this.#deletedFor([`deleted/sessions/${enc(host)}/${enc(batch.session)}`, `deleted/${task}`]) : await this.#deletedEvidence();
+    const written: string[] = [];
     const base = observationBase(host, batch.scope, batch.session);
     let stored = 0;
     let duplicates = 0;
@@ -799,8 +822,10 @@ export class LocalRecord {
       // `quota: "none"` is for a caller that bounds its own writes (cr-evidence: events per
       // participant session and notes per experiment are capped), so a write costs the same
       // however much the record holds; the default checks the review quota (MC-35).
-      if (await this.#write(key, record, true, options.quota ?? "review")) stored++;
-      else {
+      if (await this.#write(key, record, true, options.quota ?? "review")) {
+        stored++;
+        written.push(key);
+      } else {
         // Duplicate delivery is fine; different content under the same id is never overwritten.
         const existing = await this.#read<ObservationRecord>(key);
         check(existing && (options.sameEvent ? options.sameEvent(existing.event, record.event) : canonicalJson(existing.event) === canonicalJson(record.event)), "conflicting_event");
@@ -808,6 +833,16 @@ export class LocalRecord {
       }
       const first: Assignment = { task, history: [{ from: null, to: task, by: "adapter_explicit", reason: task ? "session_link" : "no_session_link", at: raw.at }] };
       await this.#write(assignmentKey(key), first, true, options.quota ?? "review");
+    }
+    // The session was erased (or its task deleted) while this batch was being written: what the
+    // batch wrote must not outlive it. `deleteTask` also sweeps the task's scope for anything a
+    // race still leaves.
+    if (options.participant && (await this.taskForSession(host, batch.session)) !== task) {
+      for (const k of written) {
+        await this.#remove(k);
+        await this.#remove(assignmentKey(k));
+      }
+      throw new Error("session_deleted");
     }
     // A caller that delivers one session in many small batches (the participant snippet)
     // passes `gaps: false`: each batch's own numbering would report the earlier batches missing.
@@ -1089,8 +1124,11 @@ export class LocalRecord {
    * reference must resolve to a live record of this task, or nothing is written and every
    * refused item is named. A revision > 1 needs its predecessor; a stored revision is never
    * rewritten (MC-22). `quota: "none"` for a caller that bounds drafts per task.
+   * `repeatedUse` is whether the experiment declared repeated-use measurement (CR-72): when it
+   * did not, every session has a fresh pseudonym and returns are not measured, so any item
+   * carrying a return basis or count is refused (`return_not_measured`), zero included.
    */
-  async saveEvidenceDraft(taskId: string, value: unknown, options: { quota?: "review" | "none" } = {}): Promise<{ ok: true; draft: EvidenceDraft } | { ok: false; refusals: DraftRefusal[] }> {
+  async saveEvidenceDraft(taskId: string, value: unknown, options: { quota?: "review" | "none"; repeatedUse?: boolean } = {}): Promise<{ ok: true; draft: EvidenceDraft } | { ok: false; refusals: DraftRefusal[] }> {
     await this.getTask(taskId);
     const draft = validateEvidenceDraftShape(value);
     check(draft.experiment === taskId, "invalid_evidence_draft");
@@ -1099,6 +1137,10 @@ export class LocalRecord {
     // CR-72: a statement counted per device pseudonym is a return count over the sessions it
     // cites; the count, the sessions and their one pseudonym must agree, or it is refused.
     for (const it of draft.items) {
+      if ((it.basis !== undefined || it.return_count !== undefined) && options.repeatedUse !== true) {
+        if (!refusals.some((r) => r.item === it.id)) refusals.push({ item: it.id, code: "return_not_measured" });
+        continue;
+      }
       if (it.basis !== "per_device_pseudonym" || refusals.some((r) => r.item === it.id)) continue;
       const pseudonyms = new Map<string, string | null>();
       for (const ref of it.source_refs) {
@@ -1366,6 +1408,17 @@ export class LocalRecord {
       await this.#remove(oKey);
       await this.#remove(aKey);
       evidence.push(oKey);
+      removed.observations++;
+    }
+    // cr-evidence (CR-69): every observation scoped to the task (participant events and manual
+    // records name their experiment as scope) goes too, whatever its assignment says, so an
+    // event a race stored with no task cannot outlive the experiment's deletion.
+    for (const k of await this.#keys("observations/")) {
+      if (k.split("/")[2] !== enc(taskId)) continue;
+      for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.add(d);
+      await this.#remove(k);
+      await this.#remove(assignmentKey(k));
+      evidence.push(k);
       removed.observations++;
     }
     for (const k of await this.#keys(`interpretations/${taskId}/`)) {

@@ -173,7 +173,8 @@ export default {
           .catch((err) => console.error("classroom-retention crashed:", err)),
       );
       // cr-evidence (#1394; decision 6) — participant test data 30 days (or the cohort's period) after
-      // its experiment ended. A no-op without a configured test origin (the production default).
+      // its experiment ended. Gated on the tables, not on a test origin: a no-op (one sqlite_master
+      // read) until migrations 0032/0033 are applied, which they are not in production yet.
       ctx.waitUntil(
         runCurriculumRetention(env, Date.now())
           .then((r) => { if (r.ran && r.deleted.length) console.log("curriculum-retention", JSON.stringify(r)); })

@@ -145,8 +145,17 @@ export async function openParticipantSession(
   // measurement. Otherwise the Service ignores what the page sent and gives the session a fresh
   // pseudonym of its own, so no two sessions of an undeclared experiment can share one.
   const pseudonym = experiment.declarations?.repeated_use === true ? input.pseudonym : freshPseudonym();
+  const link_ = (p: string | undefined) => record.linkSessionKey(experiment.id, { host: PUBLISHED_HOST, session_id: input.sessionId, by: "adapter_explicit", at: input.at, attribution, ...(p ? { pseudonym: p } : {}) });
   try {
-    const { created } = await record.linkSessionKey(experiment.id, { host: PUBLISHED_HOST, session_id: input.sessionId, by: "adapter_explicit", at: input.at, attribution, ...(pseudonym ? { pseudonym } : {}) });
+    let created: boolean;
+    try {
+      ({ created } = await link_(pseudonym));
+    } catch (e) {
+      // A pseudonym first recorded under another link of this experiment ended with that link
+      // (CR-65): the session is kept, under a fresh pseudonym of the Service's, never as a return.
+      if (!(e instanceof Error) || e.message !== "pseudonym_from_other_link") throw e;
+      ({ created } = await link_(freshPseudonym()));
+    }
     return { ok: true, attribution, created };
   } catch (e) {
     const code = e instanceof Error ? e.message : "";
@@ -225,18 +234,33 @@ export type EventRefusal =
 /** What the stored event says, in words a reviewer reads; never a typed value. */
 /** A page path as the participant snippet sends it: the path under the link, no query string. */
 function describe(kind: ParticipantEventKind, e: { label?: string; target?: { role: string; path: string }; field?: string }, path?: string): string {
-  if (kind === "task_start" || kind === "task_complete" || kind === "milestone") return `${kind}: ${e.label}`;
+  if (kind === "task_start" || kind === "task_complete" || kind === "milestone") return e.label ? `${kind}: ${e.label}` : kind;
   if (kind === "click") return `click: ${e.target!.role} ${e.target!.path}`;
   if (kind === "input") return `input: ${e.field ?? e.target!.path}`;
-  if (kind === "page_view") return `page_view: ${path ?? ""}`.trim();
+  if (kind === "page_view") return path ? `page_view: ${path}` : "page_view";
   return "session_start";
+}
+
+/** A page_view path kept only when it names one of the version's files (or no list was given). */
+function publishedPath(path: unknown, files: ReadonlySet<string> | undefined): string | undefined {
+  if (typeof path !== "string") return undefined;
+  if (!files) return path;
+  let file: string;
+  try {
+    file = decodeURIComponent(path.slice(1));
+  } catch {
+    return undefined;
+  }
+  return files.has(file) ? path : undefined;
 }
 
 /**
  * Turn the snippet's events into stored participant events (CR-23, CR-65, CR-67, CR-74). A task
  * or milestone label is free text the page chose, so it is kept only when the experiment
- * declared that name (`declarations.labels`); an event with any other label (a typed value the
- * page passed as a label) is dropped and counted, never stored. The
+ * declared that name (`declarations.labels`). An event with any other label (a typed value the
+ * page passed as a label, or a name the student did not declare) is kept WITHOUT its label:
+ * the fact that a task started, finished or a milestone was reached survives (CR-67), its
+ * text never does, and the evidence read counts such events per session. The
  * page sends only what happened (kind, sequence, a task label, a clicked element's role and
  * path, an input field); everything that says WHERE it belongs (project, experiment,
  * version, link, channel, variant, pseudonym) is copied from the session the Service
@@ -251,6 +275,11 @@ export function participantEvents(
     linkId: string;
     events: unknown;
     now: number;
+    /**
+     * The version's published file paths. A `page_view` path that is not one of them (a path
+     * the page made up, which could carry typed text) is stored without its path.
+     */
+    pagePaths?: ReadonlySet<string>;
   },
 ): { ok: true; events: ObservationEvent[]; values_dropped: number; labels_dropped: number } | { ok: false; code: EventRefusal } {
   const raw = input.events;
@@ -285,10 +314,8 @@ export function participantEvents(
     if (e.field !== undefined && !str(e.field, 60)) return { ok: false, code: "invalid_event" };
     if (e.value !== undefined && !(typeof e.value === "string" && e.value.length <= 2000)) return { ok: false, code: "invalid_event" };
     if (kind === "page_view" ? !(e.path === undefined || (typeof e.path === "string" && e.path.startsWith("/") && e.path.length <= 300)) : e.path !== undefined) return { ok: false, code: "invalid_event" };
-    if (labelled && !labels.has((e.label as string).trim())) {
-      labelsDropped++;
-      continue;
-    }
+    const named = labelled && labels.has((e.label as string).trim());
+    if (labelled && !named) labelsDropped++;
     const keep = kind === "input" && typeof e.value === "string" && typeof e.field === "string" && declared.has(e.field);
     if (kind === "input" && e.value !== undefined && !keep) dropped++;
     out.push({
@@ -297,7 +324,7 @@ export function participantEvents(
       task: input.experiment.id,
       at: input.now,
       kind,
-      text: describe(kind, e as { label?: string; target?: { role: string; path: string }; field?: string }, typeof e.path === "string" ? e.path : undefined),
+      text: describe(kind, { ...(named ? { label: (e.label as string).trim() } : {}), ...(targeted ? { target: t as { role: string; path: string } } : {}), ...(typeof e.field === "string" ? { field: e.field } : {}) }, publishedPath(e.path, input.pagePaths)),
       actor: "external_user",
       assistance: "unknown",
       evidence_type: "action",
@@ -307,7 +334,7 @@ export function participantEvents(
       participant: { session_id: input.sessionId, ...(pseudonym ? { pseudonym } : {}) },
       attribution: { project: a.project, experiment: a.experiment, product_version: a.product_version, ...(a.link ? { link: a.link } : {}), ...(a.channel ? { channel: a.channel } : {}), ...(a.variant ? { variant: a.variant } : {}) },
       ...(targeted ? { target: { role: (t as { role: string }).role, path: (t as { path: string }).path } } : {}),
-      ...(labelled ? { label: (e.label as string).trim() } : {}),
+      ...(named ? { label: (e.label as string).trim() } : {}),
       ...(keep ? { input_value: e.value as string } : {}),
     });
   }
@@ -328,7 +355,7 @@ export function sameClientEvent(stored: ObservationEvent, incoming: ObservationE
 /** Append one batch of participant events to the experiment's record (constant cost; bounded by the caller). */
 export async function appendParticipantEvents(record: LocalRecord, experimentId: string, sessionId: string, events: ObservationEvent[]): Promise<{ stored: number; duplicates: number; refused_deleted: number }> {
   const batch = { format: OBSERVATION_FORMAT_V2, scope: experimentId, session: sessionId, program: PROGRAM, events };
-  const r = await record.appendObservations(PUBLISHED_HOST, batch, { quota: "none", gaps: false, sameEvent: sameClientEvent });
+  const r = await record.appendObservations(PUBLISHED_HOST, batch, { quota: "none", gaps: false, sameEvent: sameClientEvent, participant: true });
   return { stored: r.stored, duplicates: r.duplicates, refused_deleted: r.refused_deleted };
 }
 

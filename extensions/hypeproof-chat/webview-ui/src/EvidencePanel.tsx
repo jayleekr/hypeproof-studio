@@ -190,6 +190,7 @@ export function EvidencePanel(props: {
                 <li key={s.session_id} data-testid="evidence-session" data-session={s.session_id}>
                   참가 세션 {s.session_id.slice(3, 9)} · {time(s.at)} · 화면 {s.pages} · 누름 {s.clicks}
                   {Object.entries(s.tasks).map(([k, t]) => ` · ${k} ${t.completed ? "마침" : "시작만 함"}`).join("")}
+                  {s.unnamed ? <span data-testid="evidence-session-unnamed"> · 선언하지 않은 과제 이름 {s.unnamed}개는 이름 없이 기록했어요</span> : null}
                   <button type="button" disabled={disabled} data-testid="evidence-delete-session" onClick={() => props.onDelete(exp.id, s.session_id)}>이 세션 지우기</button>
                 </li>
               ))}

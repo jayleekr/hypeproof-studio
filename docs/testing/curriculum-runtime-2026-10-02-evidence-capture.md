@@ -60,6 +60,53 @@ Planted defects for the round, each applied alone, `cr-evidence.test.mjs` run, s
 | R12 | the pseudonym index never refusing | CR-T60 server side, CR-T67 |
 | R13 | the sweep gated on a test origin again | decision 6, decision 6 manual records |
 
+## Review round 2 (2026-10-02)
+
+Findings of the second review applied on the same branch (plan, "Review round 2"). Controls added to `cr-evidence.test.mjs`:
+
+- Decision 6, not swept early: an experiment with no link and no record is not due at +400 days, stays `running` and still issues a link; with the link revoked 25 days back, a note written now keeps the experiment at +6 days and it is deleted (and closed) at +31; a draft and a draft review each move the last record (backdated record with nothing after it: due, the control). The notes-only experiment is deleted at +31 days and left `running`, still taking notes and a link.
+- CR-T62 labels: an undeclared task start, task start and milestone are all stored without a name (no typed text in the events or the evidence read); the evidence read counts them (`unnamed` 3, and 2 in the experiment declaring `주문하기`); a start and a finish with an undeclared name both come out of `participantEvents` nameless.
+- CR-T67: in an undeclared experiment a statement of zero returns (`basis`, `return_count: 0`) → 422 `return_not_measured`; the same session cited without a return claim → 201.
+- CR-69 races: the student's session delete landing inside the batch's first event write → 409 `session_deleted` and no event or assignment of that session left; an observation stored with no task under the experiment's scope (present, the control) is removed by the experiment delete; the participant path refuses the same write (`session_not_open`).
+- CR-65 on the Service: same link, the device's second session is a return (control); after revoking it, the same pseudonym on a new link gets a fresh one and the return count stays 1.
+- Page paths: `/app.js` (a published file) is kept; a made-up path is stored without it.
+- CR-T25 adds a sibling experiment's session (`foreign_source_ref`); CR-T28 rejects one item and checks it is absent from `review_input`; CR-T64 checks no `pseudonyms/` key is left; snippet size checks both halves under 2,048 bytes (event half 2,045).
+
+Planted defects for the round, each applied alone, `cr-evidence.test.mjs` run, source restored (16 of 16 caught):
+
+| | Plant | Red |
+|---|---|---|
+| S1 | an experiment with no link and no record is due | decision 6, not swept early |
+| S2 | the end time from the link only | decision 6, not swept early |
+| S3 | the sweep always closes | decision 6, manual records |
+| S4 | no last-record move on a note | decision 6, manual records; not swept early |
+| S5 | no last-record move on a draft | decision 6, not swept early |
+| S6 | no last-record move on a draft review | decision 6, not swept early |
+| S7 | an undeclared-label event dropped | CR-T62 labels |
+| S8 | the repeated-use declaration ignored for return statements | CR-T67 |
+| S9 | no re-check after a participant batch's writes | CR-69 races |
+| S10 | no scope sweep in `deleteTask` | CR-69 races |
+| S11 | no linked-session check before a participant batch | CR-69 races |
+| S12 | rejected items kept in the review input | CR-T28 |
+| S13 | a sibling experiment's session resolves | CR-T25 |
+| S14 | pseudonym index keys kept on delete | CR-T64 |
+| S15 | a pseudonym accepted from another link | CR-65 on the Service |
+| S16 | any page path kept | page paths |
+
+### Gates for review round 2 (exit codes, on the review-round-2 commit's tree)
+
+| Command | Exit |
+|---|---|
+| `worker`: `npm test` | 0 |
+| `worker`: `node … test/cr-evidence.test.mjs`, `test:cr-evidence:d1`, `test:cr-publish:d1` | 0, 0 (67 s, it waited for sockets to drain; 8,171 in TIME_WAIT after), 0 |
+| `worker`: `npx tsc --noEmit` | 0 |
+| `extensions/hypeproof-chat`: `tsc --noEmit`, `webview-ui` `tsc --noEmit`, `npm run build` | 0, 0, 0 |
+| `extensions/hypeproof-chat`: `npm test` | 1 at `test:instructor-render` only, the environment cause above (`/Users/jaylee/node_modules/react` 19.1.0); the same bundle with `react`/`react-dom` aliased to the webview's copy: 14 of 14 passed. Every smoke, `test:classroom-ops:review` and `test:chalk-tools` passed |
+| `e2e`: `npm run test:cr-evidence`, `npm run test:cr-publish` (Chromium) | 0, 0 |
+| in-app `evidence-app` (gated, idle, screen unlocked; the prepared copy with this tree's extension and webview injected) | 0: 2 passed in 12.7 s |
+| `python3 scripts/next-work.py --check`; `python3 scripts/check-registry.py`; `node --experimental-strip-types worker/test/cr-traceability.test.mjs` | 0, 0, 0 |
+| Harness `align.py check --doc curriculum-runtime` | 1: `BROKEN cr-recon` only, as above |
+
 ## Pre-change tree (`efb27f40`)
 
 `worker/test/cr-evidence.test.mjs` does not load there (`src/routes/curriculum-admin.ts` absent). A probe of the same controls through the pre-change router: the events route 404, notes 404, evidence 404, drafts 404, experiment delete 404, admin controls 404, a link without a variant in a comparison experiment 201 (accepted), the validator refuses a participant kind (`invalid_kind`), and the core exports neither `reviewInput` nor `identityFieldProblems`. Every control above was therefore red before this change.
