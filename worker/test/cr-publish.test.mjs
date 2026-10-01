@@ -22,7 +22,8 @@ const { signSessionToken, verifySessionToken } = await import("../src/lib/curric
 const { PARTICIPANT_SNIPPET } = await import("../src/lib/curriculum/participant-snippet.ts");
 const { participantRecord, openParticipantSession, sessionsByChannel, PUBLISHED_HOST } = await import("../src/lib/curriculum/participant-record.ts");
 const { CURRICULUM_ROUTES, PUBLISH_LIMITS } = await import("../src/routes/curriculum.ts");
-const { CR_SURFACES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
+const { CR_SURFACES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE, CR_TEST_ORIGIN_EVENTS_ROUTE } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
+const { CURRICULUM_ADMIN_ROUTES } = await import("../src/routes/curriculum-admin.ts");
 const { issue, issueIssuer } = await import("../src/lib/tokens.ts");
 const { scrubSecrets } = await import("../src/lib/scrub-secrets.ts");
 const { redactText } = await import("../src/lib/measurement-core/local-record.ts");
@@ -46,9 +47,12 @@ async function fixture(opts = {}) {
   const compatibilityDate = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
   mf ??= createMiniflare({ modules: true, script: 'export default {fetch(){return new Response("local test")}}', compatibilityDate, d1Databases: ["HPS_DB"] });
   const db = await mf.getD1Database("HPS_DB");
-  for (const t of ["cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
-  const sql = readFileSync(new URL("../migrations/0032-curriculum-runtime-publish.sql", import.meta.url), "utf8");
-  for (let i = 0; i < 2; i++) for (const s of sql.replace(/^--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run();
+  // cr-evidence (#1394) adds 0033 (per-link rate windows, cohort controls), which the publish routes read too.
+  for (const t of ["cr_experiment_records", "cr_link_rates", "cr_cohort_controls", "cr_test_links", "cr_experiments", "cr_product_versions", "cr_hypotheses", "cr_projects"]) await db.prepare(`DROP TABLE IF EXISTS ${t}`).run();
+  for (const m of ["0032-curriculum-runtime-publish", "0033-curriculum-runtime-evidence"]) {
+    const sql = readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), "utf8");
+    for (let i = 0; i < 2; i++) for (const s of sql.replace(/^--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run();
+  }
   return localCurriculum({ ...opts, binding: db });
 }
 
@@ -105,7 +109,8 @@ async function openVisit(f, url) {
 // ── CR-T02, Worker half ──────────────────────────────────────────────────────
 
 await test("CR-T02 inventory: the App's switch-off inventory lists every curriculum route the Worker mounts, and the test origin", () => {
-  assert.deepEqual([...CR_SURFACES.workerRoutes].sort(), [...CURRICULUM_ROUTES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE].sort());
+  // cr-evidence (#1394) adds the events route on the test origin and the admin's cohort controls.
+  assert.deepEqual([...CR_SURFACES.workerRoutes].sort(), [...CURRICULUM_ROUTES, CR_TEST_ORIGIN_ROUTE, CR_TEST_ORIGIN_SESSION_ROUTE, CR_TEST_ORIGIN_EVENTS_ROUTE, ...CURRICULUM_ADMIN_ROUTES].sort());
   // Every inventoried /v1 route is really mounted under that method (a planted typo is caught below).
   const src = readFileSync(new URL("../src/routes/curriculum.ts", import.meta.url), "utf8");
   const mounted = [...src.matchAll(/curriculum\.(get|post|put|delete)\("([^"]+)"/g)].map((m) => `${m[1].toUpperCase()} /v1/curriculum${m[2]}`);
@@ -539,7 +544,9 @@ const PRD_SAMPLE = { id: "exp_001", project_id: "prj_abc", week: 2, hypothesis_i
 /** Experiment or hypothesis tables outside the Venture Memory storage (migration 0032's cr_* tables). */
 function strayTables(sql) {
   const names = [...sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+([A-Za-z0-9_]+)/gi)].map((m) => m[1]);
-  return names.filter((n) => /experiment|hypothes/i.test(n) && !["cr_experiments", "cr_hypotheses"].includes(n));
+  // cr_experiment_records (cr-evidence, migration 0033) holds one time per experiment (its last
+  // manual record, for decision 6's deletion), never an experiment record or a copy of one.
+  return names.filter((n) => /experiment|hypothes/i.test(n) && !["cr_experiments", "cr_hypotheses", "cr_experiment_records"].includes(n));
 }
 
 await test("CR-T80: the PRD §10.1 sample validates; any one field removed is refused; starting a test stores the hypothesis and one Experiment whose ids resolve; an unresolved hypothesis is refused; no stray table", async () => {
@@ -980,7 +987,9 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     for (let i = 0; i < VISITS - 2; i++) await openVisit(f, s.url);
     const last = await r2Calls(f, () => openVisit(f, s.url));
     assert.deepEqual(last, first, `R2 calls per visit: first ${JSON.stringify(first)}, ${VISITS}th ${JSON.stringify(last)}`);
-    assert.ok(first.get + first.put + first.list <= 8, `a small constant: ${JSON.stringify(first)}`);
+    // cr-evidence adds two constant steps per open: the erased-session check (one read) and the
+    // pseudonym's one-experiment index (one conditional put: a read and a put).
+    assert.ok(first.get + first.put + first.list <= 11, `a small constant: ${JSON.stringify(first)}`);
     assert.equal(first.list, 0, "no listing on the open path");
     assert.equal(taskBytes(), before, "the task document is not rewritten per open");
     // Starting the next test (the Week-2 experiment) costs the same after 500 sessions.

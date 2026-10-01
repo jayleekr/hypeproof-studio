@@ -55,6 +55,7 @@ export function PublishPanel(props: {
   const [extraFile, setExtraFile] = useState("");
   const [devices, setDevices] = useState<Array<"camera" | "microphone">>([]);
   const [repeatedUse, setRepeatedUse] = useState(false);
+  const [labels, setLabels] = useState("");
   const toggleDevice = (d: "camera" | "microphone", on: boolean) => setDevices((cur) => (on ? [...cur.filter((x) => x !== d), d] : cur.filter((x) => x !== d)));
   const [more, setMore] = useState<Record<string, { channel: string; expiry: number | null }>>({});
   const disabled = props.busy || !view.available;
@@ -70,6 +71,7 @@ export function PublishPanel(props: {
       ...(expiry !== null ? { expires_in_days: expiry } : {}),
       ...(devices.length ? { devices } : {}),
       ...(repeatedUse ? { repeated_use: true } : {}),
+      ...(labels.trim() ? { labels: labels.split("\n").map((s) => s.trim()).filter(Boolean) } : {}),
       manifest: view.version.manifest_added,
     });
 
@@ -155,6 +157,8 @@ export function PublishPanel(props: {
                 <input type="checkbox" checked={repeatedUse} onChange={(e) => setRepeatedUse(e.target.checked)} data-testid="publish-repeated-use" /> 같은 사람이 다시 와서 쓰는지 볼래요
               </label>
               <small>카메라와 마이크는 참가자가 자기 휴대폰에서 직접 허락해야 켜져요.</small>
+              <textarea value={labels} onChange={(e) => setLabels(e.target.value)} placeholder={"앱이 기록할 과제 이름, 한 줄에 하나 (예: 주문)"} aria-label="기록할 과제 이름" rows={2} data-testid="publish-labels" />
+              <small>여기 적은 이름만 기록돼요.</small>
             </fieldset>
             <ExpiryPicker value={expiry} onChange={setExpiry} name="publish-expiry" />
             <button type="button" data-testid="publish-submit" disabled={!canSubmit} onClick={submit}>

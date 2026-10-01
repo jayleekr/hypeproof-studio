@@ -19,7 +19,7 @@ process.env.HPS_QUIET_NO_HIDE ||= "1";
 
 export default defineConfig({
   testDir: here,
-  testMatch: /(app-layer|verify-app|publish-app)\.spec\.ts$/,
+  testMatch: /(app-layer|verify-app|publish-app|evidence-app)\.spec\.ts$/,
   timeout: 300_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,

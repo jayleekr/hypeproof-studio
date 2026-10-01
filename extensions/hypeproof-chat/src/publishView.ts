@@ -59,6 +59,8 @@ export interface PublishForm {
   manifest?: string[];
   devices?: Array<"microphone" | "camera">;
   repeated_use?: boolean;
+  /** Task and milestone names the app reports (`declarations.labels`, cr-evidence): only these are recorded. */
+  labels?: string[];
 }
 
 export const EXPIRY_CHOICES = [1, 3, 7, 14] as const;

@@ -29,6 +29,7 @@ import { authoring } from "./authoring";
 import { chalkCourses } from "./chalk-courses";
 import { chalkRecommend } from "./chalk-recommend";
 import { accessAdmin } from './access';
+import { curriculumAdmin } from './curriculum-admin';
 import { classroomTeacher } from "./classroom";
 import { classroomOpsTeacher, fenceIssuerForDistribution, liftIssuerFence, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
 import { classroomDistributionTeacher } from "./classroom-distribution";
@@ -148,6 +149,8 @@ admin.route("/", authoring);
 admin.route("/", chalkCourses);
 admin.route("/", chalkRecommend);
 admin.route('/', accessAdmin);
+// cr-evidence (#1394; CR-70) — per-cohort data controls; answers as an unknown route with the CR switch off.
+admin.route('/', curriculumAdmin);
 admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);
 admin.route("/", classroomCollectTeacher);

@@ -289,3 +289,170 @@ export function validateReinterpretation(previous: unknown, next: unknown, batch
   check(nxt.id === prev.id && nxt.revision === prev.revision + 1, "invalid_supersedes");
   return nxt;
 }
+
+// ── hps-evidence-draft/1 — Observed / Interpreted / Assumed / Next (cr-evidence; CR-25, CR-26, CR-74) ──
+//
+// The PRD P0-4 evidence draft of one experiment. It lives here, beside hps-interpretation/1,
+// because it is the same kind of thing: a revision ABOUT stored observations that never edits
+// them, whose every observed statement cites real records. It is not an hps-interpretation/1:
+// that contract is bound to exactly one batch (one session) and to capability findings, while
+// a participant-evidence draft spans many participant sessions and the student's notes, and
+// sorts statements into the PRD's four sections. Nothing here produces a number about a
+// person; counts in a statement's text are the runtime's reading of the cited records.
+//
+// A source reference names a record of the SAME experiment's record (local-record.ts
+// `evidenceRefKey` turns it into a key):
+//   session:<participant session id>              a participant session (CR-23)
+//   event:<participant session id>/<event id>     one participant event
+//   note:<event id>                               one manual record (CR-24)
+// Resolution is the store's (`resolve`): a reference to another project's or another
+// experiment's record, to nothing, or to a deleted record does not resolve, and a draft
+// carrying such an item is refused with every refused item named (CR-25, CR-69).
+
+export const EVIDENCE_DRAFT_FORMAT = "hps-evidence-draft/1";
+export const DRAFT_SECTIONS = ["observation", "interpretation", "assumption", "next_experiment"] as const;
+export type DraftSection = (typeof DRAFT_SECTIONS)[number];
+/** An interpretation is a draft until the student reviews it (CR-25, CR-26); `edited` is a reviewed, changed one. */
+export const DRAFT_REVIEW_STATES = ["draft", "accepted", "edited", "rejected"] as const;
+export type DraftReviewState = (typeof DRAFT_REVIEW_STATES)[number];
+export const EVIDENCE_REF = /^(?:session:[A-Za-z0-9_-]{1,100}|event:[A-Za-z0-9_-]{1,100}\/[A-Za-z0-9_.:-]{1,128}|note:[A-Za-z0-9_.:-]{1,128})$/;
+
+export interface DraftItem {
+  id: string;
+  section: DraftSection;
+  text: string;
+  source_refs: string[];
+  review: DraftReviewState;
+  /** Only the person moves an item out of `draft` (MC-22: an AI never reviews itself). */
+  reviewed_by?: "user";
+  /** A comparison claim: the variants it compares (CR-74). Its support is computed on read (`comparisonSupport`), never stored. */
+  compares?: string[];
+  /** Counts in this statement are per device pseudonym, never per person (CR-72). */
+  basis?: "per_device_pseudonym";
+  /**
+   * With `basis`: the return count the statement claims (CR-72), structured so the store can
+   * check it against the cited sessions (sessions cited = return_count + 1, one pseudonym).
+   * Additive (decision 8).
+   */
+  return_count?: number;
+}
+
+export interface EvidenceDraft {
+  format: typeof EVIDENCE_DRAFT_FORMAT;
+  id: string;
+  revision: number;
+  supersedes: null | { id: string; revision: number };
+  reason?: string;
+  experiment: string;
+  /** Who wrote this revision: the runtime's reading of the records, an AI summary, or the student. */
+  author: "runtime" | "ai" | "user";
+  created_at: number;
+  items: DraftItem[];
+}
+
+export type RefResolution = "ok" | "missing" | "deleted" | "foreign";
+
+export interface DraftRefusal {
+  item: string;
+  code: "missing_source_refs" | "unresolved_source_ref" | "deleted_source_ref" | "foreign_source_ref" | "return_without_sessions" | "return_count_mismatch" | "return_sessions_not_one_device" | "return_not_measured";
+  ref?: string;
+}
+
+/**
+ * Shape of a draft revision. Throws a named code for a malformed document; reference
+ * resolution is `draftRefusals`, so a refusal can name every item it refuses.
+ */
+export function validateEvidenceDraftShape(value: unknown): EvidenceDraft {
+  check(object(value) && value.format === EVIDENCE_DRAFT_FORMAT, "unsupported_evidence_draft");
+  forbidKeys(value);
+  check(keysWithin(value, ["format", "id", "revision", "supersedes", "reason", "experiment", "author", "created_at", "items"]), "invalid_draft_fields");
+  check(str(value.id, 100) && /^[A-Za-z0-9_-]+$/.test(String(value.id)) && Number.isSafeInteger(value.revision) && Number(value.revision) >= 1 && Number(value.revision) <= 200, "invalid_revision");
+  if (value.revision === 1) check(value.supersedes === null, "invalid_supersedes");
+  else check(object(value.supersedes) && value.supersedes.id === value.id && value.supersedes.revision === Number(value.revision) - 1 && str(value.reason, 1000), "invalid_supersedes");
+  check(str(value.experiment, 100) && ["runtime", "ai", "user"].includes(String(value.author)) && Number.isFinite(value.created_at), "invalid_evidence_draft");
+  check(Array.isArray(value.items) && value.items.length >= 1 && value.items.length <= 60, "invalid_draft_items");
+  const ids = new Set<string>();
+  for (const it of value.items) {
+    check(object(it) && keysWithin(it, ["id", "section", "text", "source_refs", "review", "reviewed_by", "compares", "basis", "return_count"]), "invalid_draft_item");
+    check(str(it.id, 60) && !ids.has(String(it.id)), "invalid_draft_item");
+    ids.add(String(it.id));
+    check((DRAFT_SECTIONS as readonly string[]).includes(String(it.section)) && str(it.text, 2000), "invalid_draft_item");
+    check(Array.isArray(it.source_refs) && it.source_refs.length <= 50 && it.source_refs.every((r) => typeof r === "string" && EVIDENCE_REF.test(r)), "invalid_source_ref");
+    check((DRAFT_REVIEW_STATES as readonly string[]).includes(String(it.review)), "invalid_review");
+    check(it.review === "draft" ? it.reviewed_by === undefined : it.reviewed_by === "user", "invalid_review");
+    // An AI or the runtime writes drafts; only the student reviews (MC-22).
+    if (value.author !== "user") check(it.review === "draft", "invalid_review");
+    if (it.compares !== undefined) check(Array.isArray(it.compares) && it.compares.length >= 2 && it.compares.length <= 4 && it.compares.every((v) => str(v, 64)) && new Set(it.compares).size === it.compares.length, "invalid_compares");
+    if (it.basis !== undefined) check(it.basis === "per_device_pseudonym", "invalid_draft_item");
+    if (it.return_count !== undefined) check(it.basis === "per_device_pseudonym" && Number.isSafeInteger(it.return_count) && Number(it.return_count) >= 0 && Number(it.return_count) <= 1000, "invalid_draft_item");
+  }
+  return value as unknown as EvidenceDraft;
+}
+
+/**
+ * The items of a draft that may not be stored (CR-25): an observed statement with no
+ * reference, and any statement whose reference does not resolve to a live record of this
+ * experiment. Empty means every reference resolves.
+ */
+export async function draftRefusals(draft: EvidenceDraft, resolve: (ref: string) => Promise<RefResolution>): Promise<DraftRefusal[]> {
+  const out: DraftRefusal[] = [];
+  for (const it of draft.items) {
+    if (it.section === "observation" && it.source_refs.length === 0) {
+      out.push({ item: it.id, code: "missing_source_refs" });
+      continue;
+    }
+    for (const ref of it.source_refs) {
+      const r = await resolve(ref);
+      if (r === "ok") continue;
+      out.push({ item: it.id, ref, code: r === "deleted" ? "deleted_source_ref" : r === "foreign" ? "foreign_source_ref" : "unresolved_source_ref" });
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Is a comparison claim supported (CR-74)? It must cite evidence from every variant it
+ * compares; one that cites only one side is `unsupported`, flagged on read, not refused.
+ */
+export function comparisonSupport(item: Pick<DraftItem, "compares" | "source_refs">, variantOf: (ref: string) => string | null): "supported" | "unsupported" | null {
+  if (!item.compares) return null;
+  const cited = new Set(item.source_refs.map(variantOf).filter((v): v is string => !!v));
+  return item.compares.every((v) => cited.has(v)) ? "supported" : "unsupported";
+}
+
+/**
+ * The student's review of one revision (CR-26): accept, edit or reject items. Returns the
+ * next revision; the previous one and every raw record are untouched (MC-22). Only
+ * `interpretation`, `assumption` and `next_experiment` items take an edit of their text; an
+ * observed statement is the records' reading, so it is accepted or rejected, never rewritten.
+ */
+export function reviseEvidenceDraft(
+  previous: EvidenceDraft,
+  actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }>,
+  input: { at: number; reason: string },
+): EvidenceDraft {
+  check(Array.isArray(actions) && actions.length >= 1 && actions.length <= 60 && str(input.reason, 1000), "invalid_review");
+  const byId = new Map(previous.items.map((i) => [i.id, i]));
+  const next = previous.items.map((i) => ({ ...i, source_refs: [...i.source_refs] }));
+  for (const a of actions) {
+    check(object(a) && byId.has(String(a.item)) && ["accept", "edit", "reject"].includes(String(a.action)), "invalid_review");
+    const item = next.find((i) => i.id === a.item)!;
+    if (a.action === "edit") {
+      check(item.section !== "observation", "observation_not_editable");
+      check(str(a.text, 2000), "invalid_review");
+      item.text = a.text!;
+      item.review = "edited";
+    } else item.review = a.action === "accept" ? "accepted" : "rejected";
+    item.reviewed_by = "user";
+  }
+  return {
+    ...previous,
+    revision: previous.revision + 1,
+    supersedes: { id: previous.id, revision: previous.revision },
+    reason: input.reason,
+    author: "user",
+    created_at: input.at,
+    items: next,
+  };
+}

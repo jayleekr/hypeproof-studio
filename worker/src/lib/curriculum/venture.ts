@@ -9,6 +9,8 @@
 // cr-publish creates Project, Hypothesis, Experiment (CR-39, every PRD §10.1 field),
 // ProductVersion (the R4 published file set) and TestLink. Pure: no env, no storage.
 
+import { identityFieldProblems } from "../measurement-core/learning-events.ts";
+
 export const VENTURE_SCHEMA = "hps-venture/1";
 
 export const HYPOTHESIS_STATUSES = ["open", "supported", "refuted", "revised"] as const;
@@ -54,6 +56,13 @@ export interface ExperimentDeclarations {
   devices?: Device[];
   raw_input?: { fields: string[] };
   variants?: Array<{ id: string; product_version_id?: string; alternative?: string }>;
+  /**
+   * The task and milestone names the app reports through `window.hypeproof.test.task/milestone`
+   * (cr-evidence, CR-23, CR-67; additive per decision 8). A label is free text the page sends,
+   * so only a declared name is stored: an event naming anything else (a typed value passed as a
+   * label) is dropped, never kept.
+   */
+  labels?: string[];
 }
 
 export interface Experiment {
@@ -69,6 +78,13 @@ export interface Experiment {
   product_version_id: string;
   status: ExperimentStatus;
   declarations?: ExperimentDeclarations;
+  /** When the experiment's test data was deleted (cr-evidence, CR-69); absent until then. */
+  data_deleted_at?: number;
+  /**
+   * Set with `data_deleted_at` before the record is scanned and cleared once the scan finished
+   * (cr-evidence, CR-69): a deletion that failed half-way is due again on the next sweep.
+   */
+  data_deletion_pending?: true;
   created_at: number;
 }
 
@@ -167,10 +183,13 @@ export function validateExperimentContract(v: unknown): Validation<Omit<Experime
   return { ok: true, value: out };
 }
 
+/** Task and milestone names one experiment may declare (`declarations.labels`). */
+export const MAX_DECLARED_LABELS = 30;
+
 export function declarationProblems(d: unknown): string[] {
   if (!isObj(d)) return ["invalid:declarations"];
   const problems: string[] = [];
-  for (const k of Object.keys(d)) if (!["repeated_use", "devices", "raw_input", "variants"].includes(k)) problems.push(`invalid:declarations.${k}`);
+  for (const k of Object.keys(d)) if (!["repeated_use", "devices", "raw_input", "variants", "labels"].includes(k)) problems.push(`invalid:declarations.${k}`);
   if (d.repeated_use !== undefined && d.repeated_use !== true) problems.push("invalid:declarations.repeated_use");
   if (d.devices !== undefined) {
     const ds = d.devices;
@@ -179,6 +198,12 @@ export function declarationProblems(d: unknown): string[] {
   if (d.raw_input !== undefined) {
     const r = d.raw_input;
     if (!isObj(r) || !Array.isArray(r.fields) || r.fields.length === 0 || !r.fields.every((x) => str(x, 60))) problems.push("invalid:declarations.raw_input");
+    // CR-65: no name, e-mail or phone field, so an identity-like field is never declared for keeping.
+    else if (identityFieldProblems((r.fields as string[]).map((x) => x.trim())).length) problems.push("invalid:declarations.raw_input");
+  }
+  if (d.labels !== undefined) {
+    const ls = d.labels;
+    if (!Array.isArray(ls) || ls.length === 0 || ls.length > MAX_DECLARED_LABELS || !ls.every((x) => str(x, 80)) || new Set(ls.map((x) => String(x).trim())).size !== ls.length) problems.push("invalid:declarations.labels");
   }
   if (d.variants !== undefined) {
     const vs = d.variants;
@@ -203,7 +228,7 @@ export function publishPathProblem(p: unknown): string | null {
 }
 
 /** A Service-made id: prefix + 16 random hex characters, also a DNS label. */
-export function newVentureId(prefix: "prj" | "hyp" | "exp"): string {
+export function newVentureId(prefix: "prj" | "hyp" | "exp" | "drf" | "note"): string {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
   return `${prefix}-${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;

@@ -61,7 +61,8 @@ export function memoryR2() {
   };
 }
 
-export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGIN, binding, environment = "development" } = {}) {
+/** `r2` replaces the in-memory bucket (cr-evidence: a local workerd R2 in --d1 mode); `adminPassword` enables the /admin gate's Basic-auth fallback. */
+export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGIN, binding, environment = "development", r2: bucket, adminPassword = "cr-admin-pw" } = {}) {
   const app = await bootApp();
   const { getProfile } = await import("../../src/profiles/index.ts");
   const { issue, issueIssuer } = await import("../../src/lib/tokens.ts");
@@ -80,11 +81,12 @@ export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGI
     db.exec("PRAGMA foreign_keys=ON");
     db.exec(readFileSync(new URL("../../schema.sql", import.meta.url), "utf8"));
   }
-  const r2 = memoryR2();
+  const r2 = bucket ?? memoryR2();
   const env = createMockEnv({
     withSession: false,
     withRoster: false,
     environment,
+    adminPassword,
     env: { HPS_DB: binding ?? sqliteBinding(db), HPS_TRACES: r2, ...(testOrigin ? { HPS_TEST_ORIGIN: testOrigin } : {}) },
   });
   const cohort = profile.session.cohort_id;
@@ -107,6 +109,8 @@ export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGI
     return { status: res.status, headers: res.headers, text, bytes, json };
   }
   const api = (path, opts) => raw("https://service.test" + path, opts);
+  /** An /admin call with the dev Basic-auth fallback (cr-evidence CR-T65). */
+  const admin = (path, opts = {}) => raw("https://service.test" + path, { ...opts, headers: { authorization: "Basic " + Buffer.from("admin:" + adminPassword).toString("base64"), ...(opts.headers ?? {}) } });
 
   /** A published file set the way the App sends it: sorted list, R4 digest, base64 bytes. */
   async function fileSet(files, entry = "index.html") {
@@ -132,5 +136,5 @@ export async function localCurriculum({ switchOn = true, testOrigin = TEST_ORIGI
     if (original.other === undefined) delete other.curriculum_runtime;
     else other.curriculum_runtime = original.other;
   };
-  return { app, env, db, r2, profile, other, cohort, otherCohort, student, issuer, api, raw, open, fileSet, upload, setSwitch, close: () => { restore(); db?.close(); } };
+  return { app, env, db, r2, admin, profile, other, cohort, otherCohort, student, issuer, api, raw, open, fileSet, upload, setSwitch, close: () => { restore(); db?.close(); } };
 }

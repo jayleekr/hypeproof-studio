@@ -18,6 +18,7 @@ import { classroomReportsRunner } from "./routes/classroom-reports";
 import { classroomDeliveryWebhooks, classroomReportLinks } from "./routes/classroom-delivery";
 import { curriculum } from "./routes/curriculum";
 import { isTestOriginRequest, testOriginApp } from "./routes/curriculum-test-origin";
+import { runCurriculumRetention } from "./lib/curriculum/retention";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { runClassroomErasureRecovery, runClassroomRetention } from "./lib/classroom-erasure";
@@ -170,6 +171,14 @@ export default {
         runClassroomRetention(env, Date.now())
           .then((r) => { if (r.mode !== "off" || r.problem) console.log("classroom-retention", JSON.stringify(r)); })
           .catch((err) => console.error("classroom-retention crashed:", err)),
+      );
+      // cr-evidence (#1394; decision 6) — participant test data 30 days (or the cohort's period) after
+      // its experiment ended. Gated on the tables, not on a test origin: a no-op (one sqlite_master
+      // read) until migrations 0032/0033 are applied, which they are not in production yet.
+      ctx.waitUntil(
+        runCurriculumRetention(env, Date.now())
+          .then((r) => { if (r.ran && r.deleted.length) console.log("curriculum-retention", JSON.stringify(r)); })
+          .catch((err) => console.error("curriculum-retention crashed:", (err as Error)?.name ?? "error")),
       );
       ctx.waitUntil(
         runD1Backup(env)

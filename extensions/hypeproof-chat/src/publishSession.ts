@@ -308,7 +308,8 @@ export class PublishSession {
     const up = await phase("upload", () => publishTestVersion(client, projectId!, built.set, verification.state === "verified" ? verification.run_id : undefined));
     if (!up.ok) return this.refusal(up);
     const devices = form.devices?.filter((d) => d === "camera" || d === "microphone");
-    const declarations = { ...(form.repeated_use ? { repeated_use: true } : {}), ...(devices?.length ? { devices } : {}) };
+    const labels = [...new Set((form.labels ?? []).map((l) => l.trim()).filter(Boolean))].slice(0, 30);
+    const declarations = { ...(form.repeated_use ? { repeated_use: true } : {}), ...(devices?.length ? { devices } : {}), ...(labels.length ? { labels } : {}) };
     const exp = await phase("experiment", () =>
       curriculumRequest<{ experiment: { id: string } }>(client, "POST", "/experiments", {
         project_id: projectId,

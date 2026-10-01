@@ -18,6 +18,8 @@ import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 import { VerifyPanel } from "./VerifyPanel";
 import { PublishPanel } from "./PublishPanel";
+import { EvidencePanel } from "./EvidencePanel";
+import type { EvidenceView } from "../../src/evidenceView";
 import type { PublishView } from "../../src/publishView";
 import type { VerifyView } from "../../src/verifyView";
 
@@ -42,6 +44,8 @@ interface State {
   verifySend: string | null;
   /** cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden) and its last answer. */
   testPublish: { view: PublishView; error: string | null; errorLines: string[]; shareUrl: string | null } | null;
+  /** cr-evidence — the "실험 증거" panel (null = hidden). */
+  evidence: { view: EvidenceView; error: string | null; done: string | null } | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -68,6 +72,8 @@ type Action =
   | { type: "verifyClose" }
   | { type: "testPublishState"; view: PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
   | { type: "testPublishClose" }
+  | { type: "evidenceState"; view: EvidenceView | null; error?: string; done?: string }
+  | { type: "evidenceClose" }
   | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
@@ -95,6 +101,7 @@ const initialState: State = {
   elementPreview: null,
   verify: null,
   testPublish: null,
+  evidence: null,
   verifyError: null,
   verifySend: null,
   aiNotice: null,
@@ -143,6 +150,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, testPublish: action.view ? { view: action.view, error: action.error ?? null, errorLines: action.errorLines ?? [], shareUrl: action.shareUrl ?? null } : null };
     case "testPublishClose":
       return { ...state, testPublish: null };
+    case "evidenceState":
+      return { ...state, evidence: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
+    case "evidenceClose":
+      return { ...state, evidence: null };
     case "verifySent":
       return { ...state, verifySend: null };
     case "worldOpened":
@@ -262,6 +273,7 @@ export function App() {
         // Every chat view gets the post; only the one whose panel asked sends the sentence.
         case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
         case "publishState": dispatch({ type: "testPublishState", view: msg.view, error: msg.error, errorLines: msg.errorLines, shareUrl: msg.shareUrl }); break;
+        case "evidenceState": dispatch({ type: "evidenceState", view: msg.view, error: msg.error, done: msg.done }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -326,6 +338,21 @@ export function App() {
       onLink={(experimentId, channel, expiresInDays) => postToHost({ type: "publishLink", experimentId, channel, expiresInDays })}
       onRevoke={(linkId) => postToHost({ type: "publishRevoke", linkId })}
       onClose={() => dispatch({ type: "testPublishClose" })}
+    />
+  ) : null;
+
+  const evidencePanel = state.evidence ? (
+    <EvidencePanel
+      view={state.evidence.view}
+      error={state.evidence.error}
+      done={state.evidence.done}
+      busy={!!state.streamId}
+      onSelect={(experimentId) => postToHost({ type: "evidenceOpen", experimentId })}
+      onNote={(experimentId, note) => postToHost({ type: "evidenceNote", experimentId, note })}
+      onDraft={(experimentId) => postToHost({ type: "evidenceDraft", experimentId })}
+      onReview={(experimentId, draftId, revision, actions) => postToHost({ type: "evidenceReview", experimentId, draftId, revision, actions })}
+      onDelete={(experimentId, sessionId) => postToHost({ type: "evidenceDelete", experimentId, ...(sessionId ? { sessionId } : {}) })}
+      onClose={() => dispatch({ type: "evidenceClose" })}
     />
   ) : null;
 
@@ -416,7 +443,7 @@ export function App() {
         messages={messages}
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
-        verifyPanel={verifyPanel || publishPanel ? <>{verifyPanel}{publishPanel}</> : null}
+        verifyPanel={verifyPanel || publishPanel || evidencePanel ? <>{verifyPanel}{publishPanel}{evidencePanel}</> : null}
         sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });

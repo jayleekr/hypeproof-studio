@@ -66,8 +66,9 @@ assert.match(providerSrc, /async pickElement\(\): Promise<void> \{\s*if \(!this\
 assert.match(providerSrc, /async showBrowserResults\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
 assert.match(providerSrc, /async testMyProduct\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
 assert.match(providerSrc, /async publishTestVersion\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
-assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion"], "every CR command is in the inventory the manifest check walks (cr-verify adds testMyProduct, cr-publish publishTestVersion)");
-ok("commands: the pickElement, browserResults, testMyProduct and publishTestVersion handlers re-check the served switch before anything else");
+assert.match(providerSrc, /async experimentEvidence\(\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\)/);
+assert.deepEqual(CR_SURFACES.commands, ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion", "hypeproof-chat.experimentEvidence"], "every CR command is in the inventory the manifest check walks (cr-verify adds testMyProduct, cr-publish publishTestVersion, cr-evidence experimentEvidence)");
+ok("commands: the pickElement, browserResults, testMyProduct, publishTestVersion and experimentEvidence handlers re-check the served switch before anything else");
 
 // ── the listed exception: delete-only, shown only while the person has bytes stored ──
 assert.deepEqual(CR_SURFACES.switchOffWhileStored, ["hypeproof-chat.clearBrowserResultBytes"], "the delete command is in the inventory as the one allowed exception");
@@ -223,6 +224,9 @@ for (const t of CR_SURFACES.webviewMessages) {
   if (t === "removeElementContext") {
     const handler = new RegExp(`case "${t}":[\\s\\S]{0,200}?this\\.clearElementContext\\(\\)`);
     assert.match(providerSrc, handler, `${t} only removes CR state; it has nothing to reach with the switch off`);
+  } else if (t.startsWith("evidence")) {
+    // cr-evidence — every evidence message goes to one handler that checks the switch before anything else.
+    assert.match(providerSrc, new RegExp(`case "${t}":[\\s\\S]{0,300}?await this\\.handleEvidenceMessage\\(msg\\)`), `${t} is handled by handleEvidenceMessage`);
   } else if (t.startsWith("publish")) {
     // cr-publish — every publish message goes to one handler that checks the switch before anything else.
     assert.match(providerSrc, new RegExp(`case "${t}":[\\s\\S]{0,300}?await this\\.handlePublishMessage\\(msg\\)`), `${t} is handled by handlePublishMessage`);
@@ -233,6 +237,7 @@ for (const t of CR_SURFACES.webviewMessages) {
 }
 assert.match(providerSrc, /private async handlePublishMessage\([\s\S]{0,600}?\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\) \{\s*await this\.post\(\{ type: "publishState", view: null/, "the publish handler re-checks the switch first");
 assert.match(providerSrc, /private async handleVerifyMessage\([^)]*\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\) \{\s*await this\.post\(\{ type: "verifyState", view: null/, "the verify handler re-checks the switch first");
+assert.match(providerSrc, /private async handleEvidenceMessage\([\s\S]{0,900}?\): Promise<void> \{\s*if \(!this\.isCurriculumRuntimeEnabled\(\)\) \{\s*await this\.post\(\{ type: "evidenceState", view: null/, "the evidence handler re-checks the switch first");
 // The queue's behaviour is test/cr-host.smoke.mjs; here, that the provider uses it: one
 // writer (attachElementContext), and the turn takes it through the switch.
 assert.equal((providerSrc.match(/this\.elementQueue\.attach\(/g) ?? []).length, 1, "one writer of the element queue");

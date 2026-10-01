@@ -3046,13 +3046,47 @@
       ]
     },
     {
+      "id": "ST-IMP-CR-EVIDENCE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-PUBLISH"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/measurement-core/participant-evidence.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/retention.ts"
+        },
+        {
+          "path": "worker/src/routes/curriculum-admin.ts"
+        },
+        {
+          "path": "worker/migrations/0033-curriculum-runtime-evidence.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/EvidencePanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CR",
       "stage": "test",
       "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-CR",
         "ST-DES-CR",
-        "ST-IMP-CR-PUBLISH"
+        "ST-IMP-CR-PUBLISH",
+        "ST-IMP-CR-EVIDENCE"
       ],
       "sources": [
         {
@@ -3099,6 +3133,21 @@
         },
         {
           "path": "e2e/curriculum-runtime/publish-runtime.real.mjs"
+        },
+        {
+          "path": "worker/test/cr-evidence.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-evidence.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-app.spec.ts"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-runtime.real.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-evidence-capture.md"
         }
       ]
     },

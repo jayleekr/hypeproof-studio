@@ -86,13 +86,16 @@ export interface CrSurfaceInventory {
 export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
 /** The participant snippet opens the visit's session here, once (CR-21). */
 export const CR_TEST_ORIGIN_SESSION_ROUTE = "POST <test-origin>/l/:link/__hp/session";
+/** The participant snippet's events go here (cr-evidence; CR-23). */
+export const CR_TEST_ORIGIN_EVENTS_ROUTE = "POST <test-origin>/l/:link/__hp/events";
 
 export const CR_SURFACES: CrSurfaceInventory = {
-  // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17).
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion"],
+  // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17);
+  // cr-evidence adds the experiment evidence panel (CR-24–CR-27, CR-69).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion", "hypeproof-chat.experimentEvidence"],
   mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
-  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke"],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke", "evidenceOpen", "evidenceNote", "evidenceDraft", "evidenceReview", "evidenceDelete"],
   // cr-verify adds no Worker route. cr-publish adds the Publish for User Test routes
   // (worker/src/routes/curriculum.ts `CURRICULUM_ROUTES`) and the test origin's.
   workerRoutes: [
@@ -107,6 +110,16 @@ export const CR_SURFACES: CrSurfaceInventory = {
     "POST /v1/curriculum/links/:id/revoke",
     CR_TEST_ORIGIN_ROUTE,
     CR_TEST_ORIGIN_SESSION_ROUTE,
+    // cr-evidence: participant evidence, manual records, drafts, deletion, and the admin's cohort controls.
+    "GET /v1/curriculum/experiments/:id/evidence",
+    "POST /v1/curriculum/experiments/:id/notes",
+    "POST /v1/curriculum/experiments/:id/drafts",
+    "POST /v1/curriculum/experiments/:id/drafts/:draft/review",
+    "DELETE /v1/curriculum/experiments/:id",
+    "DELETE /v1/curriculum/experiments/:id/sessions/:sid",
+    CR_TEST_ORIGIN_EVENTS_ROUTE,
+    "GET /admin/curriculum/cohorts/:cohort/controls",
+    "PUT /admin/curriculum/cohorts/:cohort/controls",
   ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };

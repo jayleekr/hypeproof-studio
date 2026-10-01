@@ -52,6 +52,8 @@ export const COMPONENTS = {
   // VerifyView the host computed and never decides "검증됨" itself.
   VerifyPanel: { from: "./src/VerifyPanel.tsx", exportName: "VerifyPanel" },
   PublishPanel: { from: "./src/PublishPanel.tsx", exportName: "PublishPanel" },
+  // cr-evidence (#1394) — the experiment evidence panel.
+  EvidencePanel: { from: "./src/EvidencePanel.tsx", exportName: "EvidencePanel" },
 };
 
 /**

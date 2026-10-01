@@ -1573,3 +1573,19 @@ html, body, #root {
 .hps-publish-declare { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); padding: 6px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .hps-publish-declare legend { padding: 0 4px; font-size: 12px; }
 .hps-publish-declare small { flex-basis: 100%; opacity: .8; }
+/* cr-evidence — the "실험 증거" panel (#1394). */
+.hps-evidence { border: 1px solid var(--vscode-panel-border, #8884); border-radius: 6px; padding: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.hps-evidence > header { display: flex; align-items: center; gap: 8px; }
+.hps-evidence > header button { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; }
+.hps-evidence ul { margin: 0; padding-left: 16px; }
+.hps-evidence-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.hps-evidence-section { font-weight: 600; margin-top: 4px; }
+.hps-evidence-claim { background: none; border: none; padding: 0; color: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; font: inherit; }
+.hps-evidence-claim:disabled { text-decoration: none; cursor: default; }
+.hps-evidence-meta { opacity: 0.8; font-size: 11px; margin-left: 4px; }
+.hps-evidence-sources { border-left: 2px solid var(--vscode-panel-border, #8884); margin: 2px 0 4px; }
+.hps-evidence-sources [data-state]:not([data-state="ok"]) { color: var(--vscode-errorForeground, #c62828); }
+.hps-evidence-review, .hps-evidence-note, .hps-evidence-records { display: flex; flex-wrap: wrap; gap: 4px; }
+.hps-evidence-note textarea, .hps-evidence-note input, .hps-evidence-note select { width: 100%; box-sizing: border-box; }
+.hps-evidence-variants { border-collapse: collapse; }
+.hps-evidence-variants td, .hps-evidence-variants th { border: 1px solid var(--vscode-panel-border, #8884); padding: 2px 4px; text-align: left; }

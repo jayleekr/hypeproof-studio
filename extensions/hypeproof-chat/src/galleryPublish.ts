@@ -223,7 +223,7 @@ const CURRICULUM_MESSAGES: Record<string, string> = {
   unknown_variant: "고른 비교 버전이 이 실험에 없어요.",
 };
 
-export async function curriculumRequest<T>(input: { base: string; token: string; fetchImpl?: typeof fetch }, method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<CurriculumResult<T>> {
+export async function curriculumRequest<T>(input: { base: string; token: string; fetchImpl?: typeof fetch }, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<CurriculumResult<T>> {
   const doFetch = input.fetchImpl ?? fetch;
   let res: Response;
   try {
