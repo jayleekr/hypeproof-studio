@@ -62,6 +62,8 @@ const failuresInText = (text) => {
   }
   return out;
 };
+/** Every console/error record line of a tool result as the model read it, unparsed (CR-08 raw). */
+const recordLines = (text) => text.split("\n").filter((l) => /^- \[(console|exception|network|log)\//.test(l));
 const blocks = (content) => (typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : []);
 const textOf = (content) => blocks(content).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 
@@ -79,15 +81,16 @@ function agent(body) {
   const userText = start >= 0 ? textOf(msgs[start].content) : "";
   const images = start >= 0 ? blocks(msgs[start].content).filter((b) => b.type === "image").length : 0;
   state.requests.push({ at: Date.now(), tools: (body.tools ?? []).map((t) => t.name), userText, images, system: JSON.stringify(body.system ?? "").slice(0, 200000) });
+  if (/\[cr:again\]/.test(userText)) return again(msgs.slice(start + 1));
   const scenario = /\[cr:flow(?::([a-z0-9-]+))?\]/.exec(userText);
   if (!scenario) return { text: "[로컬 시험 응답] 받았어요." };
   const plant = scenario[1] ?? "";
   const key = plant || "clean";
   const after = msgs.slice(start + 1);
   const round = after.filter((m) => m.role === "assistant").length;
-  const run = (state.runs[key] ??= { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: [] });
+  const run = (state.runs[key] ??= { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: [], lines: [] });
   if (round === 0) {
-    Object.assign(run, { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: ["navigate"] });
+    Object.assign(run, { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: ["navigate"], lines: [] });
     const origin = /http:\/\/127\.0\.0\.1:\d+/.exec(JSON.stringify(body.system ?? "") + JSON.stringify(msgs))?.[0];
     if (!origin) return finish(run, 0, "미리보기 주소를 받지 못했어요");
     return { tool: "browser_navigate", input: { url: `${origin}/index.html${plant ? `?plant=${plant}` : ""}` } };
@@ -95,6 +98,7 @@ function agent(body) {
   const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
   const resultText = textOf(last?.content);
   run.results.push({ round, isError: last?.is_error === true, head: resultText.slice(0, 300) });
+  for (const line of recordLines(resultText)) run.lines.push({ round, line });
   for (const f of failuresInText(resultText)) if (!run.failures.some((g) => g.message === f.message)) run.failures.push(f);
   const stepDone = round - 1; // round 1 answers the navigate; round k+1 answers step k
   if (last?.is_error === true || !resultText) return finish(run, Math.max(stepDone, 1), "도구 실패");
@@ -108,6 +112,34 @@ function agent(body) {
   // record's "단계 N" names actions[N-1]; the spec maps it back to the flow step.
   run.actions.push(step.target[1]);
   return { tool: step.name, input: { ref, ...(step.value ? { value: step.value } : {}) } };
+}
+/**
+ * CR-08 across requests: a request that does NOT navigate. It observes the document the
+ * previous request left (no browser_navigate, so the executor and its records survive),
+ * then clicks the one button still on screen. Every record of the earlier request must
+ * read "이전 요청", never a step of this request.
+ */
+function again(after) {
+  const round = after.filter((m) => m.role === "assistant").length;
+  const run = (state.runs.again ??= { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: [], lines: [] });
+  if (round === 0) {
+    Object.assign(run, { failedAt: null, failures: [], steps: 0, done: false, results: [], actions: [], lines: [] });
+    return { tool: "browser_observe", input: {} };
+  }
+  const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  const resultText = textOf(last?.content);
+  run.results.push({ round, isError: last?.is_error === true, head: resultText.slice(0, 300) });
+  for (const line of recordLines(resultText)) run.lines.push({ round, line });
+  for (const f of failuresInText(resultText)) run.failures.push(f);
+  if (last?.is_error === true || !resultText) return finish(run, round, "도구 실패");
+  if (round === 1) {
+    const ref = refOf(resultText, "button", "도움말 보기");
+    if (!ref) return finish(run, 1, "도움말 보기 요소를 찾지 못함");
+    run.actions.push("도움말 보기");
+    return { tool: "browser_click", input: { ref } };
+  }
+  run.steps = 1;
+  return finish(run, null, "끝까지 됨");
 }
 function finish(run, failedAt, why) {
   run.failedAt = failedAt;

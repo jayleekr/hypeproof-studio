@@ -142,6 +142,23 @@ export type ResultBlob = { media_type: BlobMediaType; base64?: string; json?: un
  */
 export type BlobSink = (blobs: readonly ResultBlob[]) => Promise<Array<string | null>>;
 
+/**
+ * Events a result may still need after its bytes are checked for room: its own
+ * tool_result plus what the turn records while the bytes are written.
+ */
+export const CR_RESULT_EVENT_HEADROOM = 8;
+
+/**
+ * The turn's sink, refused (every digest null, nothing stored) once the turn's recorder
+ * cannot take the result's event: bytes are written before their event, and a full
+ * recorder refuses that event (observation_capacity), which would leave stored bytes no
+ * event names. `hasRoom(n)` is the recorder's own check.
+ */
+export function roomGuardedSink(sink: BlobSink | undefined, hasRoom: ((n: number) => boolean) | undefined): BlobSink | undefined {
+  if (!sink || !hasRoom) return undefined;
+  return (blobs) => (hasRoom(CR_RESULT_EVENT_HEADROOM) ? sink(blobs) : Promise.resolve(blobs.map(() => null)));
+}
+
 /** One browser result as its `tool_result` event: readable text plus the reference keys. */
 export interface CrResultEvent {
   text: string;
@@ -270,7 +287,7 @@ export class SdkCrResults {
 // ── CR-10: the stored results, read back and labelled by version ────────────
 
 export interface CrResultItem {
-  /** e.g. "이전 버전 · sha256:1a2b3c4d" — what the list shows first. */
+  /** e.g. "이전 버전 · 버전 1" — what the list shows first. */
   label: string;
   description: string;
   detail: string;
@@ -284,6 +301,20 @@ export interface CrResultItem {
 const STATE_LABEL = { current: "현재 버전", earlier: "이전 버전", unknown: "버전 확인 안 됨" } as const;
 
 /**
+ * Versions numbered per entry page in the order they were first seen ("버전 1", "버전 2"),
+ * instead of a digest prefix a student cannot read.
+ */
+function versionNumbers(records: readonly BrowserResultRecord[]): (entry: string, version: string) => number {
+  const byEntry = new Map<string, string[]>();
+  for (const r of [...records].sort((a, b) => a.at - b.at)) {
+    const seen = byEntry.get(r.artifact_entry) ?? [];
+    if (!seen.includes(r.artifact_version)) seen.push(r.artifact_version);
+    byEntry.set(r.artifact_entry, seen);
+  }
+  return (entry, version) => (byEntry.get(entry)?.indexOf(version) ?? -1) + 1;
+}
+
+/**
  * Every browser result on a stored batch, newest first, each labelled with the version it
  * was taken against compared with the version its page is at now (`currentByEntry`; null
  * when the preview is off or the page is gone). Reads only what the record holds.
@@ -293,13 +324,14 @@ export function crResultHistory(
   currentByEntry: (entry: string) => string | null,
 ): CrResultItem[] {
   const records = events.map((e) => readBrowserResultEvent(e)).filter((r): r is BrowserResultRecord => r !== null);
+  const numberOf = versionNumbers(records);
   return labelByVersion(records, currentByEntry)
     .sort((a, b) => b.record.at - a.record.at)
     .map(({ record: r, version, label }) => {
       // The same failure rule the agent reports by (failuresOf, CR-08).
       const errors = r.records.filter((x) => x.kind === "exception" || x.kind === "network" || x.level === "error" || x.level === "assert");
       return {
-        label: `${STATE_LABEL[label]} · ${version.slice(0, 15)}`,
+        label: `${STATE_LABEL[label]} · 버전 ${numberOf(r.artifact_entry, version)}`,
         description: `${r.tool.replace(/^mcp__hypeproof__/, "")} · ${r.route || r.url}${r.step === null ? "" : ` · ${r.step}단계`}`,
         detail: errors.length ? `오류 ${errors.length}건: ${errors[0]!.message.slice(0, 120)}` : "기록된 오류 없음",
         version,
@@ -308,6 +340,52 @@ export function crResultHistory(
         at: r.at,
       };
     });
+}
+
+/** One row of the results command, vscode-free (the provider maps it to a QuickPickItem). */
+export type CrResultsRow =
+  | { kind: "result"; label: string; description: string; detail: string; item: CrResultItem }
+  | { kind: "separator" }
+  | { kind: "clear"; label: string; description: string; detail: string };
+
+export const CR_CLEAR_LABEL = "$(trash) 저장된 화면·동작 기록 지우기";
+
+/**
+ * Context key: browser-result bytes are stored on this seat's local record. It gates the
+ * delete command (CR_BYTES_CLEAR_COMMAND) and deliberately NOT the CR switch: after a
+ * cohort or tier change turns the switch off, the stored screenshots of the student's pages
+ * must still be visible and deletable (MC-27), while every CR surface stays hidden (CR-02).
+ */
+export const CR_BYTES_CONTEXT_KEY = "hypeproof-chat.crBrowserBytesStored";
+export const CR_BYTES_CLEAR_COMMAND = "hypeproof-chat.clearBrowserResultBytes";
+
+/**
+ * What the results command shows (switch on): the results, then a delete row when bytes
+ * are stored. `notice` replaces the list when there is nothing to show.
+ */
+export function crResultsMenu(input: { items: readonly CrResultItem[]; stored: number }): { notice: string | null; rows: CrResultsRow[] } {
+  const stored = Math.max(0, Math.floor(input.stored || 0));
+  if (!input.items.length && !stored) return { notice: "아직 기록된 실험 브라우저 결과가 없어요.", rows: [] };
+  const rows: CrResultsRow[] = input.items.map((item) => ({ kind: "result", label: item.label, description: item.description, detail: item.detail, item }));
+  if (stored) {
+    if (rows.length) rows.push({ kind: "separator" });
+    rows.push({ kind: "clear", label: CR_CLEAR_LABEL, description: `${stored}개`, detail: "이 컴퓨터에 저장된 실험 브라우저 화면과 동작 기록을 모두 지워요. 결과 목록은 남아요." });
+  }
+  return { notice: null, rows };
+}
+
+/**
+ * The student deletes every stored browser-result byte, only after confirming with
+ * "지우기"; anything else (Escape, closing the dialog) deletes nothing.
+ */
+export async function clearStoredResults(
+  stored: number,
+  confirm: (message: string) => Promise<string | undefined>,
+  remove: () => Promise<{ removed: number }>,
+): Promise<{ removed: number } | null> {
+  const ok = await confirm(`저장된 실험 브라우저 화면과 동작 기록 ${stored}개를 지울까요? 되돌릴 수 없어요.`);
+  if (ok !== "지우기") return null;
+  return remove();
 }
 
 /** The distinct entry pages the stored results were taken on (to look up their current version). */

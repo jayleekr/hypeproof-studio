@@ -60,6 +60,10 @@ import {
   crResultHistory,
   crResultEntries,
   assessmentBatch,
+  roomGuardedSink,
+  crResultsMenu,
+  clearStoredResults,
+  CR_BYTES_CONTEXT_KEY,
   type BlobSink,
 } from "./crHostWiring";
 import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
@@ -482,8 +486,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
     });
     this.crBlobWrites = next;
+    void next.then((digests) => { if (digests.some((d) => d !== null)) void this.refreshCrBytesContext(); });
     return next;
   };
+  /**
+   * CR-10 — mirror "browser-result bytes are stored" to CR_BYTES_CONTEXT_KEY, which shows
+   * the delete command whatever the CR switch says (MC-27). Called at start-up, after bytes
+   * are stored and after they are deleted. Returns the stored count (0 when unreadable).
+   */
+  async refreshCrBytesContext(): Promise<number> {
+    let stored = 0;
+    try {
+      stored = (await this.crRecordHandle().record.records()).browser_results.stored;
+    } catch {
+      stored = 0;
+    }
+    void vscode.commands.executeCommand("setContext", CR_BYTES_CONTEXT_KEY, stored > 0);
+    return stored;
+  }
   /** CR-09 — the element the student picked for the NEXT turn, until sent or removed. */
   private readonly elementQueue = new ElementQueue();
   /** CR-09 — a pick is waiting for the student's click; a second one is refused, not stacked. */
@@ -821,19 +841,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const items = crResultHistory(events, (entry) => current.get(entry) ?? null);
     // What the record holds, so stored screenshots are never invisible (MC-27).
-    let stored = 0;
-    try {
-      stored = (await this.crRecordHandle().record.records()).browser_results.stored;
-    } catch {
-      stored = 0;
-    }
-    if (!items.length && !stored) {
-      this.postPageNotice("아직 기록된 실험 브라우저 결과가 없어요.");
+    const stored = await this.refreshCrBytesContext();
+    const menu = crResultsMenu({ items, stored });
+    if (menu.notice) {
+      this.postPageNotice(menu.notice);
       return;
     }
     type Pick = vscode.QuickPickItem & { item?: (typeof items)[number]; clear?: true };
-    const rows: Pick[] = items.map((item) => ({ label: item.label, description: item.description, detail: item.detail, item }));
-    if (stored) rows.push({ label: "", kind: vscode.QuickPickItemKind.Separator }, { label: "$(trash) 저장된 화면·동작 기록 지우기", description: `${stored}개`, detail: "이 컴퓨터에 저장된 실험 브라우저 화면과 동작 기록을 모두 지워요. 결과 목록은 남아요.", clear: true });
+    const rows: Pick[] = menu.rows.map((r): Pick =>
+      r.kind === "separator" ? { label: "", kind: vscode.QuickPickItemKind.Separator }
+      : r.kind === "clear" ? { label: r.label, description: r.description, detail: r.detail, clear: true }
+      : { label: r.label, description: r.description, detail: r.detail, item: r.item });
     const picked = await vscode.window.showQuickPick(rows, { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" });
     if (picked?.clear) {
       await this.clearBrowserResultBytes(stored);
@@ -861,22 +879,37 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.postPageNotice(`${picked.item.label} 화면을 다음 메시지에 붙였어요.`);
   }
 
+  /**
+   * CR-10 — the delete command (CR_BYTES_CLEAR_COMMAND). Deliberately NOT gated on the CR
+   * switch: it deletes what an earlier switch-on stored, so it must work after the switch
+   * goes off (cohort or tier change). It shows nothing of the results, only the count.
+   */
+  async clearStoredBrowserResults(): Promise<void> {
+    const stored = await this.refreshCrBytesContext();
+    if (!stored) {
+      this.postPageNotice("이 컴퓨터에 저장된 실험 브라우저 화면이 없어요.");
+      return;
+    }
+    await this.clearBrowserResultBytes(stored);
+  }
+
   /** CR-10 — the student deletes the stored browser-result bytes (screenshots, action traces). */
   private async clearBrowserResultBytes(stored: number): Promise<void> {
-    const ok = await vscode.window.showWarningMessage(
-      `저장된 실험 브라우저 화면과 동작 기록 ${stored}개를 지울까요? 되돌릴 수 없어요.`,
-      { modal: true },
-      "지우기",
-    );
-    if (ok !== "지우기") return;
     try {
-      await this.crBlobWrites.catch(() => undefined);
-      const { store, record } = this.crRecordHandle();
-      const { removed } = await store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now() }));
-      this.postPageNotice(`저장된 화면·동작 기록 ${removed}개를 지웠어요.`);
+      const out = await clearStoredResults(
+        stored,
+        (message) => Promise.resolve(vscode.window.showWarningMessage(message, { modal: true }, "지우기")),
+        async () => {
+          await this.crBlobWrites.catch(() => undefined);
+          const { store, record } = this.crRecordHandle();
+          return store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now() }));
+        },
+      );
+      if (out) this.postPageNotice(`저장된 화면·동작 기록 ${out.removed}개를 지웠어요.`);
     } catch {
       this.postPageNotice("기록을 지우지 못했어요. 다른 창에서 기록을 쓰는 중이면 잠시 뒤에 다시 해 주세요.");
     }
+    await this.refreshCrBytesContext();
   }
 
   /** Queue a picked element for the NEXT turn and show the student exactly what goes. */
@@ -3049,7 +3082,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // CR-10 — the element capture is a browser result bound to its artifact version; its
     // bytes are stored first, and the turn's end waits for it (observationCaptures).
     // Bytes are stored only when a recorder will write the event that names them.
-    const turnBlobSink = observation ? this.crBlobSink : undefined;
+    const turnBlobSink = roomGuardedSink(this.crBlobSink, observation ? (n) => observation.hasRoom(n) : undefined);
     if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, turnBlobSink));
     const messageId = randomId();
     const ctrl = new AbortController();
@@ -3211,7 +3244,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
       };
       // CR-10 — SDK tool ids of the delegated browser tools whose results carry an observation.
-      this.crSdkResults.reset(observation ? this.crBlobSink : undefined);
+      this.crSdkResults.reset(turnBlobSink);
       this.mcpBrowser?.crNewTurn();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         if (a.kind==='tool_use') this.crSdkResults.onToolUse(a.id, a.name, this.isCurriculumRuntimeEnabled());

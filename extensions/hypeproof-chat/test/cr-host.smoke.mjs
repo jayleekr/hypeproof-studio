@@ -178,13 +178,13 @@ await test("CR-10 positive: a proxy call, an SDK tool_result and a pick each put
   assert.ok(local.calls.every((n) => n === 2), `each result's bytes in one sink call: ${local.calls}`);
   // The provider calls these for each path, with its sink, and the turn's end waits for them.
   assert.match(providerSrc, /this\.crSdkResults\.onInspect\(name, input, r\.observation\);/);
-  assert.match(providerSrc, /this\.crSdkResults\.reset\(observation \? this\.crBlobSink : undefined\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.reset\(turnBlobSink\);/);
   assert.match(providerSrc, /const crResult = this\.crSdkResults\.onToolResult\(a\.id, a\.isError\);/);
   assert.match(providerSrc, /if \(crResult\) observationCaptures\.push\(crResult\.then\(\(r\) => recordObservation\('tool_result', r\.text, \{ \.\.\.r\.refs, tool_id: a\.id/);
   assert.match(providerSrc, /this\.crSdkResults\.onToolUse\(a\.id, a\.name, this\.isCurriculumRuntimeEnabled\(\)\)/);
   assert.match(providerSrc, /const recording = recordProxyCrResult\(p\.recordObservation, call\.id, fixed\.call\.name, fixed\.call\.input \?\? \{\}, tr\.observation, p\.blobSink\);\s*if \(p\.trackObservation\) p\.trackObservation\(recording\);/);
   assert.match(providerSrc, /trackObservation: \(q\) => observationCaptures\.push\(q\),/);
-  assert.match(providerSrc, /const turnBlobSink = observation \? this\.crBlobSink : undefined;/);
+  assert.match(providerSrc, /const turnBlobSink = roomGuardedSink\(this\.crBlobSink, observation \? \(n\) => observation\.hasRoom\(n\) : undefined\);/);
   assert.match(providerSrc, /blobSink: turnBlobSink,/);
   assert.match(providerSrc, /if \(element\) observationCaptures\.push\(recordElementCapture\(recordObservation, `pick-\$\{crypto\.randomUUID\(\)\}`, element, turnBlobSink\)\);/);
   assert.match(providerSrc, /return await store\.exclusive\(async \(\) => \{\s*const out: Array<string \| null> = \[\];\s*for \(const blob of blobs\) out\.push\(await record\.putBlob\(blob\)/);
@@ -311,7 +311,8 @@ await test("CR-10 read-back: stored results come back newest first, labelled cur
   const byState = Object.fromEntries(items.map((i) => [i.version + i.description, i.state]));
   const click = items.find((i) => i.description.startsWith("browser_click"));
   assert.equal(click.state, "earlier", "a result on v0 says it belongs to the earlier version after v1");
-  assert.match(click.label, /^이전 버전 · sha256:aaaaaaa/);
+  assert.equal(click.label, "이전 버전 · 버전 1", "a version a student can read, not a digest prefix");
+  assert.equal(items.find((i) => i.version === V1 && i.description.includes("/index.html")).label, "현재 버전 · 버전 2");
   assert.match(click.detail, /오류 1건: boom/, "the earlier result is still readable");
   assert.ok(await local.record.getBlob(click.screenshot_digest), "its screenshot still resolves");
   assert.equal(items.find((i) => i.version === V1 && i.description.includes("/index.html")).state, "current");
@@ -327,7 +328,96 @@ await test("CR-10 read-back: stored results come back newest first, labelled cur
   assert.match(providerSrc, /blob = await this\.crRecordHandle\(\)\.record\.getBlob\(picked\.item\.screenshot_digest\);/);
   // The stored bytes are listed and can be deleted from the same command.
   assert.match(providerSrc, /stored = \(await this\.crRecordHandle\(\)\.record\.records\(\)\)\.browser_results\.stored;/);
-  assert.match(providerSrc, /await store\.exclusive\(\(\) => record\.deleteBlobs\(\{ by: "user", at: Date\.now\(\) \}\)\)/);
+  assert.match(providerSrc, /return store\.exclusive\(\(\) => record\.deleteBlobs\(\{ by: "user", at: Date\.now\(\) \}\)\);/);
+  assert.match(providerSrc, /const menu = crResultsMenu\(\{ items, stored \}\);/);
+  const menu = w.crResultsMenu({ items, stored: 4 });
+  assert.equal(menu.notice, null);
+  assert.deepEqual(menu.rows.map((r) => r.kind), ["result", "result", "result", "separator", "clear"]);
+  assert.equal(menu.rows.at(-1).description, "4개");
+  assert.deepEqual(w.crResultsMenu({ items: [], stored: 2 }).rows.map((r) => r.kind), ["clear"], "bytes with no listed result are still shown and deletable");
+  assert.equal(w.crResultsMenu({ items, stored: 0 }).rows.some((r) => r.kind === "clear"), false);
+  assert.match(w.crResultsMenu({ items: [], stored: 0 }).notice, /아직 기록된/);
+});
+
+await test("CR-10 negative: a version that disagrees between the event key and its text never reads as a result", async () => {
+  const ex = observationOf(makeFakePage());
+  const obs = (await ex.execute("browser_observe")).observation;
+  const r = recorder();
+  await w.recordProxyCrResult(r.record, "a", "browser_observe", {}, obs, localRecord().sink);
+  const ev = r.events[1];
+  assert.ok(readBrowserResultEvent(ev), "control: key and text agree");
+  assert.equal(readBrowserResultEvent({ ...ev, artifact_version: `sha256:${"d".repeat(64)}` }), null, "a key naming another version is refused");
+  assert.equal(w.crResultHistory([{ ...ev, artifact_version: `sha256:${"d".repeat(64)}` }], () => null).length, 0);
+});
+
+await test("CR-10: the delete asks first; only \"지우기\" deletes", async () => {
+  for (const answer of [undefined, "취소", "지우기 "]) {
+    let called = 0;
+    const out = await w.clearStoredResults(3, async () => answer, async () => { called++; return { removed: 3 }; });
+    assert.equal(out, null, `answer ${JSON.stringify(answer)} deletes nothing`);
+    assert.equal(called, 0);
+  }
+  let asked = "";
+  let called = 0;
+  const out = await w.clearStoredResults(3, async (m) => { asked = m; return "지우기"; }, async () => { called++; return { removed: 3 }; });
+  assert.deepEqual(out, { removed: 3 });
+  assert.equal(called, 1);
+  assert.match(asked, /3개를 지울까요\? 되돌릴 수 없어요\./);
+  assert.match(providerSrc, /const out = await clearStoredResults\(\s*stored,\s*\(message\) => Promise\.resolve\(vscode\.window\.showWarningMessage\(message, \{ modal: true \}, "지우기"\)\),/);
+});
+
+await test("CR-10 MC-27: stored bytes stay visible and deletable after the CR switch goes off", async () => {
+  const { CR_CONTEXT_KEY, manifestSwitchProblems } = await import("../src/curriculumRuntime.ts");
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const extensionSrc = readFileSync(new URL("../src/extension.ts", import.meta.url), "utf8");
+  const cmd = manifest.contributes.commands.find((c) => c.command === w.CR_BYTES_CLEAR_COMMAND);
+  assert.ok(cmd, "a delete command is declared");
+  assert.equal(cmd.enablement, w.CR_BYTES_CONTEXT_KEY, "enabled by 'bytes are stored'");
+  const palette = manifest.contributes.menus.commandPalette.filter((m) => m.command === w.CR_BYTES_CLEAR_COMMAND);
+  assert.deepEqual(palette.map((m) => m.when), [w.CR_BYTES_CONTEXT_KEY], "shown in the palette by 'bytes are stored'");
+  for (const expr of [cmd.enablement, ...palette.map((m) => m.when)]) assert.ok(!expr.includes(CR_CONTEXT_KEY), "never by the CR switch");
+  // It is not a CR surface (the switch-off check would hide it again).
+  assert.deepEqual(manifestSwitchProblems(manifest), []);
+  assert.match(extensionSrc, /registerCommand\("hypeproof-chat\.clearBrowserResultBytes", \(\) => provider\.clearStoredBrowserResults\(\)\)/);
+  assert.match(extensionSrc, /void provider\.refreshCrBytesContext\(\);/);
+  // The handler does not check the switch, and the key follows the record.
+  const handler = /async clearStoredBrowserResults\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(providerSrc)?.[1] ?? "";
+  assert.match(handler, /const stored = await this\.refreshCrBytesContext\(\);[\s\S]*await this\.clearBrowserResultBytes\(stored\);/);
+  assert.doesNotMatch(handler, /isCurriculumRuntimeEnabled/);
+  assert.match(providerSrc, /void vscode\.commands\.executeCommand\("setContext", CR_BYTES_CONTEXT_KEY, stored > 0\);/);
+  assert.match(providerSrc, /void next\.then\(\(digests\) => \{ if \(digests\.some\(\(d\) => d !== null\)\) void this\.refreshCrBytesContext\(\); \}\);/);
+  assert.match(providerSrc, /this\.postPageNotice\("기록을 지우지 못했어요[^"]*"\);\s*\}\s*await this\.refreshCrBytesContext\(\);/);
+});
+
+await test("CR-10 negative: no bytes are stored once the turn's recorder cannot take the event that names them", async () => {
+  const ex = observationOf(makeFakePage());
+  await ex.execute("browser_observe");
+  const click = (await ex.execute("browser_click", { ref: "e1" })).observation;
+  const local = localRecord();
+  let room = false;
+  const asked = [];
+  const guarded = w.roomGuardedSink(local.sink, (n) => (asked.push(n), room));
+  const full = recorder();
+  await w.recordProxyCrResult(full.record, "c", "browser_click", { ref: "e1" }, click, guarded);
+  assert.deepEqual(local.calls, [], "a full recorder: the sink never runs");
+  assert.deepEqual(local.blobKeys(), []);
+  assert.equal("screenshot_digest" in full.events[1], false, "and nothing is named");
+  assert.ok(asked.every((n) => n === w.CR_RESULT_EVENT_HEADROOM));
+  // Control: with room, the same call stores and names its bytes.
+  room = true;
+  const ok = recorder();
+  await w.recordProxyCrResult(ok.record, "c", "browser_click", { ref: "e1" }, click, guarded);
+  assert.equal(local.calls.length, 1);
+  assert.ok(await local.record.getBlob(ok.events[1].screenshot_digest));
+  assert.equal(w.roomGuardedSink(local.sink, undefined), undefined, "no recorder, no sink");
+  // The recorder's check is the one that refuses the event.
+  const { NativeObservationRecorder, OBSERVATION_EVENT_CAP } = await import("../src/nativeObservationRecorder.ts");
+  const rec = new NativeObservationRecorder({ format: "hps-observation/1", scope: "s", session: "s", program: "p" });
+  for (let i = 0; i < OBSERVATION_EVENT_CAP - 3; i++) rec.record("t", "coach", "x");
+  assert.equal(rec.hasRoom(3), true);
+  assert.equal(rec.hasRoom(4), false);
+  for (let i = 0; i < 3; i++) rec.record("t", "coach", "x");
+  assert.throws(() => rec.record("t", "coach", "x"), /observation_capacity/);
 });
 
 await test("CR-10: an assessment request leaves the reference keys out; the stored batch keeps them", async () => {
@@ -479,7 +569,7 @@ await test("CR-09 proxy: a picked element's ref is known to the executor the nex
 
 await test("CR-08: both runtimes start a new turn on the long-lived control, so step numbers count this request's actions", () => {
   assert.match(providerSrc, /const browser = turnBrowser\.browser;\s*\/\/[^\n]*\n\s*browser\.crNewTurn\(\);/);
-  assert.match(providerSrc, /this\.crSdkResults\.reset\(observation \? this\.crBlobSink : undefined\);\s*this\.mcpBrowser\?\.crNewTurn\(\);/);
+  assert.match(providerSrc, /this\.crSdkResults\.reset\(turnBlobSink\);\s*this\.mcpBrowser\?\.crNewTurn\(\);/);
 });
 
 console.log(`\n${passed} cr-host checks passed`);

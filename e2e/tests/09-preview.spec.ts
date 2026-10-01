@@ -14,6 +14,8 @@
 // the unchanged tree too (recon F1). Each check now finds which path opened and
 // asserts that path's contract. REQ-D3 and REQ-D6 belong to the webview path;
 // studio-requirements.md §N says REQ-N1 replaces REQ-D3 for live_server cohorts.
+// Which path is expected is read from the served profile's `preview.type`, so a
+// webview cohort that wrongly takes the live path (skipping REQ-D3/D6) fails.
 
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
@@ -27,6 +29,7 @@ import {
   previewFrame,
   runCommand,
 } from "../fixtures/app";
+import { TOKEN_FILE } from "../fixtures/global-setup";
 
 /** The canned game sets this title once its script runs; a browser tab is labelled by its page title. */
 const LOADED_TITLE = "preview-test-loaded";
@@ -48,6 +51,16 @@ async function openedPreview(win: Page): Promise<"live" | "iframe"> {
     await win.waitForTimeout(250);
   }
   throw new Error(`no preview opened: neither a browser tab titled "${LOADED_TITLE}" nor a webview with #frame`);
+}
+
+/** The path the served profile picks: `preview.type: "live_server"` → live, anything else → iframe. */
+async function expectedPreview(): Promise<"live" | "iframe"> {
+  const proxy = process.env.HPS_E2E_PROXY_URL?.trim() || "http://localhost:8787/v1";
+  const token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
+  const res = await fetch(`${proxy.replace(/\/$/, "")}/profile`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`profile not served (${res.status}): cannot tell which preview path is expected`);
+  const profile = (await res.json()) as { preview?: { type?: unknown } };
+  return profile.preview?.type === "live_server" ? "live" : "iframe";
 }
 
 const CANNED_GAME = `<!doctype html>
@@ -91,6 +104,7 @@ test("REQ-D1 + REQ-D3 + REQ-D6: Run Last Code opens preview with sandboxed ifram
   // REQ-D1: Run Last Code in Preview
   await runCommand(ctx.win, "HypeProof Chat: Run Last Code in Preview");
   const opened = await openedPreview(ctx.win);
+  expect(opened, "the preview path the served profile's preview.type picks").toBe(await expectedPreview());
 
   if (opened === "live") {
     // REQ-D1 on the live-server path: the canned game itself is what the tab shows
@@ -137,6 +151,7 @@ test("REQ-D4: second Run reuses the existing preview panel (no second WebviewPan
   // First run — opens preview
   await runCommand(ctx.win, "HypeProof Chat: Run Last Code in Preview");
   const opened = await openedPreview(ctx.win);
+  expect(opened, "the preview path the served profile's preview.type picks").toBe(await expectedPreview());
   await ctx.win.waitForTimeout(800);
 
   if (opened === "live") {

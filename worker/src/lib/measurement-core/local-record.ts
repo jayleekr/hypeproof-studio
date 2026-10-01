@@ -15,7 +15,10 @@ export const DEFAULT_LOCAL_MAX_BYTES = 256 * 1024 * 1024;
 /**
  * What task deletion cannot reach, reported instead of claimed (MC-31). Browser-result
  * bytes (CR-10) that no observation of the task names are not the task's: they are
- * removed by `deleteBlobs` ("실험 브라우저 기록 화면 지우기"), never by `deleteTask`.
+ * removed by `deleteBlobs` (the results command's "저장된 화면·동작 기록 지우기" row),
+ * never by `deleteTask`. In Studio today no local-record observation names them at all:
+ * the events that do live in the workspace's native observation batch, so `deleteTask`
+ * removes browser-result bytes only for a future import that carries the digests.
  */
 export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user", "browser_result_bytes_not_named_by_the_task"] as const;
 
@@ -61,8 +64,9 @@ export async function digestOf(value: unknown): Promise<string> {
 // ── Content-addressed bytes (CR-10) ───────────────────────────────────────────
 // The bytes an observation event names by digest (a browser result's screenshot and
 // action trace), kept on this record next to the events instead of in a store of their
-// own (SX-48). Keyed by digest, so the same bytes are stored once and a stored digest
-// always resolves to exactly those bytes.
+// own (SX-48). Keyed by digest, so the same bytes are stored once. A digest resolved
+// when it was handed out (putBlob reads the bytes back first); the bytes can later be
+// evicted by the bound or deleted by the person, and the digest then resolves to nothing.
 export const BLOB_MEDIA_TYPES = ["image/jpeg", "image/png", "application/json"] as const;
 export type BlobMediaType = (typeof BLOB_MEDIA_TYPES)[number];
 /** Provisional, like DEFAULT_LOCAL_MAX_BYTES (MC-35): one screenshot or trace, decoded. */
@@ -71,8 +75,10 @@ export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
  * Provisional bound on all stored browser-result bytes (CR-10), kept apart from
  * DEFAULT_LOCAL_MAX_BYTES: screenshots never count against, or crowd out, the review
  * data MC-35 protects. When a new capture does not fit, the OLDEST captures are removed
- * first. They are copies of a page the browser can take again, not review data; the
- * events that named them stay; the list then finds no stored screen for them.
+ * first, silently. A capture of an earlier artifact version cannot be taken again once the
+ * files changed, so eviction does lose what the person could otherwise still look at; the
+ * bound keeps a student's disk from filling with screenshots instead. The events that named
+ * evicted bytes stay, and the results list then finds no stored screen for them.
  */
 export const DEFAULT_BLOB_MAX_BYTES = 64 * 1024 * 1024;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
@@ -730,7 +736,10 @@ export class LocalRecord {
 
   /**
    * Delete stored browser-result bytes, all of them or the named digests, at the person's
-   * request ("실험 브라우저 기록 화면 지우기"). The events that named them stay.
+   * request (the results command's "저장된 화면·동작 기록 지우기" row). The events that named
+   * them stay. Each blob goes before its age marker, as in eviction: an interruption leaves
+   * a marker without bytes (cleared by the next eviction or delete), never bytes no bound
+   * or delete can find.
    */
   async deleteBlobs(input: { by: "user"; at: number; digests?: readonly string[] }): Promise<{ removed: number }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
@@ -739,13 +748,23 @@ export class LocalRecord {
       check(Array.isArray(input.digests) && input.digests.every((d) => typeof d === "string" && DIGEST.test(d)), "invalid_digest");
       wanted = new Set(input.digests.map((d) => d.slice("sha256:".length)));
     }
+    const markers = new Map<string, string[]>();
+    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) {
+      const hex = order.slice(-64);
+      if (wanted && !wanted.has(hex)) continue;
+      markers.set(hex, [...(markers.get(hex) ?? []), order]);
+    }
     let removed = 0;
-    for (const order of await this.#keys(BLOB_ORDER_PREFIX)) if (!wanted || wanted.has(order.slice(-64))) await this.#remove(order);
     for (const key of await this.#keys(BLOB_PREFIX)) {
-      if (wanted && !wanted.has(key.slice(BLOB_PREFIX.length))) continue;
+      const hex = key.slice(BLOB_PREFIX.length);
+      if (wanted && !wanted.has(hex)) continue;
       await this.#remove(key);
       removed++;
+      for (const order of markers.get(hex) ?? []) await this.#remove(order);
+      markers.delete(hex);
     }
+    // Markers whose bytes were already gone (an earlier interruption).
+    for (const orders of markers.values()) for (const order of orders) await this.#remove(order);
     return { removed };
   }
 

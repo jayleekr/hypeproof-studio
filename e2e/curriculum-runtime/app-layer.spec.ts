@@ -11,7 +11,9 @@
 //   CR-T07          five-step kiosk flow reaches the order screen; planted disabled step 4
 //                   stops at step 4.
 //   CR-T08          planted console error in flow step 3 reported once, at the step index of
-//                   the action that raised it (action 4: the opening navigate is action 1);
+//                   the action that raised it (action 4: the opening navigate is action 1),
+//                   checked on the raw tool results; a following request that does not
+//                   navigate reads it as "이전 요청" and reports no failure at its own steps;
 //                   the clean and the chatty (console.log/info) flows report none.
 //   CR-T63          the page outline is painted while agent steps run and gone after; the
 //                   chat-panel tool line is "running" during a step and none is after.
@@ -39,7 +41,7 @@ const PICK = "HypeProof: 화면에서 요소 골라 코치에게 묻기";
 const RESULTS = "HypeProof: 실험 브라우저 결과 기록 보기";
 const PREVIEW = "HypeProof: HTML 미리보기 (옆 패널)";
 
-type Run = { failedAt: number | null; failures: Array<{ step: number | null; message: string }>; steps: number; done: boolean; results: unknown[]; actions: string[] };
+type Run = { failedAt: number | null; failures: Array<{ step: number | null; message: string }>; steps: number; done: boolean; results: unknown[]; actions: string[]; lines: Array<{ round: number; line: string }> };
 type State = { requests: Array<{ tools: string[]; userText: string; images: number }>; runs: Record<string, Run> };
 
 function screenLocked(): boolean | null {
@@ -274,6 +276,23 @@ test("CR-T02/07/08/09/10/63 in-app, switch on", async () => {
   expect(planted.actions.indexOf("수량 늘리기") + 1, "instrument: flow step 3 is the request's fourth action").toBe(4);
   expect(at3[0].step, "CR-T08: reported at the step index of the action that raised it").toBe(4);
   expect(planted.failures.length).toBe(1);
+  // The same on the raw tool results the App sent (not the agent's de-duplicated list):
+  // every later observation repeats the record, always at action 4, never at another step.
+  const rawPlanted = planted.lines.filter((l) => /planted-step3-error/.test(l.line));
+  expect(rawPlanted.length, "instrument: the planted record reached the model").toBeGreaterThan(0);
+  expect(rawPlanted.filter((l) => !/\] 단계 4 /.test(l.line)), "CR-T08 raw: the planted error appears at action 4 only").toEqual([]);
+
+  // CR-T08 across requests: the next request does not navigate, so the executor, its step
+  // count and the earlier records survive; only the per-request turn tells them apart.
+  await send(win, "[cr:again] 지금 화면 다시 보고 도움말 보기 눌러봐");
+  const again = await waitRun(svc, "again", win);
+  record["CR-T08-again"] = again;
+  expect(again.actions, "instrument: the request clicks without navigating").toEqual(["도움말 보기"]);
+  expect(again.failedAt).toBeNull();
+  const earlier = again.lines.filter((l) => /planted-step3-error/.test(l.line));
+  expect(earlier.length, "instrument: the earlier request's error is still on this document").toBeGreaterThan(0);
+  expect(earlier.filter((l) => !/\] 이전 요청 /.test(l.line)), "CR-T08: an earlier request's error reads 이전 요청, never a step of this request").toEqual([]);
+  expect(again.failures, "CR-T08: no failure is attributed to a step of the current request").toEqual([]);
 
   await send(win, "[cr:flow:chatty] 다시 해봐");
   const chatty = await waitRun(svc, "chatty", win);

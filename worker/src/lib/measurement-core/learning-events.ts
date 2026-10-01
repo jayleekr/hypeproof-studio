@@ -118,8 +118,10 @@ export const ARTIFACT_REF_KEYS = ["artifact_before", "artifact_after"] as const;
  *   screenshot_digest  sha256 of the screenshot bytes the result was taken with
  *   trace_digest       digest of the action trace (tool, input, outcome, step, document)
  *
- * The two digests are written only once their bytes are stored on the same local record
- * (`LocalRecord.putBlob`, local-record.ts), so a digest on an event always resolves.
+ * The two digests are written only once their bytes are stored and read back on the
+ * seat's local record (`LocalRecord.putBlob`, local-record.ts), so a digest resolved when
+ * its event was written. The bytes can later be evicted by their bound or deleted by the
+ * person; the event then names bytes that are no longer stored.
  *
  * Not `ARTIFACT_REF_KEYS`: those name one `artifact` event's plain sha256 in the same
  * batch (AE-37 binds single files). A version is a file set, and recording it as an

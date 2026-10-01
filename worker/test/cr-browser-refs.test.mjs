@@ -186,6 +186,26 @@ test("positive: deleteBlobs removes every stored capture, or just the named ones
   assert.deepEqual([...port.store.keys()].filter((k) => k.startsWith("blob")), [], "no bytes and no age markers left");
 });
 
+test("negative: a delete interrupted mid-way never leaves bytes without their age marker", async () => {
+  const port = memoryPort();
+  const record = new LocalRecord(port);
+  await record.putBlob({ media_type: "image/png", base64: png(10, 1) });
+  await record.putBlob({ media_type: "image/png", base64: png(10, 2) });
+  const remove = port.remove;
+  port.remove = async (k) => { if (k.startsWith("blobs/")) throw new Error("disk gone"); return remove(k); };
+  await assert.rejects(record.deleteBlobs({ by: "user", at: 1 }));
+  const markers = new Set([...port.store.keys()].filter((k) => k.startsWith("blob-order/")).map((k) => k.slice(-64)));
+  assert.equal(blobKeys(port).length, 2, "instrument: the bytes are still there");
+  for (const k of blobKeys(port)) assert.ok(markers.has(k.slice("blobs/".length)), `${k} is still findable by the bound`);
+  // Control: once the port works again the same delete clears everything.
+  port.remove = remove;
+  assert.deepEqual(await record.deleteBlobs({ by: "user", at: 2 }), { removed: 2 });
+  assert.deepEqual([...port.store.keys()].filter((k) => k.startsWith("blob")), []);
+});
+
+// Unit level only: in Studio no local-record observation names these digests today (the
+// browser-result events live in the workspace's native observation batch), so this path
+// covers a future import that carries them, not the student's delete (the results command).
 test("positive: deleting a task removes the bytes its observations name; bytes another observation names stay", async () => {
   const port = memoryPort();
   const record = new LocalRecord(port);

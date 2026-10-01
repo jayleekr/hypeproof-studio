@@ -34,6 +34,17 @@ try {
   await a.write('blobs/x', '12345');
   assert.equal(await a.usageOf('blobs/'), 5);
   assert.equal(await a.usageBytes(), (await a.read('receipts/one')).length + 'tampered'.length + 5);
+  // The scan cache trusts a file only while its size and mtime are unchanged: another
+  // writer (a second window's instance) rewriting it to a new length is seen.
+  await reopened.write('blobs/x', '123456789');
+  assert.equal(await a.usageOf('blobs/'), 9, 'a rewrite by another instance is re-read');
+  await writeFile(join(root, createHash('sha256').update('blobs/x').digest('hex') + '.json'), JSON.stringify({ key: 'blobs/x', value: '12' }));
+  assert.equal(await a.usageOf('blobs/'), 2, 'and so is one made on disk directly');
+  await reopened.write('blobs/y', 'yy');
+  assert.deepEqual(await a.list('blobs/'), ['blobs/x', 'blobs/y']);
+  await reopened.remove('blobs/y');
+  assert.deepEqual(await a.list('blobs/'), ['blobs/x']);
+  await a.write('blobs/x', '12345');
   // Two writers of the same directory in ONE process (the local review and CR-10's bytes)
   // wait for each other instead of the second failing storage_busy against its own pid.
   const order = [];
