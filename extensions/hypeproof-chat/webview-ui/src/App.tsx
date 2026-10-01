@@ -19,6 +19,8 @@ import { ChatErrorBoundary } from "./ChatErrorBoundary";
 import { VerifyPanel } from "./VerifyPanel";
 import { PublishPanel } from "./PublishPanel";
 import { EvidencePanel } from "./EvidencePanel";
+import { MemoryPanel } from "./MemoryPanel";
+import type { MemoryView } from "../../src/memoryView";
 import type { EvidenceView } from "../../src/evidenceView";
 import type { PublishView } from "../../src/publishView";
 import type { VerifyView } from "../../src/verifyView";
@@ -46,6 +48,8 @@ interface State {
   testPublish: { view: PublishView; error: string | null; errorLines: string[]; shareUrl: string | null } | null;
   /** cr-evidence — the "실험 증거" panel (null = hidden). */
   evidence: { view: EvidenceView; error: string | null; done: string | null } | null;
+  /** cr-memory — the "프로젝트 기억" panel (null = hidden). */
+  memory: { view: MemoryView; error: string | null; done: string | null } | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -74,6 +78,8 @@ type Action =
   | { type: "testPublishClose" }
   | { type: "evidenceState"; view: EvidenceView | null; error?: string; done?: string }
   | { type: "evidenceClose" }
+  | { type: "memoryState"; view: MemoryView | null; error?: string; done?: string }
+  | { type: "memoryClose" }
   | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
@@ -102,6 +108,7 @@ const initialState: State = {
   verify: null,
   testPublish: null,
   evidence: null,
+  memory: null,
   verifyError: null,
   verifySend: null,
   aiNotice: null,
@@ -154,6 +161,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, evidence: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
     case "evidenceClose":
       return { ...state, evidence: null };
+    case "memoryState":
+      return { ...state, memory: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
+    case "memoryClose":
+      return { ...state, memory: null };
     case "verifySent":
       return { ...state, verifySend: null };
     case "worldOpened":
@@ -274,6 +285,7 @@ export function App() {
         case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
         case "publishState": dispatch({ type: "testPublishState", view: msg.view, error: msg.error, errorLines: msg.errorLines, shareUrl: msg.shareUrl }); break;
         case "evidenceState": dispatch({ type: "evidenceState", view: msg.view, error: msg.error, done: msg.done }); break;
+        case "memoryState": dispatch({ type: "memoryState", view: msg.view, error: msg.error, done: msg.done }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -353,6 +365,19 @@ export function App() {
       onReview={(experimentId, draftId, revision, actions) => postToHost({ type: "evidenceReview", experimentId, draftId, revision, actions })}
       onDelete={(experimentId, sessionId) => postToHost({ type: "evidenceDelete", experimentId, ...(sessionId ? { sessionId } : {}) })}
       onClose={() => dispatch({ type: "evidenceClose" })}
+    />
+  ) : null;
+
+  const memoryPanel = state.memory ? (
+    <MemoryPanel
+      view={state.memory.view}
+      error={state.memory.error}
+      done={state.memory.done}
+      busy={!!state.streamId}
+      onRefresh={() => postToHost({ type: "memoryOpen" })}
+      onDiff={(from, to) => postToHost({ type: "memoryDiff", from, to })}
+      onDecide={(form) => postToHost({ type: "memoryDecision", form })}
+      onClose={() => dispatch({ type: "memoryClose" })}
     />
   ) : null;
 
@@ -443,7 +468,7 @@ export function App() {
         messages={messages}
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
-        verifyPanel={verifyPanel || publishPanel || evidencePanel ? <>{verifyPanel}{publishPanel}{evidencePanel}</> : null}
+        verifyPanel={verifyPanel || publishPanel || evidencePanel || memoryPanel ? <>{verifyPanel}{publishPanel}{evidencePanel}{memoryPanel}</> : null}
         sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });

@@ -184,6 +184,12 @@
         "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
       },
       {
+        "command": "hypeproof-chat.ventureMemory",
+        "title": "HypeProof: 프로젝트 기억 보기",
+        "icon": "$(history)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
         "command": "hypeproof-chat.clearBrowserResultBytes",
         "title": "HypeProof: 저장된 실험 브라우저 화면 지우기",
         "enablement": "hypeproof-chat.crBrowserBytesStored"
@@ -230,6 +236,11 @@
           "command": "hypeproof-chat.experimentEvidence",
           "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
           "group": "navigation@8"
+        },
+        {
+          "command": "hypeproof-chat.ventureMemory",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@9"
         }
       ],
       "editor/title": [
@@ -269,6 +280,10 @@
         },
         {
           "command": "hypeproof-chat.experimentEvidence",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.ventureMemory",
           "when": "hypeproof-chat.curriculumRuntimeEnabled"
         },
         {
