@@ -80,6 +80,36 @@ bash scripts/e2e-quiet.sh              # waits for lock, then runs the suite inv
 If Quartz isn't installed the script refuses to run (fails safe — never runs
 while it can't confirm you're away).
 
+### While you keep working — `GATE=idle` + a prepared app copy
+
+The lock gate cannot run screenshot or wheel-scroll checks (a locked screen
+composites no frames). To run those without taking over the Mac:
+
+1. Copy the app and mark the copy as a background app. `LSUIElement=1` means no
+   Dock icon and no activation at launch, so even the first second of a run
+   cannot take keyboard focus:
+
+   ```bash
+   cp -R "/Applications/HypeProof Studio.app" /tmp/hps-test/
+   bash scripts/prep-test-app.sh "/tmp/hps-test/HypeProof Studio.app"
+   ```
+
+2. Run behind the idle gate. It starts after `IDLE_MIN` (default 5) minutes
+   without keyboard/mouse input on an unlocked screen and aborts with exit 75
+   as soon as input resumes. It only ever kills the prepared copy:
+
+   ```bash
+   GATE=idle HPS_APP_PATH="/tmp/hps-test/HypeProof Studio.app" bash scripts/e2e-quiet.sh
+   GATE=idle HPS_APP_PATH=... bash scripts/e2e-quiet.sh npx playwright test tests/09-preview.spec.ts
+   ```
+
+   Keep the display from sleeping while you are away (`caffeinate -d`), or the
+   screen locks and the gate waits. Exit 75 means "retry later", not a failure.
+
+Agents and scripts that launch the app outside the fixture must apply the same
+quiet stash and use a prepared copy; never launch `/Applications/HypeProof Studio.app`
+from automation.
+
 ## Run
 
 ```bash
