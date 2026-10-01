@@ -79,6 +79,9 @@ export class InstructorModeManager {
       this._lastWhoamiStatus = null;
       return false;
     }
+    // A different credential cannot inherit the previous issuer's authorization or brief.
+    // An unreachable whoami must fail closed for the new token.
+    if (this._isInstructorToken !== token) this.reset();
     if (this._isInstructor !== null && this._isInstructorToken === token) return this._isInstructor;
     try {
       const base = adminBaseFrom(proxyUrl);
