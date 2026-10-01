@@ -190,6 +190,12 @@
         "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
       },
       {
+        "command": "hypeproof-chat.curriculumSkills",
+        "title": "HypeProof: 커리큘럼 스킬",
+        "icon": "$(lightbulb)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
         "command": "hypeproof-chat.clearBrowserResultBytes",
         "title": "HypeProof: 저장된 실험 브라우저 화면 지우기",
         "enablement": "hypeproof-chat.crBrowserBytesStored"
@@ -241,6 +247,11 @@
           "command": "hypeproof-chat.ventureMemory",
           "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
           "group": "navigation@9"
+        },
+        {
+          "command": "hypeproof-chat.curriculumSkills",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@10"
         }
       ],
       "editor/title": [
@@ -284,6 +295,10 @@
         },
         {
           "command": "hypeproof-chat.ventureMemory",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.curriculumSkills",
           "when": "hypeproof-chat.curriculumRuntimeEnabled"
         },
         {

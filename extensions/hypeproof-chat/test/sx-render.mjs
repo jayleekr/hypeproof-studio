@@ -56,6 +56,8 @@ export const COMPONENTS = {
   EvidencePanel: { from: "./src/EvidencePanel.tsx", exportName: "EvidencePanel" },
   // cr-memory (#1395) — the Venture Memory panel; draws the MemoryView the host read.
   MemoryPanel: { from: "./src/MemoryPanel.tsx", exportName: "MemoryPanel" },
+  // cr-skills (#1396) — the curriculum skills panel; draws the SkillsView the host read.
+  SkillsPanel: { from: "./src/SkillsPanel.tsx", exportName: "SkillsPanel" },
 };
 
 /**

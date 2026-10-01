@@ -99,7 +99,7 @@ export function MemoryPanel(props: {
             ))}
           </ul>
 
-          <h4>어디까지 확인했나?</h4>
+          <h4>확인한 것과 가정</h4>
           {CONFIDENCES.map((c) => (
             <div key={c} data-testid={`memory-register-${c}`}>
               <strong>{CONFIDENCE_LABEL[c]} {m.register[c].length}개</strong>

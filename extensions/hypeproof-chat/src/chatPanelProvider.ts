@@ -22,7 +22,7 @@ import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
+import { TOKEN_MISSING_FRIENDLY, buildProxyHeaders, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { acceptFocus, acceptWork, rehearsalReport, turnLesson, workContext, type LessonFocus, type StepWork } from "./lessonFocus";
 import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
@@ -38,6 +38,7 @@ import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, reso
 import { PublishSession } from "./publishSession";
 import { EvidenceSession } from "./evidenceSession";
 import { MemorySession } from "./memorySession";
+import { SkillSession, type SkillCompletion } from "./skillSession";
 import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
@@ -829,6 +830,84 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
     await this.postMemoryState();
+  }
+
+  // ── Curriculum skills (cr-skills, #1396) ────────────────────────────────────
+  /**
+   * The skills panel over the same Project the publish panel remembers. The skill list and every
+   * contract come from the Service; the model call goes through the existing coach route with the
+   * run's skill tag and capability (CR-45), never a model id; the Service gates the answer (CR-44).
+   */
+  private readonly skillSession = new SkillSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(this.proxyUrl()),
+    projectId: () => this.crProjectMemory.projectId(),
+    complete: (prompt, headers) => this.completeSkill(prompt, headers),
+  });
+
+  private proxyUrl(): string {
+    return vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+  }
+
+  /** One non-streaming request on the coach route, carrying only the run's metadata headers and no model. */
+  private async completeSkill(prompt: string, headers: Record<string, string>): Promise<SkillCompletion> {
+    const token = await this.crProjectMemory.refresh();
+    if (!token) return { ok: false };
+    const meta: Record<string, string> = {};
+    for (const k of ["x-hps-skill", "x-hps-capability"]) if (typeof headers[k] === "string") meta[k] = headers[k]!;
+    try {
+      const res = await fetch(this.proxyUrl().replace(/\/+$/, "") + "/chat/completions", {
+        method: "POST",
+        headers: { ...buildProxyHeaders({ token }), accept: "application/json", ...meta },
+        body: JSON.stringify({ stream: false, messages: [{ role: "user", content: prompt }] }),
+      });
+      if (!res.ok) return { ok: false, status: res.status };
+      const json = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+      const content = json.choices?.[0]?.message?.content;
+      return { ok: typeof content === "string", text: typeof content === "string" ? content : undefined, model: res.headers.get("x-hps-model"), status: res.status };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  /** Post the skills panel state (null hides it with the switch off). */
+  private async postSkillsState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "skillsState", view: await this.skillSession.view(), running: this.skillSession.isRunning(), ...extra });
+  }
+
+  /** CR-43 — the "커리큘럼 스킬" command: re-checks the served switch, then opens the panel. */
+  async curriculumSkills(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 커리큘럼 스킬을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postSkillsState();
+  }
+
+  /** One skills action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleSkillsMessage(msg: { type: "skillsOpen" } | { type: "skillRun"; skill: string; form: import("./skillView").SkillForm }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, error: "이 수업에서는 커리큘럼 스킬을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "skillsOpen") return this.postSkillsState();
+    const f = msg.form ?? {};
+    const form: import("./skillView").SkillForm = {
+      ...(typeof f.experiment_id === "string" ? { experiment_id: f.experiment_id } : {}),
+      ...(typeof f.decision_id === "string" ? { decision_id: f.decision_id } : {}),
+      ...(Array.isArray(f.evidence_refs) ? { evidence_refs: f.evidence_refs.map(String) } : {}),
+      ...(typeof f.text === "string" ? { text: f.text } : {}),
+      ...(typeof f.notes === "string" ? { notes: f.notes } : {}),
+    };
+    void this.post({ type: "skillsState", view: await this.skillSession.view(), running: true });
+    const r = await this.skillSession.run(String(msg.skill ?? ""), form);
+    return this.postSkillsState(r.ok ? { done: "AI의 답이 규칙을 지켰어요." } : { error: r.message });
   }
 
   /** One memory action from the panel, behind the served switch (a message can be posted without the panel). */
@@ -3181,6 +3260,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "memoryDecision":
         // cr-memory — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
         await this.handleMemoryMessage(msg);
+        break;
+      case "skillsOpen":
+      case "skillRun":
+        // cr-skills — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleSkillsMessage(msg);
         break;
       case "clearHistory":
         void this.clearHistory();

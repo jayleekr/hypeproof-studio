@@ -91,11 +91,12 @@ export const CR_TEST_ORIGIN_EVENTS_ROUTE = "POST <test-origin>/l/:link/__hp/even
 
 export const CR_SURFACES: CrSurfaceInventory = {
   // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17);
-  // cr-evidence adds the experiment evidence panel (CR-24–CR-27, CR-69); cr-memory the Venture Memory panel (CR-35–CR-38).
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion", "hypeproof-chat.experimentEvidence", "hypeproof-chat.ventureMemory"],
+  // cr-evidence adds the experiment evidence panel (CR-24–CR-27, CR-69); cr-memory the Venture Memory panel (CR-35–CR-38);
+  // cr-skills the curriculum skills panel (CR-43–CR-47).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion", "hypeproof-chat.experimentEvidence", "hypeproof-chat.ventureMemory", "hypeproof-chat.curriculumSkills"],
   mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
   proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
-  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke", "evidenceOpen", "evidenceNote", "evidenceDraft", "evidenceReview", "evidenceDelete", "memoryOpen", "memoryDiff", "memoryDecision"],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke", "evidenceOpen", "evidenceNote", "evidenceDraft", "evidenceReview", "evidenceDelete", "memoryOpen", "memoryDiff", "memoryDecision", "skillsOpen", "skillRun"],
   // cr-verify adds no Worker route. cr-publish adds the Publish for User Test routes
   // (worker/src/routes/curriculum.ts `CURRICULUM_ROUTES`) and the test origin's.
   workerRoutes: [
@@ -133,6 +134,10 @@ export const CR_SURFACES: CrSurfaceInventory = {
     "POST /v1/curriculum/projects/:id/decisions",
     "POST /v1/curriculum/decisions/:id/version",
     "PUT /v1/curriculum/projects/:id/slides/:n",
+    // cr-skills: the skill registry and one run's prepare and output gate.
+    "GET /v1/curriculum/skills",
+    "POST /v1/curriculum/projects/:id/skills/:skill/prepare",
+    "POST /v1/curriculum/projects/:id/skills/:skill/output",
   ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };
