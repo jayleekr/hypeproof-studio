@@ -985,7 +985,9 @@ await test("CR-18/CR-20 scale: one visit costs the same R2 calls at the 1st and 
     for (let i = 0; i < VISITS - 2; i++) await openVisit(f, s.url);
     const last = await r2Calls(f, () => openVisit(f, s.url));
     assert.deepEqual(last, first, `R2 calls per visit: first ${JSON.stringify(first)}, ${VISITS}th ${JSON.stringify(last)}`);
-    assert.ok(first.get + first.put + first.list <= 8, `a small constant: ${JSON.stringify(first)}`);
+    // cr-evidence adds two constant steps per open: the erased-session check (one read) and the
+    // pseudonym's one-experiment index (one conditional put: a read and a put).
+    assert.ok(first.get + first.put + first.list <= 11, `a small constant: ${JSON.stringify(first)}`);
     assert.equal(first.list, 0, "no listing on the open path");
     assert.equal(taskBytes(), before, "the task document is not rewritten per open");
     // Starting the next test (the Week-2 experiment) costs the same after 500 sessions.

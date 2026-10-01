@@ -113,6 +113,7 @@ async function publishKiosk(): Promise<{ win: Page; chat: FrameLocator; shareUrl
   await form.locator('textarea[aria-label="가설"]').fill("처음 쓰는 사람도 혼자 주문할 수 있다");
   await form.locator('input[aria-label="질문"]').fill("도움 없이 주문을 마칠 수 있나?");
   await form.locator('textarea[aria-label="성공 기준"]').fill("5명 중 3명이 주문 완료");
+  await form.locator('textarea[aria-label="기록할 과제 이름"]').fill("주문");
   await chat.locator('[data-testid="publish-expiry-3"]').check();
   await chat.locator('[data-testid="publish-submit"]').click();
   const shareLine = chat.locator('[data-testid="publish-share-url"]');

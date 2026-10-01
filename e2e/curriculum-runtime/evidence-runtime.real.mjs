@@ -42,7 +42,7 @@ const record = (id, verdict, detail) => {
 
 // Planted variants of the event half, served on chosen hosts (negative controls).
 const IDENTITY_PLANT = PARTICIPANT_EVENTS_SNIPPET.replace("o.kind=k;o.seq=s.n;", 'o.kind=k;o.seq=s.n;o.email="kid@example.com";');
-const VALUE_PLANT = PARTICIPANT_EVENTS_SNIPPET.replace("if(k&&D.indexOf(k)>=0&&n.value)o.value", "if(k&&n.value)o.value");
+const VALUE_PLANT = PARTICIPANT_EVENTS_SNIPPET.replace("if(k&&~D.indexOf(k)&&n.value)o.value", "if(k&&n.value)o.value");
 for (const [name, v] of Object.entries({ IDENTITY_PLANT, VALUE_PLANT })) if (v === PARTICIPANT_EVENTS_SNIPPET) throw new Error(`${name} did not apply`);
 const planted = new Map();
 
@@ -78,7 +78,10 @@ document.getElementById("pay").addEventListener("click",function(){window.hypepr
 const FILES = { ...fixture, "index.html": String(fixture["index.html"]).replace("</body>", `${REPORT}</body>`) };
 
 const token = await f.student();
-async function publish(declarations) {
+// The task and milestone names REPORT sends, declared on every experiment (only declared names are recorded).
+const LABELS = ["주문", "음료 고름", "늦은 기록"];
+async function publish(given) {
+  const declarations = { ...given, labels: LABELS };
   const p = (await f.api("/v1/curriculum/projects", { method: "POST", token, body: { title: "키오스크" } })).json.project;
   const up = await f.upload(p.id, FILES, token);
   const e = await f.api("/v1/curriculum/experiments", { method: "POST", token, body: { project_id: p.id, product_version_id: up.id, week: 1, question: "도움 없이 주문할 수 있나?", method: "task_test", success_criteria: ["5명 중 3명 완료"], hypothesis: "처음 쓰는 사람도 혼자 주문할 수 있다", ...(declarations ? { declarations } : {}) } });

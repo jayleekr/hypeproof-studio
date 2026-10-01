@@ -131,14 +131,21 @@ export function returnEvidence(declarations: { repeated_use?: true } | undefined
 }
 
 /**
- * A return count is a claim about sessions; one that cites none, or cites a number of sessions
- * that does not match the count, is refused (CR-72). Resolution of each cited session is the
- * draft check's (`draftRefusals`).
+ * A return count is a claim about sessions (CR-72). A statement counted per device pseudonym
+ * must cite the sessions it counts, carry its count as `return_count` equal to those sessions
+ * less one, and every cited session must carry the same pseudonym (one device of a declared
+ * experiment). Otherwise it is refused. Called by the store on every draft it saves
+ * (`LocalRecord.saveEvidenceDraft`); resolution of each cited session is `draftRefusals`'.
  */
-export function returnItemProblem(item: { return_count: number; source_refs: readonly string[] }): "return_without_sessions" | "return_count_mismatch" | null {
+export function returnItemProblem(
+  item: { return_count?: number; source_refs: readonly string[] },
+  pseudonymOf: (sessionRef: string) => string | null,
+): "return_without_sessions" | "return_count_mismatch" | "return_sessions_not_one_device" | null {
   const sessions = item.source_refs.filter((r) => r.startsWith("session:"));
   if (sessions.length === 0) return "return_without_sessions";
   if (item.return_count !== sessions.length - 1) return "return_count_mismatch";
+  const devices = new Set(sessions.map(pseudonymOf));
+  if (devices.size !== 1 || devices.has(null)) return "return_sessions_not_one_device";
   return null;
 }
 
@@ -215,6 +222,19 @@ export function variantOfRef(sessions: readonly ParticipantSession[], notes: rea
 const days = (ms: number) => Math.round((ms / 86_400_000) * 10) / 10;
 
 /**
+ * The bounds `validateEvidenceDraftShape` (interpretation.ts) puts on every draft, which the
+ * runtime's own draft must fit: references per statement and statements per draft.
+ */
+export const RUNTIME_DRAFT_LIMITS = { refsPerItem: 50, items: 60 } as const;
+
+/** Up to `max` references, taken in turn from each group, so every group stays cited. */
+function balancedRefs(groups: readonly (readonly string[])[], max: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; out.length < max && groups.some((g) => i < g.length); i++) for (const g of groups) if (i < g.length && out.length < max) out.push(g[i]!);
+  return out;
+}
+
+/**
  * Observed statements the runtime reads off the records: what happened, with the records that
  * show it (CR-25). No interpretation, no assumption: those are the student's (or an AI
  * summary's, reviewed by the student). Student-facing Korean copy. Deterministic: the same
@@ -230,6 +250,12 @@ export function observedItems(
     if (!refs.length) return;
     items.push({ id: `o${items.length + 1}`, section: "observation", text, source_refs: refs, review: "draft", ...extra });
   };
+  // A statement over more sessions than one item may cite is split into parts that together
+  // cite every session, each part saying which part it is.
+  const addSplit = (text: string, refs: string[]) => {
+    const parts = Math.ceil(refs.length / RUNTIME_DRAFT_LIMITS.refsPerItem);
+    for (let i = 0; i < parts; i++) add(parts > 1 ? `${text} (근거 ${i + 1}/${parts})` : text, refs.slice(i * RUNTIME_DRAFT_LIMITS.refsPerItem, (i + 1) * RUNTIME_DRAFT_LIMITS.refsPerItem));
+  };
   const comparison = isComparison(experiment.declarations);
   const groups: Array<{ label: string; sessions: readonly ParticipantSession[] }> = comparison
     ? (experiment.declarations!.variants ?? []).map((v) => ({ label: `[${v.id}] `, sessions: sessions.filter((s) => s.variant === v.id) }))
@@ -240,29 +266,35 @@ export function observedItems(
       const started = g.sessions.filter((s) => s.tasks[label]?.started);
       const done = g.sessions.filter((s) => s.tasks[label]?.completed);
       const paused = started.filter((s) => !s.tasks[label]?.completed);
-      add(`${g.label}'${label}'을(를) 시작한 세션 ${started.length}개 중 ${done.length}개가 끝까지 마쳤어요.`, started.map((s) => sessionRef(s.session_id)));
-      if (paused.length) add(`${g.label}'${label}'을(를) 시작했지만 마치지 않은 세션이 ${paused.length}개 있어요.`, paused.map((s) => sessionRef(s.session_id)));
-    }
-  }
-  const returns = returnEvidence(experiment.declarations, sessions);
-  if (returns.status === "measured") {
-    for (const d of returns.devices) {
-      if (d.return_count < 1) continue;
-      const gaps = d.intervals_ms.map((ms) => `${days(ms)}일`).join(", ");
-      add(`같은 기기(익명 표시 ${d.pseudonym.slice(3, 9)})에서 ${d.sessions.length}번 열었어요. 다시 온 횟수 ${d.return_count}번, 사이 간격 ${gaps}.`, d.source_refs, { basis: "per_device_pseudonym" });
+      addSplit(`${g.label}'${label}'을(를) 시작한 세션 ${started.length}개 중 ${done.length}개가 끝까지 마쳤어요.`, started.map((s) => sessionRef(s.session_id)));
+      if (paused.length) addSplit(`${g.label}'${label}'을(를) 시작했지만 마치지 않은 세션이 ${paused.length}개 있어요.`, paused.map((s) => sessionRef(s.session_id)));
     }
   }
   if (comparison) {
     const results = variantResults(experiment, sessions, notes);
     if (results.every((r) => r.source_refs.length > 0)) {
+      // One statement; its references are drawn from every variant in turn, so it stays
+      // supported (CR-74) within the per-statement bound.
       add(
         `같은 기준으로 비교한 기록: ${results.map((r) => `${r.variant} 세션 ${r.sessions}개·기록 ${r.notes}개`).join(" / ")}.`,
-        results.flatMap((r) => r.source_refs),
+        balancedRefs(results.map((r) => r.source_refs), RUNTIME_DRAFT_LIMITS.refsPerItem),
         { compares: results.map((r) => r.variant) },
       );
     }
   }
-  return items;
+  const returns = returnEvidence(experiment.declarations, sessions);
+  if (returns.status === "measured") {
+    for (const d of returns.devices) {
+      // A return count must cite every session it counts (CR-72), so a device with more sessions
+      // than one statement may cite is left to the evidence read's `returns`, not the draft.
+      if (d.return_count < 1 || d.source_refs.length > RUNTIME_DRAFT_LIMITS.refsPerItem) continue;
+      const gaps = d.intervals_ms.map((ms) => `${days(ms)}일`).join(", ");
+      add(`같은 기기(익명 표시 ${d.pseudonym.slice(3, 9)})에서 ${d.sessions.length}번 열었어요. 다시 온 횟수 ${d.return_count}번, 사이 간격 ${gaps}.`, d.source_refs, { basis: "per_device_pseudonym", return_count: d.return_count });
+    }
+  }
+  // The draft's own bound: statements past it are left out of the draft (the evidence read
+  // still shows every session); tasks first, then the comparison, then returns.
+  return items.slice(0, RUNTIME_DRAFT_LIMITS.items);
 }
 
 /** The runtime's draft over the records, revision 1. Interpretations and assumptions are left for the student. */

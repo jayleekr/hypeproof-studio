@@ -329,6 +329,12 @@ export interface DraftItem {
   compares?: string[];
   /** Counts in this statement are per device pseudonym, never per person (CR-72). */
   basis?: "per_device_pseudonym";
+  /**
+   * With `basis`: the return count the statement claims (CR-72), structured so the store can
+   * check it against the cited sessions (sessions cited = return_count + 1, one pseudonym).
+   * Additive (decision 8).
+   */
+  return_count?: number;
 }
 
 export interface EvidenceDraft {
@@ -348,7 +354,7 @@ export type RefResolution = "ok" | "missing" | "deleted" | "foreign";
 
 export interface DraftRefusal {
   item: string;
-  code: "missing_source_refs" | "unresolved_source_ref" | "deleted_source_ref" | "foreign_source_ref";
+  code: "missing_source_refs" | "unresolved_source_ref" | "deleted_source_ref" | "foreign_source_ref" | "return_without_sessions" | "return_count_mismatch" | "return_sessions_not_one_device";
   ref?: string;
 }
 
@@ -367,7 +373,7 @@ export function validateEvidenceDraftShape(value: unknown): EvidenceDraft {
   check(Array.isArray(value.items) && value.items.length >= 1 && value.items.length <= 60, "invalid_draft_items");
   const ids = new Set<string>();
   for (const it of value.items) {
-    check(object(it) && keysWithin(it, ["id", "section", "text", "source_refs", "review", "reviewed_by", "compares", "basis"]), "invalid_draft_item");
+    check(object(it) && keysWithin(it, ["id", "section", "text", "source_refs", "review", "reviewed_by", "compares", "basis", "return_count"]), "invalid_draft_item");
     check(str(it.id, 60) && !ids.has(String(it.id)), "invalid_draft_item");
     ids.add(String(it.id));
     check((DRAFT_SECTIONS as readonly string[]).includes(String(it.section)) && str(it.text, 2000), "invalid_draft_item");
@@ -378,6 +384,7 @@ export function validateEvidenceDraftShape(value: unknown): EvidenceDraft {
     if (value.author !== "user") check(it.review === "draft", "invalid_review");
     if (it.compares !== undefined) check(Array.isArray(it.compares) && it.compares.length >= 2 && it.compares.length <= 4 && it.compares.every((v) => str(v, 64)) && new Set(it.compares).size === it.compares.length, "invalid_compares");
     if (it.basis !== undefined) check(it.basis === "per_device_pseudonym", "invalid_draft_item");
+    if (it.return_count !== undefined) check(it.basis === "per_device_pseudonym" && Number.isSafeInteger(it.return_count) && Number(it.return_count) >= 0 && Number(it.return_count) <= 1000, "invalid_draft_item");
   }
   return value as unknown as EvidenceDraft;
 }

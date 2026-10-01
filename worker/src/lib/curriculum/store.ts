@@ -330,11 +330,13 @@ export async function channelCountsOfProject(db: DB, projectId: string): Promise
 // ── cr-evidence (#1394): rate windows, test-data deletion, cohort controls ─────
 
 /**
- * Admit one more `kind` (`open` or `event`) on a link in its fixed window, atomically and in
- * one statement: false when the window already holds `max` (the request answers 429 and
- * writes nothing). A rate state, never a log of what was sent.
+ * Admit one more `kind` on a link in its fixed window, atomically and in one statement: false
+ * when the window already holds `max` (the request answers 429 and writes nothing). Kinds:
+ * `open` (session opens), `event` (event batches, all sessions of the link) and
+ * `session:<id>` (one participant session's event batches, bounded per link by its session
+ * bound). A rate state, never a log of what was sent.
  */
-export async function admitLinkRate(db: DB, linkId: string, kind: "open" | "event", now: number, windowMs: number, max: number): Promise<boolean> {
+export async function admitLinkRate(db: DB, linkId: string, kind: "open" | "event" | `session:${string}`, now: number, windowMs: number, max: number): Promise<boolean> {
   const r = await db
     .prepare(
       "INSERT INTO cr_link_rates (link_id, kind, window_start, count) VALUES (?, ?, ?, 1) ON CONFLICT(link_id, kind) DO UPDATE SET " +
@@ -365,25 +367,46 @@ export async function linksOfExperiment(db: DB, experimentId: string): Promise<T
 export async function closeExperimentAfterDeletion(db: DB, experiment: Experiment, now: number): Promise<Experiment> {
   await db.prepare("UPDATE cr_test_links SET revoked_at = ? WHERE experiment_id = ? AND revoked_at IS NULL").bind(now, experiment.id).run();
   await db.prepare("UPDATE cr_test_links SET sessions_opened = 0 WHERE experiment_id = ?").bind(experiment.id).run();
+  await db.prepare("DELETE FROM cr_link_rates WHERE kind LIKE 'session:%' AND link_id IN (SELECT id FROM cr_test_links WHERE experiment_id = ?)").bind(experiment.id).run();
   const next: Experiment = { ...experiment, status: "closed", data_deleted_at: now };
   await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, open_start_key = NULL, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
   return next;
 }
 
-/** One session key removed by a session erase: its link's counter follows the record (store.ts `reserveSession`). */
-export const releaseErasedSession = releaseSession;
+/** One session key removed by a session erase: its link's counter follows the record (store.ts `reserveSession`), and its own rate window goes. */
+export async function releaseErasedSession(db: DB, linkId: string, sessionId: string): Promise<void> {
+  await releaseSession(db, linkId);
+  await db.prepare("DELETE FROM cr_link_rates WHERE link_id = ? AND kind = ?").bind(linkId, `session:${sessionId}`).run();
+}
 
 /**
- * Experiments whose test data is due for deletion (Jay's decision 6): every link of the
- * experiment has ended (revoked, or past its expiry) at least `afterMs` ago, per the cohort's
- * period, and the data has not been deleted yet. An experiment with no link has no
- * participant data and is not listed.
+ * A manual record or draft was added to an experiment: its row's `updated_at` moves, which is
+ * when an experiment with no link ends for automatic deletion (`experimentsDueForDeletion`).
+ */
+export async function touchExperiment(db: DB, experimentId: string, now: number): Promise<void> {
+  await db.prepare("UPDATE cr_experiments SET updated_at = MAX(updated_at, ?) WHERE id = ?").bind(now, experimentId).run();
+}
+
+/** Are the curriculum-runtime tables there (migrations 0032 and 0033 applied)? One read of the schema, no table touched. */
+export async function curriculumTablesPresent(db: DB): Promise<boolean> {
+  const r = await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('cr_experiments', 'cr_projects', 'cr_test_links', 'cr_cohort_controls', 'cr_link_rates')").first<{ n: number }>();
+  return Number(r?.n ?? 0) === 5;
+}
+
+/**
+ * Experiments whose test data is due for deletion (Jay's decision 6): the experiment ended at
+ * least the cohort's period ago and its data has not been deleted yet. An experiment with
+ * links ends when every link has ended (revoked, or past its expiry). An experiment with no
+ * link can still hold manual records (interview notes and quotes about outside people, an
+ * outside alternative observed through notes only), so it is not exempt: it ends at its last
+ * record, the row's `updated_at`, which every note and draft moves (`touchExperiment`).
  */
 export async function experimentsDueForDeletion(db: DB, now: number, periodFor: (cohortId: string) => number): Promise<Array<{ experiment: Experiment; project: Project; ended_at: number }>> {
   const rows = await db
     .prepare(
-      "SELECT e.doc AS doc, p.doc AS project_doc, MAX(COALESCE(l.revoked_at, l.expires_at)) AS ended_at, MAX(CASE WHEN l.revoked_at IS NULL AND l.expires_at > ? THEN 1 ELSE 0 END) AS live " +
-        "FROM cr_experiments e JOIN cr_projects p ON p.id = e.project_id JOIN cr_test_links l ON l.experiment_id = e.id GROUP BY e.id",
+      "SELECT e.doc AS doc, p.doc AS project_doc, CASE WHEN COUNT(l.id) = 0 THEN e.updated_at ELSE MAX(COALESCE(l.revoked_at, l.expires_at)) END AS ended_at, " +
+        "MAX(CASE WHEN l.id IS NOT NULL AND l.revoked_at IS NULL AND l.expires_at > ? THEN 1 ELSE 0 END) AS live " +
+        "FROM cr_experiments e JOIN cr_projects p ON p.id = e.project_id LEFT JOIN cr_test_links l ON l.experiment_id = e.id GROUP BY e.id",
     )
     .bind(now)
     .all<{ doc: string; project_doc: string; ended_at: number; live: number }>();

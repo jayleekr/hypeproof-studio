@@ -7,20 +7,22 @@
 // way the student's delete action takes it (`deleteTask` and its tombstone; links revoked,
 // counters reset, the Experiment record closed with `data_deleted_at`).
 //
-// Runs on the daily tick. A Service with no test origin configured (`HPS_TEST_ORIGIN` unset,
-// the default) can hold no participant data, and the tick does nothing there, not even a
-// query, so it never touches tables a production that has not applied migration 0032/0033
-// does not have.
+// An experiment with no link ends at its last manual record or draft (store.ts
+// `experimentsDueForDeletion`): interview notes and quotes about outside people go too.
+//
+// Runs on the daily tick, gated on the tables being there, not on a test origin: projects,
+// experiments and notes need no test origin, so a Service without one can still hold manual
+// records. Where migrations 0032/0033 are not applied (production today) one read of the
+// schema answers and nothing else runs.
 
 import type { Env } from "../../env";
-import { parseTestOrigin } from "./test-origin";
-import { allCohortControls, closeExperimentAfterDeletion, DEFAULT_RETENTION_DAYS, experimentsDueForDeletion } from "./store";
+import { allCohortControls, closeExperimentAfterDeletion, curriculumTablesPresent, DEFAULT_RETENTION_DAYS, experimentsDueForDeletion } from "./store";
 import { participantRecord, type R2Like } from "./participant-record";
 
 const DAY = 24 * 3600_000;
 
 export async function runCurriculumRetention(env: Env, now: number, limit = 25): Promise<{ ran: boolean; deleted: string[] }> {
-  if (!parseTestOrigin(env.HPS_TEST_ORIGIN, env.ENVIRONMENT).ok) return { ran: false, deleted: [] };
+  if (!(await curriculumTablesPresent(env.HPS_DB))) return { ran: false, deleted: [] };
   const controls = await allCohortControls(env.HPS_DB);
   const due = await experimentsDueForDeletion(env.HPS_DB, now, (cohort) => (controls.get(cohort)?.retention_days_after_end ?? DEFAULT_RETENTION_DAYS) * DAY);
   const deleted: string[] = [];

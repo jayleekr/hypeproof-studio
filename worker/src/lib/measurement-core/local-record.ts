@@ -6,6 +6,7 @@
 // resolve only after the value is durable; `submit` still reads every submission back
 // before it issues a receipt, so a port that loses or truncates data cannot fake one.
 import { validateObservation, type ObservationEvent } from "./legacy-observation.ts";
+import { returnItemProblem } from "./participant-evidence.ts";
 import { draftRefusals, validateEvidenceDraftShape, validateInterpretation, type DraftRefusal, type EvidenceDraft, type Interpretation, type RefResolution } from "./interpretation.ts";
 import type { TeacherState } from "./learning-events.ts";
 
@@ -689,9 +690,27 @@ export class LocalRecord {
     const task = await this.getTask(taskId);
     check(task.project === link.attribution.project, "invalid_session_attribution");
     const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
+    // A session erased by `deleteSession` never comes back through a replayed open (CR-69).
+    check(!(await this.sessionDeleted(link.host, link.session_id)), "session_deleted");
+    // CR-65: one pseudonym belongs to one experiment. Its index key is written once; a pseudonym
+    // already recorded under another task of this record is refused.
+    if (link.pseudonym) {
+      const pKey = `pseudonyms/${enc(link.host)}/${link.pseudonym}`;
+      if (!(await this.#write(pKey, { task: taskId }, true, "none"))) check((await this.#read<{ task: string }>(pKey))?.task === taskId, "pseudonym_in_other_experiment");
+    }
     if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) return { created: true };
     check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
     return { created: false };
+  }
+
+  /** Was this session erased (`deleteSession`'s tombstone)? */
+  async sessionDeleted(host: string, sessionId: string): Promise<boolean> {
+    return (await this.#read(`deleted/sessions/${enc(host)}/${enc(sessionId)}`)) !== null;
+  }
+
+  /** The keys every deletion so far removed, read once so a caller resolving many references does not re-read them per reference. */
+  async deletedEvidenceKeys(): Promise<Set<string>> {
+    return this.#deletedEvidence();
   }
 
   async taskForSession(host: string, sessionId: string): Promise<string | null> {
@@ -735,7 +754,18 @@ export class LocalRecord {
   async appendObservations(
     host: string,
     value: unknown,
-    options: { excludedPaths?: readonly string[]; quota?: "review" | "none"; gaps?: boolean } = {},
+    options: {
+      excludedPaths?: readonly string[];
+      quota?: "review" | "none";
+      gaps?: boolean;
+      /**
+       * Is an event already stored under the same id the same event? Default: byte-identical
+       * canonical JSON. A caller that stamps its own receive time on each event (the participant
+       * events route) passes a comparison of what the client sent, so a redelivered batch is a
+       * duplicate, not a conflict.
+       */
+      sameEvent?: (stored: ObservationEvent, incoming: ObservationEvent) => boolean;
+    } = {},
   ): Promise<{ task: string | null; stored: number; duplicates: number; refused_deleted: number; exclusions: ExclusionNote[]; missing: number[] }> {
     check(text(host, 100), "invalid_host");
     const { batch, missing } = validateObservation(value);
@@ -773,7 +803,7 @@ export class LocalRecord {
       else {
         // Duplicate delivery is fine; different content under the same id is never overwritten.
         const existing = await this.#read<ObservationRecord>(key);
-        check(existing && canonicalJson(existing.event) === canonicalJson(record.event), "conflicting_event");
+        check(existing && (options.sameEvent ? options.sameEvent(existing.event, record.event) : canonicalJson(existing.event) === canonicalJson(record.event)), "conflicting_event");
         duplicates++;
       }
       const first: Assignment = { task, history: [{ from: null, to: task, by: "adapter_explicit", reason: task ? "session_link" : "no_session_link", at: raw.at }] };
@@ -1066,6 +1096,18 @@ export class LocalRecord {
     check(draft.experiment === taskId, "invalid_evidence_draft");
     const deleted = await this.#deletedEvidence();
     const refusals = await draftRefusals(draft, (ref) => this.resolveEvidenceRef(taskId, ref, deleted));
+    // CR-72: a statement counted per device pseudonym is a return count over the sessions it
+    // cites; the count, the sessions and their one pseudonym must agree, or it is refused.
+    for (const it of draft.items) {
+      if (it.basis !== "per_device_pseudonym" || refusals.some((r) => r.item === it.id)) continue;
+      const pseudonyms = new Map<string, string | null>();
+      for (const ref of it.source_refs) {
+        const key = ref.startsWith("session:") ? this.evidenceRefKey(taskId, ref) : null;
+        if (key) pseudonyms.set(ref, (await this.#read<{ pseudonym?: string }>(key))?.pseudonym ?? null);
+      }
+      const problem = returnItemProblem(it, (ref) => pseudonyms.get(ref) ?? null);
+      if (problem) refusals.push({ item: it.id, code: problem });
+    }
     if (refusals.length) return { ok: false, refusals };
     if (draft.revision > 1) check(await this.#read(draftKey(taskId, { id: draft.id, revision: draft.revision - 1 })), "missing_previous_revision");
     const key = draftKey(taskId, draft);
@@ -1359,6 +1401,8 @@ export class LocalRecord {
       await this.#remove(k);
       removed.sessions++;
     }
+    // cr-evidence (CR-65): the task's pseudonym index keys go with its sessions.
+    for (const k of await this.#keys("pseudonyms/")) if ((await this.#read<{ task: string }>(k))?.task === taskId) await this.#remove(k);
     if (named.size) {
       // Bytes another remaining observation still names stay (content-addressed, shared).
       for (const k of await this.#keys("observations/")) for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.delete(d);

@@ -44,23 +44,26 @@ window.hypeproof=window.hypeproof||{};window.hypeproof.test=Object.freeze({sessi
  *   - `task_start` / `task_complete` / `milestone` from the student's app through
  *     `window.hypeproof.test.task(label, "start" | "complete")` and `.milestone(label)`.
  * Events wait in memory until the session half has opened the session, then go in batches
- * of at most 50 to POST /l/<link>/__hp/events with the session token; a 409 (not open yet),
- * 429 or 5xx is retried a bounded number of times. Sequence numbers live in their own
+ * of at most 50 to POST /l/<link>/__hp/events with the session token. Only a transient refusal
+ * is retried, a bounded number of times: 409 `session_not_open` (the open has not landed yet),
+ * 429 and 5xx. Any other refusal (a conflicting event, a version mismatch, a deleted session,
+ * a malformed batch) drops that batch, so one refused batch never holds back the session's
+ * later events. A redelivered batch the Service already stored answers 204 (a duplicate). Sequence numbers live in their own
  * sessionStorage key (the session half rewrites its own), at most 300 per session. No identity
  * field exists to send (CR-65). The test (worker/test/cr-evidence.test.mjs) runs these bytes.
  */
-export const PARTICIPANT_EVENTS_SNIPPET = `(function(){var W=window,C=W.__hpTest||{},K="hp:test:"+C.link,E=K+":e",S,Q=[],B=0,D=C.raw_input||[];try{S=W.sessionStorage}catch(e){}
+export const PARTICIPANT_EVENTS_SNIPPET = `(function(){var W=window,C=W.__hpTest||{},K="hp:test:"+C.link,E=K+":e",S,Q=[],B=0,D=C.raw_input||[],d=document;try{S=W.sessionStorage}catch(e){}
 function g(k){try{return JSON.parse(S.getItem(k)||"null")}catch(e){return null}}
 function p(k,v){try{S.setItem(k,JSON.stringify(v))}catch(e){}}
 function ev(k,o){if(!g(K))return;var s=g(E)||{n:0};if(s.n>=300)return;s.n++;p(E,s);o=o||{};o.kind=k;o.seq=s.n;Q.push(o);f(0)}
 function r(t,b){Q=b.concat(Q);if(t<40)setTimeout(function(){f(t+1)},400)}
 function f(t){if(B||!Q.length)return;var x=g(K);if(!x||!x.o)return r(t,[]);B=1;var b=Q.splice(0,50);
-W.fetch("/l/"+C.link+"/__hp/events",{method:"POST",body:JSON.stringify({token:x.session_token,events:b}),keepalive:true}).then(function(q){B=0;q.status==409||q.status==429||q.status>499?r(t,b):f(0)},function(){B=0;r(t,b)})}
+W.fetch("/l/"+C.link+"/__hp/events",{method:"POST",body:JSON.stringify({token:x.session_token,events:b}),keepalive:!0}).then(function(q){B=0;q.status==429||q.status>499||/not_open/.test(q.headers.get("x-hp-refusal"))?r(t,b):f(0)},function(){B=0;r(t,b)})}
 function pa(n){for(var a=[],i=0,c,s;n&&n.nodeType==1&&i<6;i++,n=n.parentNode){for(c=1,s=n.previousElementSibling;s;s=s.previousElementSibling)s.tagName==n.tagName&&c++;a.unshift(n.tagName.toLowerCase()+(c>1?":"+c:""))}return a.join(">")}
 function tg(n){return{role:((n.getAttribute&&n.getAttribute("role"))||n.tagName.toLowerCase()).slice(0,40),path:pa(n)}}
 if(g(K)){var z=g(E)||{n:0};if(!z.s){z.s=1;p(E,z);ev("session_start")}ev("page_view",{path:"/"+location.pathname.split("/").slice(3).join("/").slice(0,299)})}
-document.addEventListener("click",function(e){var n=e.target;n&&n.nodeType==1&&ev("click",{target:tg(n)})},!0);
-document.addEventListener("change",function(e){var n=e.target;if(!n||!/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName))return;var k=String(n.name||n.id||"").slice(0,60),o={target:tg(n)};if(k)o.field=k;if(k&&D.indexOf(k)>=0&&n.value)o.value=n.value.slice(0,2000);ev("input",o)},!0);
+d.addEventListener("click",function(e){var n=e.target;n&&n.nodeType==1&&ev("click",{target:tg(n)})},!0);
+d.addEventListener("change",function(e){var n=e.target;if(!n||!/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName))return;var k=String(n.name||n.id||"").slice(0,60),o={target:tg(n)};if(k)o.field=k;if(k&&~D.indexOf(k)&&n.value)o.value=n.value.slice(0,2000);ev("input",o)},!0);
 var T=(W.hypeproof||{}).test||{};W.hypeproof=W.hypeproof||{};W.hypeproof.test=Object.freeze({session_id:T.session_id,pseudonym:T.pseudonym,task:function(l,h){ev(h=="complete"?"task_complete":"task_start",{label:String(l).slice(0,80)})},milestone:function(l){ev("milestone",{label:String(l).slice(0,80)})}})})();`;
 
 export interface SnippetConfig {

@@ -252,11 +252,18 @@ async function recordEvents(c: Ctx, linkId: string): Promise<Response> {
   if (!claims) return refused(403, "invalid_session_token");
   const record = participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id);
   const session = await record.sessionLink(PUBLISHED_HOST, claims.session);
+  // An erased session (CR-69) is gone for good: a permanent refusal, so the page stops sending.
+  if (!session && (await record.sessionDeleted(PUBLISHED_HOST, claims.session))) return refused(409, "session_deleted");
   if (!session || session.task !== experiment.id || !session.attribution || session.attribution.link !== link.id) return refused(409, "session_not_open");
   if (session.attribution.product_version !== version.id) return refused(409, "session_version_mismatch");
+  // The session's own window first (CR-80's isolation on this path): one session re-sending
+  // cannot spend the link's shared window that other participants' events need.
+  if (!(await admitLinkRate(c.env.HPS_DB, link.id, `session:${claims.session}`, now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerSessionWindow))) return refused(429, "rate_limited");
   if (!(await admitLinkRate(c.env.HPS_DB, link.id, "event", now, EVIDENCE_LIMITS.windowMs, EVIDENCE_LIMITS.eventBatchesPerWindow))) return refused(429, "rate_limited");
   const built = participantEvents({ experiment, sessionId: claims.session, link: { attribution: session.attribution, ...(session.pseudonym ? { pseudonym: session.pseudonym } : {}) }, linkId: link.id, events: body?.events, now });
   if (!built.ok) return refused(built.code === "session_event_limit" || built.code === "too_many_events" ? 413 : 400, built.code);
+  // Every event of the batch named an undeclared label: nothing to store.
+  if (built.events.length === 0) return new Response(null, { status: 204, headers: baseHeaders() });
   try {
     await appendParticipantEvents(record, experiment.id, claims.session, built.events);
   } catch (e) {

@@ -63,7 +63,7 @@ import {
 import { hypeproofTokensIn, judgeToken, scanFile, type ScanHit } from "../lib/curriculum/publish-scan";
 import { originFor, parseTestOrigin, shareUrl } from "../lib/curriculum/test-origin";
 import { EVIDENCE_LIMITS, addNote, ensureExperimentTask, experimentEvidence, noteEvent, participantRecord, PUBLISHED_HOST, type R2Like } from "../lib/curriculum/participant-record";
-import { closeExperimentAfterDeletion, getCohortControls, releaseErasedSession } from "../lib/curriculum/store";
+import { closeExperimentAfterDeletion, getCohortControls, releaseErasedSession, touchExperiment } from "../lib/curriculum/store";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
 
@@ -550,7 +550,8 @@ async function evidenceReader(c: Ctx, id: string) {
   if (payload.role !== "issuer") {
     const s = await student(c);
     if (s instanceof Response) return s;
-    return memberExperiment(c, s, id);
+    const m = await memberExperiment(c, s, id);
+    return m instanceof Response ? m : { ...m, by: "student" as const };
   }
   // A director: no D1 read before the switch is known to be on for a profile this issuer serves (CR-02).
   let anyOn = false;
@@ -569,7 +570,20 @@ async function evidenceReader(c: Ctx, id: string) {
   if (!resolved || !curriculumRuntimeAllowed(resolved.profile)) return unknownRoute(c);
   noStore(c);
   if (payload.jti && (await isTokenRevoked(c.env.HPS_KV, payload.jti))) return refuse(c, 401, "revoked");
-  return { experiment, project, record: participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id) };
+  return { experiment, project, record: participantRecord(c.env.HPS_TRACES as unknown as R2Like, project.cohort_id, project.id), by: "director" as const };
+}
+
+/**
+ * Who may delete an experiment's test data (CR-69, CR-70): the evidence reader's rule. A member
+ * of the Project, unless the cohort reserved deletion for directors (`student_deletion: false`,
+ * then 403 `deletion_reserved`); a director whose scope covers the Project always may. Anyone
+ * else gets the unknown-route answer.
+ */
+async function evidenceDeleter(c: Ctx, id: string) {
+  const r = await evidenceReader(c, id);
+  if (r instanceof Response) return r;
+  if (r.by === "student" && !(await getCohortControls(c.env.HPS_DB, r.project.cohort_id)).student_deletion) return refuse(c, 403, "deletion_reserved");
+  return r;
 }
 
 curriculum.get("/experiments/:id/evidence", async (c) => {
@@ -603,6 +617,8 @@ curriculum.post("/experiments/:id/notes", async (c) => {
     if (/^(invalid_|missing_|identity_field|ai_text_as_student|unsupported_)/.test(code)) return refuse(c, 400, code);
     throw e;
   }
+  // The experiment's last record moved (when one with no link ends, decision 6).
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ note: built.event }, 201);
 });
 
@@ -635,8 +651,12 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
     if (!d) return refuse(c, 409, "no_evidence_recorded");
     draft = d;
   } else {
-    const author = body.author === "ai" ? "ai" : "user";
-    draft = { format: "hps-evidence-draft/1", id, revision: 1, supersedes: null, experiment: r.experiment.id, author, created_at: now, items: body.items };
+    // The author is stated, never defaulted: an AI tool that left it out would otherwise be
+    // stored as the student (cr-skills calls this route). And revision 1 holds drafts only:
+    // accepting or editing is the review route's, a new revision by the student (CR-26, MC-22).
+    if (body.author !== "ai" && body.author !== "user") return refuse(c, 400, "missing_author");
+    if (Array.isArray(body.items) && body.items.some((i) => !i || typeof i !== "object" || (i as { review?: unknown }).review !== "draft")) return refuse(c, 400, "invalid_review");
+    draft = { format: "hps-evidence-draft/1", id, revision: 1, supersedes: null, experiment: r.experiment.id, author: body.author, created_at: now, items: body.items };
   }
   let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
   try {
@@ -647,6 +667,7 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
     throw e;
   }
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
+  await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   return c.json({ draft: saved.draft }, 201);
 });
 
@@ -682,14 +703,12 @@ curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
  * Delete an experiment's test data (CR-69): every participant session, event, manual record
  * and evidence draft in its record (`deleteTask`, MC-31), with the receipt it returns. Its
  * links are revoked and its session counters follow; the Experiment record stays, closed, with
- * when its data was deleted. A cohort may reserve deletion for directors (CR-70).
+ * when its data was deleted. A cohort may reserve deletion for directors (CR-70); an in-scope
+ * director can always delete (`evidenceDeleter`), so the action never disappears for a cohort.
  */
 curriculum.delete("/experiments/:id", async (c) => {
-  const s = await student(c);
-  if (s instanceof Response) return s;
-  const r = await memberExperiment(c, s, c.req.param("id"));
+  const r = await evidenceDeleter(c, c.req.param("id"));
   if (r instanceof Response) return r;
-  if (!(await getCohortControls(c.env.HPS_DB, r.project.cohort_id)).student_deletion) return refuse(c, 403, "deletion_reserved");
   const now = Date.now();
   let report: Awaited<ReturnType<typeof r.record.deleteTask>> | null = null;
   try {
@@ -698,24 +717,21 @@ curriculum.delete("/experiments/:id", async (c) => {
     if (!(e instanceof Error) || e.message !== "unknown_task") throw e;
   }
   const experiment = await closeExperimentAfterDeletion(c.env.HPS_DB, r.experiment, now);
-  return c.json({ receipt: { kind: "experiment_test_data_deleted", experiment_id: experiment.id, at: now, removed: report?.removed ?? {}, not_covered: report?.not_covered ?? [], links_revoked: true }, experiment });
+  return c.json({ receipt: { kind: "experiment_test_data_deleted", experiment_id: experiment.id, at: now, deleted_by: r.by, removed: report?.removed ?? {}, not_covered: report?.not_covered ?? [], links_revoked: true }, experiment });
 });
 
 /** Delete one participant session (CR-69; recon R6's per-session erase), with its receipt; the link's counter follows. */
 curriculum.delete("/experiments/:id/sessions/:sid", async (c) => {
-  const s = await student(c);
-  if (s instanceof Response) return s;
-  const r = await memberExperiment(c, s, c.req.param("id"));
+  const r = await evidenceDeleter(c, c.req.param("id"));
   if (r instanceof Response) return r;
-  if (!(await getCohortControls(c.env.HPS_DB, r.project.cohort_id)).student_deletion) return refuse(c, 403, "deletion_reserved");
   const sid = c.req.param("sid");
   if (!/^ps-[0-9a-f]{32}$/.test(sid)) return unknownRoute(c);
   const link = await r.record.sessionLink(PUBLISHED_HOST, sid);
   if (!link || link.task !== r.experiment.id) return unknownRoute(c);
   const now = Date.now();
   const report = await r.record.deleteSession(PUBLISHED_HOST, sid, { by: "user", at: now });
-  if (link.attribution?.link) await releaseErasedSession(c.env.HPS_DB, link.attribution.link);
-  return c.json({ receipt: { kind: "participant_session_deleted", experiment_id: r.experiment.id, session_id: sid, at: now, removed: report.removed, not_covered: report.not_covered } });
+  if (link.attribution?.link) await releaseErasedSession(c.env.HPS_DB, link.attribution.link, sid);
+  return c.json({ receipt: { kind: "participant_session_deleted", experiment_id: r.experiment.id, session_id: sid, at: now, deleted_by: r.by, removed: report.removed, not_covered: report.not_covered } });
 });
 
 /** The CR-T02 Worker inventory of this router, as `METHOD /path` under /v1/curriculum. */

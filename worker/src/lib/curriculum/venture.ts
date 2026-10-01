@@ -54,6 +54,13 @@ export interface ExperimentDeclarations {
   devices?: Device[];
   raw_input?: { fields: string[] };
   variants?: Array<{ id: string; product_version_id?: string; alternative?: string }>;
+  /**
+   * The task and milestone names the app reports through `window.hypeproof.test.task/milestone`
+   * (cr-evidence, CR-23, CR-67; additive per decision 8). A label is free text the page sends,
+   * so only a declared name is stored: an event naming anything else (a typed value passed as a
+   * label) is dropped, never kept.
+   */
+  labels?: string[];
 }
 
 export interface Experiment {
@@ -169,10 +176,13 @@ export function validateExperimentContract(v: unknown): Validation<Omit<Experime
   return { ok: true, value: out };
 }
 
+/** Task and milestone names one experiment may declare (`declarations.labels`). */
+export const MAX_DECLARED_LABELS = 30;
+
 export function declarationProblems(d: unknown): string[] {
   if (!isObj(d)) return ["invalid:declarations"];
   const problems: string[] = [];
-  for (const k of Object.keys(d)) if (!["repeated_use", "devices", "raw_input", "variants"].includes(k)) problems.push(`invalid:declarations.${k}`);
+  for (const k of Object.keys(d)) if (!["repeated_use", "devices", "raw_input", "variants", "labels"].includes(k)) problems.push(`invalid:declarations.${k}`);
   if (d.repeated_use !== undefined && d.repeated_use !== true) problems.push("invalid:declarations.repeated_use");
   if (d.devices !== undefined) {
     const ds = d.devices;
@@ -181,6 +191,10 @@ export function declarationProblems(d: unknown): string[] {
   if (d.raw_input !== undefined) {
     const r = d.raw_input;
     if (!isObj(r) || !Array.isArray(r.fields) || r.fields.length === 0 || !r.fields.every((x) => str(x, 60))) problems.push("invalid:declarations.raw_input");
+  }
+  if (d.labels !== undefined) {
+    const ls = d.labels;
+    if (!Array.isArray(ls) || ls.length === 0 || ls.length > MAX_DECLARED_LABELS || !ls.every((x) => str(x, 80)) || new Set(ls.map((x) => String(x).trim())).size !== ls.length) problems.push("invalid:declarations.labels");
   }
   if (d.variants !== undefined) {
     const vs = d.variants;

@@ -134,7 +134,7 @@ With `scripts/dev-stack.sh` (wrangler dev) instead: apply the migration to the l
 
 ## `cr-evidence` — Evidence capture (#1394)
 
-**Flag:** the same `curriculum_runtime: { enabled: true }` and `HPS_TEST_ORIGIN` as `cr-publish`. Nothing else. The cohort's admin controls (`/admin/curriculum/cohorts/<cohort>/controls`) start at the defaults: data deleted 30 days after an experiment's last link ended, raw-input declarations allowed, no link expiry default, students may delete their test data, no team ceilings.
+**Flag:** the same `curriculum_runtime: { enabled: true }` and `HPS_TEST_ORIGIN` as `cr-publish`. Nothing else. The cohort's admin controls (`/admin/curriculum/cohorts/<cohort>/controls`) start at the defaults: data deleted 30 days after an experiment ended (its last link ended, or its last note when it never had a link), raw-input declarations allowed, no link expiry default, students may delete their test data, no team ceilings.
 
 **Fastest check (background, no app, no phone).**
 
@@ -156,7 +156,7 @@ It publishes the kiosk fixture from the panel, opens three participant visits th
 
 | Step | What the student does | Expected (in student terms) |
 |---|---|---|
-| 1 | Publishes the kiosk with "같은 사람이 다시 와서 쓰는지 볼래요" ticked, opens the QR on a phone and orders a drink | Nothing visible changes on the phone; the kiosk works as before |
+| 1 | Publishes the kiosk with "같은 사람이 다시 와서 쓰는지 볼래요" ticked and `주문` in "기록할 과제 이름", opens the QR on a phone and orders a drink | Nothing visible changes on the phone; the kiosk works as before. Only task names written in that box are recorded |
 | 2 | Runs "HypeProof: 실험 증거 보기" | A "실험 증거" box: the experiment, "참가 세션 1개 · 메모 0개", "다시 온 기기: 아직 없음" |
 | 3 | Opens the link again on the same phone the next day (or a minute later), then reopens the box | "다시 온 기기: <6글자> 1번 (간격 …일)" and "기기 기준이에요. 사람 수가 아니에요." An experiment published without the tick says "측정하지 않음", never 0 |
 | 4 | Opens "기록 남기기", picks "인터뷰 메모", writes what the participant said, fills 누가 · 언제 · 어떤 상황, and tries to save without choosing "실제로 있었던 일" | The save button stays off until a source state is chosen; nothing is chosen for them |
