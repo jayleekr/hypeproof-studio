@@ -14,6 +14,9 @@ export interface MemoryItemView {
   revision: number;
   experiment_id: string;
   revisions: Array<{ revision: number; confidence: Confidence; statement: string }>;
+  created_by?: "student" | "system";
+  /** An AI or runtime draft item the student has not reviewed yet. */
+  pending_review?: boolean;
   assumption_status?: "open" | "observed_later";
   cited_by?: Array<{ decision_id: string; shown_as: "team_decision" | "ai_suggestion" }>;
   slides?: number[];
@@ -36,14 +39,16 @@ export interface MemoryAnswer {
   format: "hps-venture-memory/1";
   project: { id: string; title: string; members: string[] };
   problem: string | null;
-  stakeholders: Array<{ id: string; label: string; payer_and_user: boolean; roles_shown: Array<{ role: string; confidence: "observed" | "assumed" }> }>;
+  stakeholders: Array<{ id: string; label: string; payer_and_user: boolean; roles_shown: Array<{ role: string; confidence: "observed" | "assumed" | "unsupported" }> }>;
   hypotheses: Array<{ id: string; statement: string; status: string; revision: number; revisions: Array<{ revision: number; statement: string; status: string }> }>;
-  experiments: Array<{ id: string; question: string; week: number; status: string; hypothesis_id: string; product_version_id: string }>;
+  experiments: Array<{ id: string; question: string; week: number; status: string; hypothesis_id: string; product_version_id: string; method?: string; success_criteria?: string[] }>;
   evidence_items: MemoryItemView[];
   decisions: MemoryDecisionView[];
-  versions: Array<{ id: string; created_at: number; entry_html: string }>;
-  metrics: Array<{ id: string; name: string; unit: string; metric_kind: string; value: { status: "result" | "unsupported" | "evidence_only"; value: number | null; source_refs: string[]; not_counted: Record<string, number> } }>;
+  versions: Array<{ id: string; created_at: number; entry_html: string; files?: Array<{ path: string; sha256: string; bytes: number }> }>;
+  metrics: Array<{ id: string; name: string; unit: string; metric_kind: string; value: { status: "result" | "unsupported" | "evidence_only"; value: number | null; source_refs: string[]; not_counted: Record<string, number>; evidence?: Array<{ ref: string; confidence: Confidence; review: string }> } }>;
   deck_slides: Array<{ number: number; title: string; revision: number }>;
+  /** Every stored slide revision (a timeline entry opens one). */
+  slide_revisions?: Array<{ number: number; title: string; body: string; revision: number; evidence_refs: string[]; decision_id?: string }>;
   register: { observed: MemoryItemView[]; interpreted: MemoryItemView[]; assumed: MemoryItemView[] };
   timeline: Array<{ at: number; entry: string; label: string; record: { kind: string; id: string; revision?: number } }>;
   belief_changes: Array<{ hypothesis_id: string; before: { statement: string; status: string }; after: { statement: string; status: string }; decision: { id: string; statement: string } | null; evidence: Array<{ ref: string; statement: string }>; reason: "recorded" | "reason_not_recorded" }>;
@@ -80,6 +85,49 @@ export const ENTRY_LABEL: Record<string, string> = {
   deck_slide: "발표 슬라이드",
 };
 export const CHANGE_LABEL: Record<string, string> = { added: "새로 생김", removed: "없어짐", modified: "바뀜" };
+export const ROLE_CONFIDENCE_SUFFIX: Record<string, string> = { observed: "", assumed: " (가정)", unsupported: " (근거를 찾을 수 없어요)" };
+
+/**
+ * What a timeline entry opens (CR-78): the stored record it names, read from the same memory
+ * answer — a hypothesis revision, an experiment, a version's files, an evidence item's
+ * revisions, a decision with what it rests on, a slide revision. Null when the answer holds no
+ * such record (the panel says so instead of showing nothing).
+ */
+export function timelineRecord(m: MemoryAnswer, ref: MemoryAnswer["timeline"][number]["record"]): { title: string; lines: string[] } | null {
+  const statementOf = (r: string) => m.evidence_items.find((i) => i.id === r)?.statement ?? "찾을 수 없는 근거";
+  switch (ref.kind) {
+    case "hypothesis": {
+      const rev = m.hypotheses.find((h) => h.id === ref.id)?.revisions.find((r) => r.revision === ref.revision);
+      return rev ? { title: `가설 ${rev.revision}번째 기록`, lines: [rev.statement, `상태: ${STATUS_LABEL[rev.status] ?? rev.status}`] } : null;
+    }
+    case "experiment": {
+      const e = m.experiments.find((x) => x.id === ref.id);
+      return e ? { title: `${e.week}주차 실험`, lines: [e.question, ...(e.method ? [`방법: ${e.method}`] : []), ...(e.success_criteria ?? []).map((c) => `성공 기준: ${c}`)] } : null;
+    }
+    case "product_version": {
+      const v = m.versions.find((x) => x.id === ref.id);
+      return v ? { title: `제품 버전 ${v.id.replace(/^sha256:/, "").slice(0, 8)}`, lines: [`시작 파일: ${v.entry_html}`, ...(v.files ?? []).map((f) => `${f.path} · ${f.sha256.replace(/^sha256:/, "").slice(0, 8)}`)] } : null;
+    }
+    case "evidence_item": {
+      const it = m.evidence_items.find((x) => x.id === ref.id);
+      return it ? { title: `근거 · ${CONFIDENCE_LABEL[it.confidence]}`, lines: it.revisions.map((r) => `${r.revision}번째 기록 · ${CONFIDENCE_LABEL[r.confidence]} · ${r.statement}`) } : null;
+    }
+    case "decision": {
+      const d = m.decisions.find((x) => x.id === ref.id);
+      if (!d) return null;
+      return {
+        title: d.shown_as === "ai_suggestion" ? "AI 제안 (팀 결정 아님)" : "팀 결정",
+        lines: [d.statement, ...(d.evidence.length ? d.evidence.map((e) => `근거: ${e.statement ?? "찾을 수 없는 근거"}`) : ["근거가 연결되지 않았어요"]), ...d.assumptions.map((a) => `기대는 가정: ${a.statement ?? "찾을 수 없는 가정"}`), ...(d.affected_deck_slides.length ? [`슬라이드 ${d.affected_deck_slides.join(", ")}`] : [])],
+      };
+    }
+    case "deck_slide": {
+      const sl = (m.slide_revisions ?? []).find((x) => String(x.number) === ref.id && x.revision === ref.revision);
+      return sl ? { title: `발표 슬라이드 ${sl.number} · ${sl.revision}번째 기록`, lines: [sl.title, sl.body, ...sl.evidence_refs.map((r) => `근거: ${statementOf(r)}`)].filter(Boolean) } : null;
+    }
+    default:
+      return null;
+  }
+}
 
 /** "we believed X; after this evidence we believe Y; so we changed Z" — only from the links; otherwise the fixed sentence. */
 export function beliefSentence(b: MemoryAnswer["belief_changes"][number]): string {

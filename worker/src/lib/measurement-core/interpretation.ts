@@ -435,6 +435,10 @@ export function reviseEvidenceDraft(
   check(Array.isArray(actions) && actions.length >= 1 && actions.length <= 60 && str(input.reason, 1000), "invalid_review");
   const byId = new Map(previous.items.map((i) => [i.id, i]));
   const next = previous.items.map((i) => ({ ...i, source_refs: [...i.source_refs] }));
+  // One action per item per revision: two actions on one item (an edit then a promotion, an
+  // accept then a reject) would make the revision say something the student never chose whole.
+  const named = actions.map((a) => (object(a) ? String(a.item) : ""));
+  check(new Set(named).size === named.length, "duplicate_item_action");
   for (const a of actions) {
     check(object(a) && byId.has(String(a.item)) && ["accept", "edit", "reject", "promote"].includes(String(a.action)), "invalid_review");
     const item = next.find((i) => i.id === a.item)!;
@@ -446,7 +450,11 @@ export function reviseEvidenceDraft(
       // evidence item, an AI summary or a skill's statement is not a record and does not match
       // `EVIDENCE_REF`, so a promotion resting only on one is refused.
       check(item.section === "assumption" && item.review !== "rejected", "promotion_not_assumption");
-      check(a.text === undefined, "promotion_changes_statement");
+      // Word for word against the previous revision, not against this batch: an `edit` of the
+      // same item earlier in the batch would otherwise promote a statement that was never the
+      // assumption (the duplicate-item rule above refuses that batch already; this holds even
+      // without it).
+      check(a.text === undefined && item.text === byId.get(String(a.item))!.text, "promotion_changes_statement");
       check(Array.isArray(a.source_refs) && a.source_refs.length >= 1, "promotion_without_sources");
       check(a.source_refs!.length <= 50 && a.source_refs!.every((r) => typeof r === "string" && EVIDENCE_REF.test(r)), "invalid_source_ref");
       item.section = "observation";

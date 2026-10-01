@@ -12,7 +12,8 @@
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { localCurriculum } from "./harness/curriculum.mjs";
+import { DatabaseSync } from "node:sqlite";
+import { localCurriculum, sqliteBinding } from "./harness/curriculum.mjs";
 
 const venture = await import("../src/lib/curriculum/venture.ts");
 const memory = await import("../src/lib/curriculum/memory.ts");
@@ -20,6 +21,8 @@ const { reviseEvidenceDraft } = await import("../src/lib/measurement-core/interp
 const { participantRecord } = await import("../src/lib/curriculum/participant-record.ts");
 const { CURRICULUM_ROUTES } = await import("../src/routes/curriculum.ts");
 const { CR_SURFACES } = await import("../../extensions/hypeproof-chat/src/curriculumRuntime.ts");
+const { timelineRecord } = await import("../../extensions/hypeproof-chat/src/memoryView.ts");
+const store = await import("../src/lib/curriculum/store.ts");
 
 const D1_MODE = process.argv.includes("--d1");
 let failed = 0;
@@ -419,6 +422,19 @@ await test("CR-T38: a student decision with two evidence refs and slides 2–3 v
     assert.equal(link.status, 200, link.text);
     assert.equal((await f.api(`/v1/curriculum/decisions/${bare.json.decision.id}/version`, { method: "POST", token: s.token, body: { version_id: s.version } })).json.error.code, "version_already_linked");
     assert.equal((await post({ resulting_version_id: "sha256:" + "0".repeat(64) })).status, 409, "a version of no project is refused");
+    // An assumption is cited as an assumption: as evidence, or in both lists, it is refused.
+    assert.deepEqual((await post({ evidence_refs: [ev(s, s.draft, "a2")] })).json.error.problems, [`evidence_ref_is_assumption:${ev(s, s.draft, "a2")}`]);
+    assert.deepEqual((await post({ evidence_refs: [ev(s, s.draft, "a2")], assumption_refs: [ev(s, s.draft, "a2")] })).json.error.problems, [`evidence_ref_is_assumption:${ev(s, s.draft, "a2")}`]);
+    // An AI draft item the student never reviewed is listed but is not the team's evidence yet.
+    const aiDraft = await draft(f, s, [{ id: "x1", section: "observation", text: "AI 관찰(검토 안 됨)", source_refs: [`session:${s.sessions[0]}`] }], "ai");
+    const unreviewed = await post({ evidence_refs: [ev(s, aiDraft, "x1")] });
+    assert.deepEqual([unreviewed.status, unreviewed.json.error.problems], [409, [`evidence_ref_not_reviewed:${ev(s, aiDraft, "x1")}`]]);
+    const listed = (await mem(f, s)).register.observed.find((x) => x.id === ev(s, aiDraft, "x1"));
+    assert.deepEqual([listed.pending_review, listed.created_by], [true, "system"], "listed, marked pending review");
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/decisions`, { method: "POST", token: s.token, body: { author: "ai", statement: "AI 제안", evidence_refs: [ev(s, aiDraft, "x1")] } })).status, 201, "control: an AI suggestion may cite it");
+    const reviewed = await review(f, s, aiDraft, [{ item: "x1", action: "accept" }]);
+    assert.equal(reviewed.status, 201, reviewed.text);
+    assert.equal((await post({ evidence_refs: [ev(s, aiDraft, "x1")] })).status, 201, "control: once the student reviewed it, the team may rest on it");
   } finally {
     f.close();
   }
@@ -449,9 +465,71 @@ await test("CR-T70: a stakeholder holding user and payer with evidence refs vali
     const e = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/stakeholder`, { method: "POST", token: s.token, body: { stakeholder_id: st.id } });
     assert.deepEqual([e.status, e.json.experiment.stakeholder_id, e.json.experiment.id], [200, st.id, s.experiment.id]);
     assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/stakeholder`, { method: "POST", token: s.token, body: { stakeholder_id: "stk-0000000000000000" } })).json.error.code, "stakeholder_unresolved");
+    // A role claimed observed resting only on an assumption (or interpretation) is refused.
+    for (const item of ["a2", "i1"]) {
+      const weak = await post({ label: "x", roles: [{ role: "payer", evidence_refs: [ev(s, s.draft, item)], basis: "observed" }] });
+      assert.deepEqual([weak.status, weak.json.error.code], [409, "observed_role_without_observed_evidence"], item);
+    }
+    assert.equal((await post({ label: "y", roles: [{ role: "payer", evidence_refs: [ev(s, s.draft, "a2"), ev(s, s.draft, "o1")], basis: "observed" }] })).status, 201, "control: one observed item among them is enough");
+    // Another Project's stakeholder is never this Project's: refused on every path that names one.
+    const other = await started(f, { token: s.token });
+    const foreign = await f.api(`/v1/curriculum/projects/${other.project.id}/stakeholders`, { method: "POST", token: s.token, body: { label: "다른 팀 손님", roles: [{ role: "user", evidence_refs: [] }] } });
+    assert.equal(foreign.status, 201, foreign.text);
+    const fid = foreign.json.stakeholder.id;
+    assert.equal((await f.api(`/v1/curriculum/projects/${s.project.id}/hypotheses`, { method: "POST", token: s.token, body: { statement: "다른 팀 손님이 산다", stakeholder_id: fid } })).json.error.code, "stakeholder_unresolved", "hypothesis");
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/stakeholder`, { method: "POST", token: s.token, body: { stakeholder_id: fid } })).json.error.code, "stakeholder_unresolved", "experiment link");
+    const expBody = (stakeholder_id) => ({ project_id: s.project.id, product_version_id: s.version, week: 2, question: "어르신도 혼자 주문하나?", method: "task_test", success_criteria: ["3명 중 2명 완료"], hypothesis: "어르신도 혼자 주문할 수 있다", stakeholder_id });
+    const fe = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: expBody(fid) });
+    assert.deepEqual([fe.status, fe.json.error.code], [409, "stakeholder_unresolved"], "experiment start");
+    const okExp = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: expBody(st.id) });
+    assert.equal(okExp.status, 201, okExp.text);
+    assert.equal(okExp.json.experiment.stakeholder_id, st.id, "control: this Project's stakeholder is accepted at the start");
+    // After the experiment's data is deleted (CR-69), a role resting on it is no longer observed,
+    // and the experiment's stakeholder can no longer be changed.
+    const del = await f.api(`/v1/curriculum/experiments/${s.experiment.id}`, { method: "DELETE", token: s.token });
+    assert.equal(del.status, 200, del.text);
+    const after = (await mem(f, s)).stakeholders.find((x) => x.id === st.id);
+    assert.deepEqual(after.roles_shown.map((r) => [r.role, r.confidence]), [["user", "unsupported"], ["payer", "unsupported"], ["beneficiary", "assumed"]]);
+    assert.equal((await f.api(`/v1/curriculum/experiments/${s.experiment.id}/stakeholder`, { method: "POST", token: s.token, body: { stakeholder_id: st.id } })).json.error.code, "experiment_data_deleted");
   } finally {
     f.close();
   }
+});
+
+await test("CR-T70 (unit): a role's confidence is derived on read — observed only over a reviewed observed item, unsupported when nothing resolves", () => {
+  const item = (id, confidence, pending_review = false) => [id, { id, confidence, pending_review }];
+  const items = new Map([item("o", "observed"), item("a", "assumed"), item("x", "observed", true)]);
+  const role = (refs) => ({ role: "payer", basis: "observed", evidence_refs: refs });
+  assert.deepEqual([["o"], ["a"], ["x"], ["gone"], ["a", "o"]].map((r) => memory.roleConfidence(role(r), items)), ["observed", "assumed", "assumed", "unsupported", "observed"]);
+  assert.equal(memory.roleConfidence({ role: "user", evidence_refs: ["o"] }, items), "assumed", "no observed claim: assumed");
+});
+
+await test("CR-75 store race: setting an experiment's stakeholder never overwrites a concurrent close for deletion (CR-69); a planted unguarded write does", async () => {
+  const run = async (setStakeholder) => {
+    const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+    db.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
+    const base = sqliteBinding(db);
+    let gate = null;
+    // The first UPDATE of cr_experiments waits for `gate` (the deletion's close) to run first.
+    const binding = { prepare(sql) { const st = base.prepare(sql); return { bind(...a) { st.bind(...a); return this; }, first: () => st.first(), all: () => st.all(), async run() { if (gate && /^UPDATE cr_experiments/.test(sql)) { const g = gate; gate = null; await g(); } return st.run(); } }; } };
+    const exp = { schema: "hps-venture/1", kind: "experiment", id: "exp-00000000000000aa", project_id: "prj-00000000000000aa", week: 1, hypothesis_id: "hyp-00000000000000aa", question: "q", method: "m", success_criteria: ["c"], product_version_id: "sha256:" + "a".repeat(64), status: "running", created_at: 1 };
+    db.prepare("INSERT INTO cr_experiments (id, project_id, hypothesis_id, product_version_id, doc, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, 1, 1)").run(exp.id, exp.project_id, exp.hypothesis_id, exp.product_version_id, JSON.stringify(exp));
+    gate = () => store.closeExperimentAfterDeletion(base, exp, 5);
+    const r = await setStakeholder(binding, exp);
+    const stored = JSON.parse(db.prepare("SELECT doc FROM cr_experiments WHERE id = ?").get(exp.id).doc);
+    db.close();
+    return { r, stored };
+  };
+  const real = await run((b, e) => store.setExperimentStakeholder(b, e, "stk-00000000000000aa", 6));
+  assert.deepEqual([real.r.ok, real.r.code], [false, "experiment_data_deleted"], "the guarded write sees the close and refuses");
+  assert.deepEqual([real.stored.status, real.stored.data_deletion_pending, typeof real.stored.data_deleted_at, real.stored.stakeholder_id], ["closed", true, "number", undefined]);
+  // Planted: the unguarded read-modify-write this slice first shipped.
+  const unguarded = async (db, e) => {
+    const fresh = await store.getExperiment(db, e.id);
+    await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ?").bind(JSON.stringify({ ...fresh, stakeholder_id: "stk-00000000000000aa" }), 6, e.id).run();
+  };
+  const planted = await run(unguarded);
+  assert.equal(planted.stored.status, "running", "instrument: the planted write reopens the deleted experiment, and is caught");
 });
 
 // ── CR-T71 (unit): metric values keep sources and source_state ─────────────────────
@@ -481,6 +559,8 @@ await test("CR-T71: an impact metric from three real events shows 3 with the thr
   // No resolvable source: unsupported, no value.
   assert.deepEqual([memory.metricValue(METRIC, { ...ctx, events: new Map([["exp-1", [pev(1, "simulated")]]]) }).status, memory.metricValue(METRIC, { ...ctx, experiments: new Set() }).value], ["unsupported", null]);
   assert.equal(memory.metricValue({ ...METRIC, source: { type: "evidence_items", refs: ["ev:exp-1/d/x"] } }, ctx).status, "unsupported");
+  const eo = memory.metricValue({ ...METRIC, source: { type: "evidence_items", refs: ["ev:exp-1/d/x", "ev:exp-1/d/y"] } }, { ...ctx, items: new Map([["ev:exp-1/d/x", { confidence: "observed", review: "accepted" }]]) });
+  assert.deepEqual([eo.status, eo.value, eo.evidence], ["evidence_only", null, [{ ref: "ev:exp-1/d/x", confidence: "observed", review: "accepted" }]], "evidence_only carries the cited items' confidence");
   const { stakeholder_id: _s, ...noStakeholder } = METRIC;
   assert.ok(venture.validateMetric(noStakeholder).problems.includes("impact_without_stakeholder"));
   assert.equal(venture.validateMetric({ ...noStakeholder, metric_kind: "usage" }).ok, true, "control: a usage metric may name no stakeholder");
@@ -526,6 +606,11 @@ await test("CR-T72: the v0 → v1 diff lists the changed files and the decision 
     const nd = (await f.api(`/v1/curriculum/projects/${s.project.id}/memory/diff?from=${encodeURIComponent(s.v1)}&to=${encodeURIComponent(v2own.id)}`, { token: s.token })).json.diff;
     assert.deepEqual([nd.reason, nd.decisions], ["no_recorded_decision", []]);
     assert.ok(!("why" in nd) && !("summary" in nd), "no generated reason field");
+    // An AI suggestion linked to the newer version is not the decision behind it.
+    const ai = await f.api(`/v1/curriculum/projects/${s.project.id}/decisions`, { method: "POST", token: s.token, body: { author: "ai", statement: "AI 제안: 도움말 페이지", evidence_refs: [] } });
+    assert.equal((await f.api(`/v1/curriculum/decisions/${ai.json.decision.id}/version`, { method: "POST", token: s.token, body: { version_id: v2own.id } })).status, 200);
+    const aiDiff = (await f.api(`/v1/curriculum/projects/${s.project.id}/memory/diff?from=${encodeURIComponent(s.v1)}&to=${encodeURIComponent(v2own.id)}`, { token: s.token })).json.diff;
+    assert.deepEqual([aiDiff.reason, aiDiff.decisions], ["no_recorded_decision", []], "an AI suggestion is never the recorded reason");
     // Pure: two versions of different projects are refused even when handed in directly.
     const pv = (id, project) => ({ id, project_id: project, files: [{ path: "index.html", sha256: id, bytes: 1 }], entry_html: "index.html", created_at: 1 });
     assert.deepEqual(memory.versionDiff("prj-a", pv("a", "prj-a"), pv("b", "prj-b"), [], new Map()), { ok: false, code: "cross_project" });
@@ -563,11 +648,17 @@ await test("CR-T73: the Week 1 → 2 fixture's timeline is time-ordered and ever
       globalThis.fetch = realFetch;
     }
     assert.equal(calls, 0, "the timeline read makes no outbound (model) call");
-    const records = { project: m.project, hypotheses: m.hypotheses, experiments: m.experiments, versions: m.versions, decisions: m.decisions, stakeholders: [], metrics: [], slides: m.deck_slides, items: m.evidence_items };
+    const records = { project: m.project, hypotheses: m.hypotheses, experiments: m.experiments, versions: m.versions, decisions: m.decisions, stakeholders: [], metrics: [], slides: m.slide_revisions, items: m.evidence_items };
     assert.deepEqual(timelineProblems(records, m.timeline), []);
     const kinds = new Set(m.timeline.map((e) => e.entry));
     for (const k of ["hypothesis", "hypothesis_revised", "experiment", "product_version", "evidence_item", "decision", "ai_suggestion", "deck_slide"]) assert.ok(kinds.has(k), `timeline has ${k}`);
-    assert.ok(timelineProblems(records, [...m.timeline, { at: Date.now() + 1, entry: "decision", label: "만든 결정", record: { kind: "decision", id: "dec-0000000000000000" } }]).some((p) => p.startsWith("no record")), "a planted entry with no record is caught");
+    // A planted entry with no record, one per kind, is caught.
+    for (const record of [{ kind: "decision", id: "dec-0000000000000000" }, { kind: "hypothesis", id: s.hypothesis.id, revision: 99 }, { kind: "experiment", id: "exp-0000000000000000" }, { kind: "evidence_item", id: ev(s, s.draft, "zz") }, { kind: "deck_slide", id: "2", revision: 99 }, { kind: "product_version", id: "sha256:" + "0".repeat(64) }]) {
+      assert.ok(timelineProblems(records, [...m.timeline, { at: Date.now() + 1, entry: "decision", label: "만든 기록", record }]).some((p) => p.startsWith("no record")), `a planted ${record.kind} entry with no record is caught`);
+    }
+    // The App opens every entry of this real read from the same answer (CR-78, the panel's path).
+    assert.deepEqual(m.timeline.filter((e) => !timelineRecord(m, e.record)).map((e) => e.record), [], "every entry opens in the App");
+    assert.equal(timelineRecord({ ...m, slide_revisions: [] }, m.timeline.find((e) => e.entry === "deck_slide").record), null, "control: without the slide revisions the App could not open a slide entry");
     const aiEntry = m.timeline.find((e) => e.entry === "ai_suggestion");
     assert.ok(timelineProblems(records, m.timeline.map((e) => (e === aiEntry ? { ...e, entry: "decision" } : e))).some((p) => p.startsWith("AI suggestion")), "an AI suggestion shown as a decision is caught");
   } finally {
@@ -604,6 +695,11 @@ await test("CR-T74: a hypothesis revised after a decision shows before, after, t
     assert.ok(venture.hypothesisRevisionProblems(h, overwritten).includes("revision_rewritten:1"));
     const replaced = { ...h, statement: "새 믿음", revisions: [{ revision: 1, statement: "새 믿음", status: "open", at: 1, by: "x" }] };
     assert.ok(venture.hypothesisRevisionProblems(h, replaced).length > 0, "a replacement in place is not a revision");
+    // Evidence cited but no team decision: what was seen, not what the team changed — reason not recorded.
+    const evOnly = await f.api(`/v1/curriculum/projects/${s.project.id}/hypotheses/${s.hypothesis.id}/revisions`, { method: "POST", token: s.token, body: { revision: 3, status: "supported", evidence_refs: [ev(s, s.draft, "o1")] } });
+    assert.equal(evOnly.status, 201, evOnly.text);
+    const evLast = (await mem(f, s)).belief_changes.filter((x) => x.hypothesis_id === s.hypothesis.id).at(-1);
+    assert.deepEqual([evLast.reason, evLast.decision, evLast.evidence.map((e) => e.ref)], ["reason_not_recorded", null, [ev(s, s.draft, "o1")]]);
   } finally {
     f.close();
   }
@@ -646,6 +742,9 @@ await test("CR-T77 negatives: assumption_refs dangling or pointing at an observe
     assert.deepEqual(observed.json.error.problems, [`assumption_ref_not_assumed:${ev(s, s.draft, "o1")}`]);
     assert.equal((await post({ assumption_refs: [ev(s, s.draft, "a2")] })).status, 201, "control: an assumed item is accepted");
     const latest = () => f.api(`/v1/curriculum/experiments/${s.experiment.id}/evidence`, { token: s.token }).then((x) => x.json.evidence.drafts.at(-1));
+    const noteOf = async (source_state) => (await f.api(`/v1/curriculum/experiments/${s.experiment.id}/notes`, { method: "POST", token: s.token, body: { ...OBSERVER, text: "연습으로 가정해 본 것", source_state } })).json.note.id;
+    const simulated = await noteOf("simulated");
+    const selfReported = await noteOf("self_reported");
     const d = await latest();
     const tries = [
       [[{ item: "a1", action: "promote" }], 400, "promotion_without_sources"],
@@ -656,12 +755,22 @@ await test("CR-T77 negatives: assumption_refs dangling or pointing at an observe
       [[{ item: "a1", action: "promote", source_refs: ["session:ps-" + "0".repeat(32)] }], 422, "unresolved_source_refs"],
       [[{ item: "a1", action: "promote", source_refs: [`session:${s.sessions[0]}`], text: "다른 문장" }], 400, "promotion_changes_statement"],
       [[{ item: "o1", action: "promote", source_refs: [`session:${s.sessions[0]}`] }], 400, "promotion_not_assumption"],
+      // An edit of the same assumption earlier in the batch, then its promotion: refused.
+      [[{ item: "a1", action: "edit", text: "완전히 다른 주장으로 바꿈" }, { item: "a1", action: "promote", source_refs: [`session:${s.sessions[0]}`] }], 400, "duplicate_item_action"],
+      // A note the student marked simulated (or self-reported) confirms nothing, alone or with a real one.
+      [[{ item: "a1", action: "promote", source_refs: [`note:${simulated}`] }], 422, "promotion_source_not_real"],
+      [[{ item: "a1", action: "promote", source_refs: [`note:${s.notes[0]}`, `note:${selfReported}`] }], 422, "promotion_source_not_real"],
     ];
     for (const [actions, status, code] of tries) {
       const r = await review(f, s, d, actions);
       assert.deepEqual([r.status, r.json.error.code], [status, code], JSON.stringify(actions));
     }
     assert.deepEqual((await latest()).revision, d.revision, "no refused promotion wrote a revision");
+    // Control: a promotion on a real note is accepted.
+    assert.equal((await review(f, s, d, [{ item: "a1", action: "promote", source_refs: [`note:${s.notes[0]}`] }])).status, 201, "control: a real note confirms");
+    // Pure: the statement check holds against the previous revision even without the duplicate rule.
+    const prev = { format: "hps-evidence-draft/1", id: "drf-y", experiment: "exp-y", author: "user", created_at: 1, supersedes: null, revision: 1, items: [{ id: "a", section: "assumption", text: "원래 가정", source_refs: [], review: "accepted", reviewed_by: "user" }] };
+    assert.throws(() => reviseEvidenceDraft(prev, [{ item: "a", action: "edit", text: "바꾼 주장" }, { item: "a", action: "promote", source_refs: ["session:ps-1"] }], { at: 2, reason: "학생" }), /duplicate_item_action/);
     // A stored revision is never rewritten: the same revision with different content is refused.
     const record = participantRecord(f.r2, s.project.cohort_id, s.project.id);
     const rewritten = { ...d, items: d.items.map(({ sources: _s, comparison: _c, ...i }) => (i.id === "a1" ? { ...i, text: "덮어쓴 가정" } : i)) };
@@ -672,6 +781,39 @@ await test("CR-T77 negatives: assumption_refs dangling or pointing at an observe
     assert.equal(memory.evidenceItemsOf("exp-x", [base, aiRev])[0].confidence, "assumed", "an AI or skill revision does not promote");
     const studentRev = reviseEvidenceDraft(base, [{ item: "a", action: "promote", source_refs: ["session:ps-1"] }], { at: 3, reason: "학생" });
     assert.deepEqual([memory.evidenceItemsOf("exp-x", [base, studentRev])[0].confidence, memory.evidenceItemsOf("exp-x", [base, studentRev])[0].assumption_status], ["observed", "observed_later"], "control: the student's own promotion does");
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-40 created_by: a partially reviewed AI draft keeps the unreviewed item the system's; the reviewed one and a student's own item are the student's", () => {
+  const ai = { format: "hps-evidence-draft/1", id: "drf-z", experiment: "exp-z", author: "ai", created_at: 1, supersedes: null, revision: 1, items: [{ id: "x1", section: "interpretation", text: "AI 해석", source_refs: [], review: "draft" }, { id: "x2", section: "assumption", text: "AI 가정", source_refs: [], review: "draft" }] };
+  const before = memory.evidenceItemsOf("exp-z", [ai]).map((i) => [i.item_id, i.created_by, i.review, i.pending_review]);
+  assert.deepEqual(before, [["x1", "system", "draft", true], ["x2", "system", "draft", true]]);
+  const reviewed = reviseEvidenceDraft(ai, [{ item: "x2", action: "accept" }], { at: 2, reason: "학생" });
+  const after = memory.evidenceItemsOf("exp-z", [ai, reviewed]).map((i) => [i.item_id, i.created_by, i.review, i.pending_review]);
+  assert.deepEqual(after, [["x1", "system", "draft", true], ["x2", "student", "accepted", false]], "the student's review of x2 does not make x1 theirs");
+  const own = { ...ai, id: "drf-u", author: "user" };
+  assert.deepEqual(memory.evidenceItemsOf("exp-z", [own]).map((i) => [i.created_by, i.pending_review]), [["student", false], ["student", false]], "control: the student's own draft is theirs");
+});
+
+await test("CR-35 writes: a problem revision keeps the earlier statement; a slide citing a dangling ref or naming an AI suggestion is refused", async () => {
+  const f = await fixture();
+  try {
+    const s = await week12(f);
+    const put = (statement) => f.api(`/v1/curriculum/projects/${s.project.id}/problem`, { method: "PUT", token: s.token, body: { statement } });
+    assert.equal((await put("처음 쓰는 사람이 키오스크 주문을 어려워한다")).status, 200);
+    const second = await put("옵션 고르는 단계에서 막힌다");
+    assert.equal(second.status, 200, second.text);
+    assert.deepEqual(second.json.project.problem.revisions.map((r) => r.statement), ["처음 쓰는 사람이 키오스크 주문을 어려워한다", "옵션 고르는 단계에서 막힌다"]);
+    assert.equal((await mem(f, s)).problem, "옵션 고르는 단계에서 막힌다");
+    const slide = (body) => f.api(`/v1/curriculum/projects/${s.project.id}/slides/4`, { method: "PUT", token: s.token, body: { title: "근거", body: "b", evidence_refs: [], ...body } });
+    const dangling = await slide({ evidence_refs: [ev(s, s.draft, "zz")] });
+    assert.deepEqual([dangling.status, dangling.json.error.code], [409, "unresolved_evidence_ref"]);
+    const ai = await f.api(`/v1/curriculum/projects/${s.project.id}/decisions`, { method: "POST", token: s.token, body: { author: "ai", statement: "AI 제안" } });
+    const byAi = await slide({ decision_id: ai.json.decision.id });
+    assert.deepEqual([byAi.status, byAi.json.error.code], [409, "decision_is_ai_suggestion"]);
+    assert.equal((await slide({ decision_id: s.decision.id, evidence_refs: [ev(s, s.draft, "o1")] })).status, 201, "control: the team's decision and a resolving ref are accepted");
   } finally {
     f.close();
   }

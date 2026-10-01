@@ -19,7 +19,7 @@ import { resolveProfile } from "../lib/modules";
 import { profileServesCohort } from "../lib/cohort-binding";
 import { curriculumRuntimeAllowed } from "../lib/moderation";
 import { makeErrorBody } from "../middleware/request-id";
-import { digestOf } from "../lib/measurement-core/local-record";
+import { digestOf, NOTES_HOST } from "../lib/measurement-core/local-record";
 import {
   CHANNEL_MAX,
   HYPOTHESIS_STATUSES,
@@ -93,7 +93,7 @@ import {
   slidesOf,
   stakeholdersOf,
 } from "../lib/curriculum/store";
-import { decisionRefProblems, decisionView, evidenceItemsOf, memoryState, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
+import { decisionRefProblems, decisionView, evidenceItemsOf, memoryState, supportsObservedRole, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
 import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
 import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
@@ -759,6 +759,16 @@ curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
     return refuse(c, 400, e instanceof Error ? e.message : "invalid_review");
   }
   if (r.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
+  // cr-memory (CR-82, SX-46): an assumption becomes observed only on real records. Participant
+  // sessions and events are always real; a manual record carries the source_state the student
+  // chose, and one marked simulated, self-reported or unverified cannot confirm anything.
+  const promoted = Array.isArray(body.actions) ? (body.actions as Array<{ action?: unknown; source_refs?: unknown }>).filter((a) => a && a.action === "promote").flatMap((a) => (Array.isArray(a.source_refs) ? a.source_refs.map(String) : [])) : [];
+  const noteRefs = promoted.filter((ref) => ref.startsWith("note:"));
+  if (noteRefs.length) {
+    const states = new Map((await r.record.observationsOf(NOTES_HOST, r.experiment.id).catch(() => [])).map((o) => [o.event.id, o.event.source_state]));
+    const notReal = noteRefs.filter((ref) => states.has(ref.slice(5)) && states.get(ref.slice(5)) !== "real");
+    if (notReal.length) return refuse(c, 422, "promotion_source_not_real", { refs: notReal });
+  }
   const now = Date.now();
   await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
@@ -989,7 +999,12 @@ curriculum.post("/projects/:id/hypotheses", async (c) => {
   if (stakeholder === null) return refuse(c, 409, "stakeholder_unresolved");
   if (await openHypothesis(c.env.HPS_DB, w.project.id, statement)) return refuse(c, 409, "open_statement_exists");
   const h = await addHypothesis(c.env.HPS_DB, { project_id: w.project.id, statement, ...(stakeholder ? { stakeholder_id: stakeholder } : {}), by: w.s.payload.u, now: Date.now(), max: MEMORY_LIMITS.hypothesesPerProject });
-  if (!h) return refuse(c, 409, "hypothesis_limit", { max: MEMORY_LIMITS.hypothesesPerProject });
+  if (!h) {
+    // INSERT OR IGNORE also swallows the unique open-statement index: a request that raced
+    // another for the same statement is told so, not that the Project is full.
+    if (await openHypothesis(c.env.HPS_DB, w.project.id, statement)) return refuse(c, 409, "open_statement_exists");
+    return refuse(c, 409, "hypothesis_limit", { max: MEMORY_LIMITS.hypothesesPerProject });
+  }
   return c.json({ hypothesis: h }, 201);
 });
 
@@ -1040,6 +1055,10 @@ curriculum.post("/projects/:id/stakeholders", async (c) => {
   const items = await itemsFor(c.env, w.project, experimentsOfRefs(refs));
   const missingRefs = unresolved(refs, items);
   if (missingRefs.length) return refuse(c, 409, "unresolved_evidence_ref", { refs: missingRefs });
+  // A role claimed observed rests on at least one reviewed observed item; resting only on
+  // assumptions or interpretations it would turn them into an observed fact (CR-75, CR-82).
+  const weak = v.value.roles.filter((r) => r.basis === "observed" && !r.evidence_refs.some((ref) => supportsObservedRole(items.get(ref))));
+  if (weak.length) return refuse(c, 409, "observed_role_without_observed_evidence", { problems: weak.map((r) => `observed_role_without_observed_evidence:${r.role}`) });
   const s: Stakeholder = { schema: VENTURE_SCHEMA, kind: "stakeholder", id: newVentureId("stk"), project_id: w.project.id, label: v.value.label, roles: v.value.roles, created_at: Date.now() };
   if (!(await addStakeholder(c.env.HPS_DB, s, MEMORY_LIMITS.stakeholdersPerProject))) return refuse(c, 409, "stakeholder_limit", { max: MEMORY_LIMITS.stakeholdersPerProject });
   return c.json({ stakeholder: s }, 201);
@@ -1062,7 +1081,9 @@ curriculum.post("/experiments/:id/stakeholder", async (c) => {
   }
   const stakeholder = await ownStakeholder(c.env, project, body.stakeholder_id);
   if (!stakeholder) return refuse(c, 409, "stakeholder_unresolved");
-  return c.json({ experiment: await setExperimentStakeholder(c.env.HPS_DB, experiment, stakeholder, Date.now()) });
+  const set = await setExperimentStakeholder(c.env.HPS_DB, experiment, stakeholder, Date.now());
+  if (!set.ok) return refuse(c, 409, set.code);
+  return c.json({ experiment: set.experiment });
 });
 
 /** CR-76: a metric definition; its value is computed on every read from its source. */
@@ -1114,7 +1135,7 @@ curriculum.post("/projects/:id/decisions", async (c) => {
   const items = await itemsFor(c.env, w.project, experimentsOfRefs([...d.evidence_refs, ...d.assumption_refs]));
   const versions = new Set((await versionsOf(c.env.HPS_DB, w.project.id)).map((x) => x.id));
   const experiments = new Set((await experimentsOf(c.env.HPS_DB, w.project.id)).map((x) => x.id));
-  const problems = decisionRefProblems({ ...d, ...(experimentId !== undefined ? { experiment_id: experimentId as string } : {}) }, { items, versions, experiments });
+  const problems = decisionRefProblems({ ...d, actor: w.body.author === "user" ? "student" : "ai", ...(experimentId !== undefined ? { experiment_id: experimentId as string } : {}) }, { items, versions, experiments });
   if (problems.length) return refuse(c, 409, "unresolved_decision_refs", { problems });
   const decision: Decision = {
     schema: VENTURE_SCHEMA,
@@ -1163,6 +1184,8 @@ curriculum.put("/projects/:id/slides/:n", async (c) => {
   if (v.value.decision_id !== undefined) {
     const d = await getDecision(c.env.HPS_DB, v.value.decision_id);
     if (!d || d.project_id !== w.project.id) return refuse(c, 409, "decision_unresolved");
+    // A slide changes because of the team's decision, never an AI suggestion (SX-45), as for a hypothesis revision.
+    if (d.actor !== "student") return refuse(c, 409, "decision_is_ai_suggestion");
   }
   const slide = await addSlideRevision(c.env.HPS_DB, { schema: VENTURE_SCHEMA, kind: "deck_slide", project_id: w.project.id, ...v.value, at: Date.now(), by: w.s.payload.u }, MEMORY_LIMITS.slideRevisions);
   if (!slide) return refuse(c, 409, "slide_revision_limit");

@@ -136,9 +136,15 @@ test("CR-T36 in-app: close, delete chat history, reopen — the same hypotheses,
   await expect(chat.locator('[data-testid="memory-decision"]')).toHaveCount(1, { timeout: 20_000 });
   const after = await snapshot(chat);
   expect(after, "the reopened project shows the same learning state").toBe(before);
+  // CR-78: a timeline entry opens its stored record in the panel; no entry is left without one.
+  const entry = chat.locator('[data-testid="memory-timeline-entry"]').first();
+  await entry.locator("summary").click();
+  await expect(entry.locator('[data-testid="memory-record"]')).toBeVisible();
+  await expect(chat.locator('[data-testid="memory-timeline-entry"][data-found="no"]')).toHaveCount(0);
 
-  // Instrument negative control: a reconstruction that mixed in the chat would differ.
-  const leaky = (s: string, chatMessages: number) => `${s}|chat:${chatMessages}`;
-  expect(leaky(after, 0)).not.toBe(leaky(before, chatBefore));
+  // The negative control for this comparison is not here: a planted MemorySession that also
+  // reads the chat is run through the same before/after comparison and caught in
+  // extensions/hypeproof-chat/test/cr-memory.smoke.mjs (CR-T36 App unit). This test's own
+  // controls are that the chat history existed before the deletion and is gone after it.
   record["CR-T36"] = { before: JSON.parse(before), after: JSON.parse(after), chat_before: chatBefore };
 });

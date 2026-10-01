@@ -60,6 +60,8 @@ export interface EvidenceItemView {
   /** The draft's latest revision, which holds the item's current state. */
   revision: number;
   review: DraftItem["review"];
+  /** Written by an AI or the runtime and not yet reviewed by the student (CR-26, MC-22): listed, marked, not something the team's decision rests on. */
+  pending_review: boolean;
   /** Every revision of the draft that holds this item, oldest first: an earlier statement stays readable. */
   revisions: EvidenceItemRevision[];
   /** Ever an assumption: still open, or observed in a later revision the student made (CR-82). */
@@ -100,6 +102,11 @@ export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceD
         confidence = h.confidence;
       }
       const last = history.at(-1)!;
+      // Who wrote the item (CR-40): the student when the item first appeared in a revision the
+      // student wrote, or the student reviewed this item. A student's review of another item in
+      // the same draft makes the whole draft user-authored but does not make this item theirs.
+      const firstRev = revs.find((r) => r.items.some((i) => i.id === item.id))!;
+      const createdBy = firstRev.author === "user" || item.reviewed_by === "user" ? "student" : "system";
       const everAssumed = history.some((h) => h.confidence === "assumed");
       out.push({
         id: evidenceItemRef(experimentId, draftId, item.id),
@@ -107,13 +114,14 @@ export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceD
         source_refs: confidence === "assumed" && last.confidence !== "assumed" ? history.filter((h) => h.confidence === "assumed").at(-1)!.source_refs : last.source_refs,
         statement: last.statement,
         confidence,
-        created_by: item.reviewed_by === "user" || latest.author === "user" ? "student" : "system",
+        created_by: createdBy,
         created_at: history[0]!.at,
         experiment_id: experimentId,
         draft_id: draftId,
         item_id: item.id,
         revision: latest.revision,
         review: item.review,
+        pending_review: item.review === "draft" && createdBy === "system",
         revisions: history,
         ...(everAssumed ? { assumption_status: promotedAt !== undefined ? ("observed_later" as const) : ("open" as const) } : {}),
         ...(promotedAt !== undefined ? { promoted_at_revision: promotedAt } : {}),
@@ -131,11 +139,20 @@ export function evidenceItemsOf(experimentId: string, drafts: readonly EvidenceD
  * item is not assumed (CR-82), a resulting version or experiment of another Project.
  */
 export function decisionRefProblems(
-  d: Pick<Decision, "evidence_refs" | "assumption_refs" | "resulting_version_id"> & { experiment_id?: string },
+  d: Pick<Decision, "evidence_refs" | "assumption_refs" | "resulting_version_id"> & { experiment_id?: string; actor?: Decision["actor"] },
   ctx: { items: ReadonlyMap<string, EvidenceItemView>; versions: ReadonlySet<string>; experiments: ReadonlySet<string> },
 ): string[] {
   const problems: string[] = [];
-  for (const ref of d.evidence_refs) if (!ctx.items.has(ref)) problems.push(`unresolved_evidence_ref:${ref}`);
+  for (const ref of d.evidence_refs) {
+    const it = ctx.items.get(ref);
+    if (!it) problems.push(`unresolved_evidence_ref:${ref}`);
+    // An assumption is cited as an assumption, never as evidence (CR-38, CR-82): one ref in
+    // both lists, or an assumed item in evidence_refs, would read as a decision with evidence.
+    else if (it.confidence === "assumed") problems.push(`evidence_ref_is_assumption:${ref}`);
+    // An AI draft stays a draft until the student reviews it (CR-26, MC-22): it is not yet
+    // something the team's own decision can rest on (SX-45).
+    else if (d.actor === "student" && it.pending_review) problems.push(`evidence_ref_not_reviewed:${ref}`);
+  }
   for (const ref of d.assumption_refs) {
     const it = ctx.items.get(ref);
     if (!it) problems.push(`unresolved_assumption_ref:${ref}`);
@@ -238,7 +255,7 @@ export interface BeliefChange {
   after: Pick<HypothesisRevision, "revision" | "statement" | "status">;
   decision: { id: string; statement: string; resulting_version_id: string | null } | null;
   evidence: Array<{ ref: string; statement: string; confidence: Confidence }>;
-  /** "we believed X; after this evidence we believe Y; so we changed Z" only when evidence is cited; else "reason not recorded". */
+  /** "we believed X; after this evidence we believe Y; so we changed Z" only when the team's decision is linked AND evidence is cited; else "reason not recorded". */
   reason: "recorded" | "reason_not_recorded";
 }
 
@@ -261,7 +278,9 @@ export function beliefChanges(hypotheses: readonly Hypothesis[], decisions: read
         after: { revision: cur.revision, statement: cur.statement, status: cur.status },
         decision: decision ? { id: decision.id, statement: decision.statement, resulting_version_id: decision.resulting_version_id } : null,
         evidence,
-        reason: evidence.length ? "recorded" : "reason_not_recorded",
+        // CR-79: the sentence needs all three parts. Evidence with no team decision says what was
+        // seen but not what the team changed because of it, so the reason is not recorded.
+        reason: decision && evidence.length ? "recorded" : "reason_not_recorded",
       });
     }
   }
@@ -271,16 +290,31 @@ export function beliefChanges(hypotheses: readonly Hypothesis[], decisions: read
 // ── Stakeholders (CR-75) ────────────────────────────────────────────────────
 
 export interface StakeholderView extends Stakeholder {
-  roles_shown: Array<{ role: Stakeholder["roles"][number]["role"]; confidence: "observed" | "assumed"; evidence: ReturnType<typeof cite> }>;
+  /**
+   * A role's confidence, derived on every read (CR-75): `observed` only when the role is claimed
+   * observed AND at least one cited item resolves now to a reviewed observed item; `unsupported`
+   * when it is claimed observed but no cited item resolves any more (e.g. after CR-69 deletion);
+   * otherwise `assumed`. The stored `basis` is a claim, never shown on its own.
+   */
+  roles_shown: Array<{ role: Stakeholder["roles"][number]["role"]; confidence: "observed" | "assumed" | "unsupported"; evidence: ReturnType<typeof cite> }>;
   /** Payer and user held by the same stakeholder: recorded, never assumed. */
   payer_and_user: boolean;
+}
+
+/** Does this item support a role claimed observed? An observed item the student reviewed (or wrote). */
+export const supportsObservedRole = (it: EvidenceItemView | undefined) => !!it && it.confidence === "observed" && !it.pending_review;
+
+export function roleConfidence(r: Stakeholder["roles"][number], items: ReadonlyMap<string, EvidenceItemView>): "observed" | "assumed" | "unsupported" {
+  if (r.basis !== "observed") return "assumed";
+  if (r.evidence_refs.some((ref) => supportsObservedRole(items.get(ref)))) return "observed";
+  return r.evidence_refs.some((ref) => items.has(ref)) ? "assumed" : "unsupported";
 }
 
 export function stakeholderView(s: Stakeholder, items: ReadonlyMap<string, EvidenceItemView>): StakeholderView {
   const roles = new Set(s.roles.map((r) => r.role));
   return {
     ...s,
-    roles_shown: s.roles.map((r) => ({ role: r.role, confidence: r.basis === "observed" && r.evidence_refs.length > 0 ? "observed" : "assumed", evidence: cite(r.evidence_refs, items) })),
+    roles_shown: s.roles.map((r) => ({ role: r.role, confidence: roleConfidence(r, items), evidence: cite(r.evidence_refs, items) })),
     payer_and_user: roles.has("payer") && roles.has("user"),
   };
 }
@@ -295,13 +329,16 @@ export interface MetricValue {
   source_state: "real" | null;
   /** Inputs that are not real (simulated, self-reported, unverified), labelled and never counted into the value (SX-46). */
   not_counted: Record<string, number>;
+  /** `evidence_only`: the cited evidence items with their confidence (no number is computed from them). */
+  evidence?: Array<{ ref: string; confidence: Confidence; review: DraftItem["review"] }>;
 }
 
 /** A metric's value from its source, on every read. Simulated or self-reported inputs are labelled, never counted (SX-46). */
 export function metricValue(m: Metric, ctx: { experiments: ReadonlySet<string>; events: ReadonlyMap<string, readonly ObservationEvent[]>; items: ReadonlyMap<string, EvidenceItemView> }): MetricValue {
   if (m.source.type === "evidence_items") {
     const refs = m.source.refs.filter((r) => ctx.items.has(r));
-    return { status: refs.length ? "evidence_only" : "unsupported", value: null, source_refs: refs, source_state: null, not_counted: {} };
+    const evidence = refs.map((r) => ({ ref: r, confidence: ctx.items.get(r)!.confidence, review: ctx.items.get(r)!.review }));
+    return { status: refs.length ? "evidence_only" : "unsupported", value: null, source_refs: refs, source_state: null, not_counted: {}, ...(refs.length ? { evidence } : {}) };
   }
   const src = m.source;
   if (!ctx.experiments.has(src.experiment_id)) return { status: "unsupported", value: null, source_refs: [], source_state: null, not_counted: {} };
@@ -426,6 +463,8 @@ export interface MemoryState {
   artifacts: Artifact[];
   metrics: Array<Metric & { value: MetricValue }>;
   deck_slides: DeckSlide[];
+  /** Every stored slide revision, oldest first: a timeline entry names one and opens it (CR-78). */
+  slide_revisions: DeckSlide[];
   register: FactRegister;
   timeline: TimelineEntry[];
   belief_changes: BeliefChange[];
@@ -453,6 +492,7 @@ export function memoryState(r: MemoryRecords, events: ReadonlyMap<string, readon
     artifacts: versionsByTime.map((v, i) => artifactOfVersion(v, i, [...new Set(r.decisions.filter((d) => d.actor === "student" && d.resulting_version_id === v.id).flatMap((d) => d.evidence_refs))])),
     metrics: r.metrics.map((m) => ({ ...m, value: metricValue(m, { experiments, events, items }) })),
     deck_slides: latestSlideRevisions(r.slides),
+    slide_revisions: [...r.slides].sort((a, b) => a.number - b.number || a.revision - b.revision),
     register: factRegister(r.items, r.decisions, r.slides),
     timeline: timeline(r),
     belief_changes: beliefChanges(r.hypotheses, r.decisions, items),

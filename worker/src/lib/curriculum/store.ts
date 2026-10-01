@@ -594,12 +594,23 @@ export async function reviseHypothesis(
   return { ok: false, code: fresh && fresh.statement !== next.statement && fresh.status === "open" && openStatement !== null ? "open_statement_exists" : "stale_revision" };
 }
 
-/** Name the stakeholder an experiment concerns (CR-75): an additive key on the cr-publish record, in place. */
-export async function setExperimentStakeholder(db: DB, experiment: Experiment, stakeholderId: string, now: number): Promise<Experiment> {
-  const fresh = (await getExperiment(db, experiment.id)) ?? experiment;
-  const next: Experiment = { ...fresh, stakeholder_id: stakeholderId };
-  await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now, experiment.id).run();
-  return next;
+/**
+ * Name the stakeholder an experiment concerns (CR-75): an additive key on the cr-publish record,
+ * in place, written only at the revision it was read at, so a concurrent writer (CR-69's close
+ * for deletion above all) is never overwritten with a stale copy. An experiment whose data is
+ * deleted or being deleted is not changed.
+ */
+export async function setExperimentStakeholder(db: DB, experiment: Experiment, stakeholderId: string, now: number): Promise<{ ok: true; experiment: Experiment } | { ok: false; code: "experiment_data_deleted" | "stale_revision" | "unknown_experiment" }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await db.prepare("SELECT doc, revision FROM cr_experiments WHERE id = ?").bind(experiment.id).first<{ doc: string; revision: number }>();
+    const fresh = parse<Experiment>(row);
+    if (!fresh || !row) return { ok: false, code: "unknown_experiment" };
+    if (fresh.data_deleted_at !== undefined || fresh.data_deletion_pending) return { ok: false, code: "experiment_data_deleted" };
+    const next: Experiment = { ...fresh, stakeholder_id: stakeholderId };
+    const r = await db.prepare("UPDATE cr_experiments SET doc = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?").bind(JSON.stringify(next), now, experiment.id, row.revision).run();
+    if (Number(r.meta?.changes ?? 0) > 0) return { ok: true, experiment: next };
+  }
+  return { ok: false, code: "stale_revision" };
 }
 
 // Decisions (CR-38, CR-41)
