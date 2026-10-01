@@ -82,3 +82,48 @@ It writes `e2e/test-results/cr-app/verify-result.json`. The unit and smoke halve
 | 12 | Restarts `app-service.mjs` with `off` and reloads | "내 제품 테스트하기" is not in the palette; the coach is offered neither verify tool |
 
 **Where the data is.** Everything is on the workspace's native observation batch (VS Code `workspaceState`, the `hps-observation/2` batch): `criterion_set` (the student's words), an `artifact` event tagged `hps-artifact-version/1` per tested version, the `verify_criterion` `tool_request` / `tool_result` pair (`hps-verify-result/1`: plan, steps, citations, verdict), and `test_observed` / `retest_confirmed` (actor `ai`) and `change_requested`. The report is recomputed from them each time the box opens. A stored screenshot of a verdict is a `blobs/` entry of the local record, as in `cr-browser`, deletable with the same command.
+
+## `cr-publish` — Publish for User Test (#1393)
+
+**Flag:** the same `curriculum_runtime: { enabled: true }`. The Service also needs `HPS_TEST_ORIGIN`, where published test versions are served: unset (the default) means no link can be made. Nothing else.
+
+**Fastest check (background, no app, no phone).** Real Chromium as a 390 px phone against the real Service router:
+
+```bash
+cd worker && node --experimental-strip-types --experimental-sqlite test/cr-publish.test.mjs    # Service + App session, SQLite
+cd worker && npm run test:cr-publish:d1                                                         # the same on local workerd D1
+cd e2e && npm run test:cr-publish                                                                # the phone checks in Chromium
+```
+
+**In the app (background, scripted agent).** The same prepared copy as `cr-browser`:
+
+```bash
+GATE=idle HPS_APP_PATH="<app copy>" bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts publish-app
+```
+
+It writes `e2e/test-results/cr-app/publish-result.json`. Its local Service is `app-service.mjs` with a fourth argument `publish`: SQLite D1, an in-memory R2 and `HPS_TEST_ORIGIN=http://{project}.test.invalid:<port>`.
+
+**By hand, with a phone.** Same setup as `cr-browser` above, but start the Service with `publish` and a public test origin from ngrok (a dev-only shared origin: every project shares it, which the Service refuses in production):
+
+```bash
+/opt/homebrew/bin/ngrok http 8787                       # note the https://….ngrok-free.app address
+HPS_TEST_ORIGIN="https://<that host>" node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs 8787 "$STATE/local-participant-token.txt" on publish &
+python3 scripts/studio-dev.py --state-dir "$STATE" --provider service run --service local
+```
+
+With `scripts/dev-stack.sh` (wrangler dev) instead: apply the migration to the local D1 once (`cd worker && npx wrangler d1 execute hypeproof-studio --local --file=migrations/0032-curriculum-runtime-publish.sql`), put `HPS_TEST_ORIGIN=https://<ngrok host>` in `worker/.dev.vars`, and use an adult workshop cohort whose profile has the switch on locally (no shipped profile does, and the kids default never gets it). ngrok's free plan shows its own "You are about to visit" page on the phone's first open; that page is ngrok's, not a HypeProof login. These by-hand paths were written from the scripts, not executed end to end; the Playwright and Chromium runs above are the executed ones.
+
+| Step | What the student does | Expected (in student terms) |
+|---|---|---|
+| 1 | Opens `index.html` of the kiosk fixture in the preview, runs "HypeProof: 사용자 테스트용으로 공개하기" | A "사용자 테스트용으로 공개" box: "검증 안 됨 · 이 버전은 아직 테스트하지 않았어요", "공개할 버전 7187b0db · 파일 3개", the file list (no `.env`, no file the page does not use) |
+| 2 | Runs "내 제품 테스트하기" with "주문 시작을 누르면 음료 고르기가 보인다" until it passes (the first run on a fresh preview may say "확인 안 됨"; "같은 조건으로 다시 테스트"), then reopens the publish box | "검증됨 · 이 버전은 기대 조건을 모두 통과했어요" |
+| 3 | Writes a hypothesis, a question, one success criterion, "학교 게시판" as the channel; tries "공개하고 테스트 시작" without a link period | The button stays off until a period (1·3·7·14일) is chosen; nothing is preselected |
+| 4 | Chooses 3일 and presses "공개하고 테스트 시작" | "공개했어요: <주소>"; under the experiment, the link with its QR and "링크 끄기" |
+| 5 | Scans the QR with a phone | The kiosk opens without any HypeProof login, sized for the phone |
+| 6 | Adds `const k = "AIza…"` (any Gemini-shaped key) to `app.js` and publishes again | "app.js: 비밀값처럼 보이는 내용이 있어 공개하지 않았어요" with "app.js <그 줄>번째 줄 (gemini_key)"; nothing is uploaded |
+| 7 | Removes the key, changes the heading, opens the box | "검증 안 됨 · 파일이 바뀐 뒤 아직 다시 테스트하지 않았어요"; the running experiment says "이전 버전 · 이 실험은 계속 이 버전을 보여 줘요" and its link still shows the old heading |
+| 8 | Makes another link for the same experiment labelled "1:1 메시지", opens both links once on the phone | "링크를 연 횟수: 학교 게시판 1 · 1:1 메시지 1 · 채널 이름 없음 0 · 알 수 없음 0" and "연 횟수예요. 원한다는 뜻은 아니에요." |
+| 9 | Presses "링크 끄기" on "학교 게시판" and reloads it on the phone | The phone shows the browser's own error page (410), no kiosk; the "1:1 메시지" link still opens |
+| 10 | Restarts the Service with `off` and reloads the window | The command is not in the palette; the share link answers like an unknown address |
+
+**Where the data is.** On the Service: the D1 tables `cr_projects`, `cr_hypotheses`, `cr_product_versions`, `cr_experiments` and `cr_test_links` (one `hps-venture/1` document per row); the published files as R2 objects `test-versions/<digest>/<path>` of `HPS_TRACES`; each participant session as the per-session key `curriculum/<cohort>/<project>/sessions/published/<session id>` of the measurement-core record on the same bucket, with its `attribution` (project, experiment, product version, link, channel). In the App: the Project id and its test origin per signed-in person in `workspaceState` (`hypeproof-chat.crProjects`). With the in-memory fixtures (`app-service.mjs publish`, the tests), all of it is gone when the process ends.
