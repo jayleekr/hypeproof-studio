@@ -1,0 +1,152 @@
+{
+  "skill": "demo-coach",
+  "version": "1.0.0",
+  "title": "데모 연습",
+  "intent": "Prepare a demo flow and the Q&A the demo invites, with every claim in either citing reviewed, real evidence from the project.",
+  "required_context": [
+    "curriculum_week",
+    "problem",
+    "deck_slides",
+    "evidence_items",
+    "decisions",
+    "version_files"
+  ],
+  "allowed_tools": [
+    "memory_read",
+    "evidence_read",
+    "version_read"
+  ],
+  "preferred_capability": "text.fast",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "minutes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 15
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "flow": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1
+            },
+            "show": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "minLength": 1
+                  },
+                  "evidence_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 300
+                    },
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "text",
+                  "evidence_refs"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "step",
+            "show",
+            "claims"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 10,
+        "minItems": 1
+      },
+      "qa": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "answer": {
+              "type": "string",
+              "maxLength": 600,
+              "minLength": 1
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "minLength": 1
+                  },
+                  "evidence_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 300
+                    },
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "text",
+                  "evidence_refs"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "question",
+            "answer",
+            "claims"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 10,
+        "minItems": 1
+      }
+    },
+    "required": [
+      "flow",
+      "qa"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "demo_claims_supported"
+  ],
+  "write_back_targets": []
+}

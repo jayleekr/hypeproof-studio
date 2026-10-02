@@ -85,7 +85,7 @@ const recordLines = (text) => text.split("\n").filter((l) => /^- \[(console|exce
 const blocks = (content) => (typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : []);
 const textOf = (content) => blocks(content).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 
-const state = { requests: [], runs: {}, verify: [] };
+const state = { requests: [], runs: {}, verify: [], skills: [], skillHeaders: [] };
 
 /** The next move for one upstream request: a tool call or the final text. */
 function agent(body) {
@@ -107,6 +107,8 @@ function agent(body) {
     return { text: "[로컬 시험 응답] 그 결과를 보고 고칠게요." };
   }
   if (/\[cr:propose\]/.test(userText)) return propose(msgs.slice(start + 1));
+  // cr-skills (#1396): a curriculum skill run's prompt (skill, schema, context, input).
+  if (/^## Skill\n[a-z-]+@\d/m.test(userText)) return { text: skillAnswer(userText) };
   const scenario = /\[cr:flow(?::([a-z0-9-]+))?\]/.exec(userText);
   if (!scenario) return { text: "[로컬 시험 응답] 받았어요." };
   const plant = scenario[1] ?? "";
@@ -205,6 +207,30 @@ function propose(after) {
   return { text: "[로컬 시험 응답] 조건 하나를 제안했어요. 확인해 주세요." };
 }
 
+/**
+ * cr-skills: the scripted model's answer to a skill prompt, computed only from the prompt it
+ * received. "[cr:skill-bad]" in the input plants an answer that breaks the skill's rules.
+ */
+function skillAnswer(userText) {
+  const tag = /^## Skill\n(\S+)/m.exec(userText)[1];
+  const context = JSON.parse(/^## Context\n(.*)$/m.exec(userText)?.[1] ?? "{}");
+  const bad = /\[cr:skill-bad\]/.test(userText);
+  state.skills.push({ at: Date.now(), tag, context_keys: Object.keys(context).sort(), bad });
+  if (tag.startsWith("experiment@")) {
+    const open = (context.register?.assumed ?? []).find((i) => i.assumption_status === "open");
+    return "```json\n" + JSON.stringify({
+      ...(open ? { assumption_ref: open.id } : {}),
+      assumption: open?.statement ?? "처음 쓰는 사람은 도움 없이 주문하지 못한다",
+      why_riskiest: "틀리면 키오스크가 쓸모없다",
+      hypothesis: "버튼이 크면 처음 쓰는 사람 5명 중 3명이 도움 없이 주문한다",
+      method: "task_test",
+      procedure: ["새 버전을 공개한다", "다섯 명에게 주문을 부탁한다"],
+      success_criteria: bad ? ["사람들이 좋아한다"] : ["5명 중 3명이 도움 없이 주문을 마친다"],
+    }) + "\n```";
+  }
+  return "{}";
+}
+
 function finish(run, failedAt, why) {
   run.failedAt = failedAt;
   run.done = true;
@@ -247,7 +273,7 @@ globalThis.fetch = async (input, init) => {
 const server = createServer(async (req, res) => {
   try {
     if (req.url === "/__cr/state") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(state));
-    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; state.verify = []; return res.writeHead(204).end(); }
+    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; state.verify = []; state.skills = []; state.skillHeaders = []; return res.writeHead(204).end(); }
     const parts = [];
     for await (const p of req) parts.push(p);
     const body = Buffer.concat(parts);
@@ -263,6 +289,8 @@ const server = createServer(async (req, res) => {
     const h = req.headers.host ?? "";
     const host = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || !h ? `127.0.0.1:${portArg}` : h;
     const r = await app.fetch(new Request(`http://${host}${req.url}`, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), env, makeCtx());
+    // cr-skills: what the coach route recorded for a skill request, and whether the App named a model.
+    if (req.headers["x-hps-skill"]) state.skillHeaders.push({ sent: { skill: req.headers["x-hps-skill"], capability: req.headers["x-hps-capability"], model_in_body: JSON.parse(body.toString("utf8") || "{}").model ?? null }, answered: { status: r.status, skill: r.headers.get("x-hps-skill"), capability: r.headers.get("x-hps-capability"), model: r.headers.get("x-hps-model") } });
     res.writeHead(r.status, Object.fromEntries(r.headers));
     if (r.body) for await (const chunk of r.body) res.write(Buffer.from(chunk));
     res.end();

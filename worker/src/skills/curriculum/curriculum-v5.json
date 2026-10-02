@@ -1,0 +1,77 @@
+{
+  "format": "hps-curriculum/1",
+  "curriculum": "ai-for-good",
+  "version": "v5",
+  "source": "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md §4",
+  "weeks": [
+    {
+      "week": 1,
+      "key": "W1",
+      "question": "누구의 어떤 어려움인가?",
+      "required_behaviour": "Build v0 quickly, preview, publish, observe 3 real users, store first hypothesis",
+      "skills": [
+        "interview",
+        "experiment",
+        "evidence",
+        "product-builder"
+      ]
+    },
+    {
+      "week": 2,
+      "key": "W2",
+      "question": "무엇이 나아지나? AI가 틀리면?",
+      "required_behaviour": "AI Verify, repeated testing, failure/safety review, reuse/session evidence",
+      "skills": [
+        "experiment",
+        "evidence",
+        "product-builder",
+        "critic"
+      ]
+    },
+    {
+      "week": 3,
+      "key": "W3",
+      "question": "누가 돈을 내고 무엇이 바뀌나?",
+      "required_behaviour": "Stakeholder model, payer/user distinction, impact metric, interview/channel experiments",
+      "skills": [
+        "interview",
+        "experiment",
+        "evidence"
+      ]
+    },
+    {
+      "week": 4,
+      "key": "W4",
+      "question": "이미 있는 도움과 무엇이 다른가?",
+      "required_behaviour": "Alternative-comparison experiment, version diff, user comparison testing",
+      "skills": [
+        "experiment",
+        "evidence",
+        "product-builder",
+        "deck-builder"
+      ]
+    },
+    {
+      "week": 5,
+      "key": "W5",
+      "question": "어디까지 확인했나?",
+      "required_behaviour": "Fact/assumption register, metrics, deck updates, weekly synthesis",
+      "skills": [
+        "evidence",
+        "deck-builder",
+        "critic"
+      ]
+    },
+    {
+      "week": 6,
+      "key": "W6",
+      "question": "무엇을 만들고 무엇을 배웠나?",
+      "required_behaviour": "Stable demo, version/evidence timeline, final deck, “belief changed because…” story",
+      "skills": [
+        "deck-builder",
+        "critic",
+        "demo-coach"
+      ]
+    }
+  ]
+}

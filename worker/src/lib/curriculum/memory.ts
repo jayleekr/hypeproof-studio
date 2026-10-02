@@ -182,7 +182,7 @@ export function evidenceRefProblems(refs: readonly string[], items: ReadonlyMap<
 }
 
 /** An item the team's own claim may rest on as evidence: every rule of `evidenceRefProblems` holds. */
-export const supportsTeamEvidence = (it: EvidenceItemView | undefined) => !!it && it.confidence !== "assumed" && !it.pending_review && it.sources_real !== false;
+export const supportsTeamEvidence = (it: Pick<EvidenceItemView, "confidence" | "pending_review" | "sources_real"> | undefined) => !!it && it.confidence !== "assumed" && !it.pending_review && it.sources_real !== false;
 
 /** A decision as shown: an AI suggestion is never the team's decision (SX-45); no evidence is marked, not hidden (CR-38). */
 export interface DecisionView extends Decision {

@@ -93,11 +93,15 @@ import {
   slidesOf,
   stakeholdersOf,
 } from "../lib/curriculum/store";
-import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
+import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, supportsTeamEvidence, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
 import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
-import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
+import { draftRefusals, reviseEvidenceDraft, validateEvidenceDraftShape, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
+import { CURRICULUM, CURRICULUM_SKILLS, checkSkillOutput, curriculumWeek, skillPrompt, type CurriculumSkill } from "../skills/index";
+import { evidenceDraftOf } from "../skills/curriculum/rules";
+import { validateAgainstSchema } from "../skills/curriculum/contract";
+import { SOURCE_LIMITS, isSourcePath, modelContextOf, runWeek, skillContextOf, type VersionForSkill } from "../lib/curriculum/skill-run";
 
 type Ctx = Context<{ Bindings: Env; Variables: { requestId: string } }>;
 
@@ -720,6 +724,17 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
     if (Array.isArray(body.items) && body.items.some((i) => !i || typeof i !== "object" || (i as { review?: unknown }).review !== "draft")) return refuse(c, 400, "invalid_review");
     draft = { format: "hps-evidence-draft/1", id, revision: 1, supersedes: null, experiment: r.experiment.id, author: body.author, created_at: now, items: body.items };
   }
+  const saved = await saveDraft(c, r, draft, now);
+  return saved instanceof Response ? saved : c.json({ draft: saved }, 201);
+});
+
+/**
+ * Store one draft revision 1 on the experiment's record (the drafts route and the Evidence
+ * skill's write-back, cr-skills): every reference must resolve, else nothing is stored and every
+ * refused item is named (422). The caller has checked the experiment is not deleted and has
+ * created its record task.
+ */
+async function saveDraft(c: Ctx, r: Exclude<Awaited<ReturnType<typeof memberExperiment>>, Response>, draft: unknown, now: number): Promise<EvidenceDraft | Response> {
   let saved: Awaited<ReturnType<typeof r.record.saveEvidenceDraft>>;
   await touchExperiment(c.env.HPS_DB, r.experiment.id, now);
   try {
@@ -732,8 +747,8 @@ curriculum.post("/experiments/:id/drafts", async (c) => {
   }
   if (!saved.ok) return refuse(c, 422, "unresolved_source_refs", { refusals: saved.refusals });
   if (await deletedMeanwhile(c, r)) return refuse(c, 409, "experiment_data_deleted");
-  return c.json({ draft: saved.draft }, 201);
-});
+  return saved.draft as EvidenceDraft;
+}
 
 /** Accept, edit or reject items (CR-26): a new revision; the previous one and every raw record keep their bytes. */
 curriculum.post("/experiments/:id/drafts/:draft/review", async (c) => {
@@ -1216,6 +1231,157 @@ curriculum.put("/projects/:id/slides/:n", async (c) => {
   return c.json({ slide }, 201);
 });
 
+// ── Curriculum skills (cr-skills #1396; CR-43–CR-47; recon R7) ─────────────────
+//
+// A run is three calls. The App reads the registry, asks `prepare` for the run's prompt (the
+// skill's instructions, its output schema, the context its contract requires, read from stored
+// state, and the input), sends that prompt through the existing coach route
+// (`/v1/chat/completions`) naming the skill tag and the capability in `x-hps-skill` /
+// `x-hps-capability`, never a model id (CR-45), and posts the model's answer to `output`.
+// `output` is the gate (CR-44): input and output schemas, then every validation rule, against
+// the Project's state read again now; any problem refuses the whole answer, writes nothing and
+// names every problem (422). Only the contract's write-back targets are written, evidence
+// through the existing draft store (SX-48). Behind the CR switch like every route here.
+
+/** The registry as the App lists it: the student-facing name, the tag, the input and where it writes. */
+const skillListing = (s: CurriculumSkill) => ({
+  skill: s.contract.skill,
+  version: s.contract.version,
+  tag: s.tag,
+  title: s.contract.title,
+  intent: s.contract.intent,
+  preferred_capability: s.contract.preferred_capability,
+  input_schema: s.contract.input_schema,
+  write_back_targets: s.contract.write_back_targets,
+});
+
+/**
+ * With `?project_id=`, also the run state of that Project as the Service reads it, so the App
+ * re-derives nothing: the week a run is for (the same `runWeek` the prompt uses) and the evidence
+ * items a team may act on (memory.ts `supportsTeamEvidence`, the Product Builder's choices).
+ */
+curriculum.get("/skills", async (c) => {
+  const s = await student(c);
+  if (s instanceof Response) return s;
+  const listing = { curriculum: CURRICULUM, skills: [...CURRICULUM_SKILLS.values()].map(skillListing) };
+  const projectId = c.req.query("project_id");
+  if (projectId === undefined) return c.json(listing);
+  const project = await memberProject(c, s, projectId);
+  if (project instanceof Response) return project;
+  const memory = await loadMemory(c.env, project);
+  const w = curriculumWeek(runWeek(memory, {}));
+  return c.json({
+    ...listing,
+    run: {
+      project_id: project.id,
+      week: { week: w.week, question: w.question },
+      team_evidence: memory.evidence_items.filter((i) => supportsTeamEvidence(i)).map((i) => ({ id: i.id, statement: i.statement })),
+    },
+  });
+});
+
+/**
+ * The product version a run reads: the input's (of this Project only) or the newest; texts only
+ * when the contract needs them. Every source file is read for the rules (an AI call in file 21 or
+ * in a file over the model's bound still counts); only those within `SOURCE_LIMITS` go to the
+ * model. A source file that cannot be read is named in `unread`.
+ */
+async function versionForSkill(env: Env, project: Project, memory: MemoryState, versionId: unknown, withSources: boolean): Promise<VersionForSkill | null | "unresolved"> {
+  const v = typeof versionId === "string" ? await getVersion(env.HPS_DB, project.id, versionId) : (memory.versions.at(-1) ?? null);
+  if (typeof versionId === "string" && !v) return "unresolved";
+  if (!v) return null;
+  const files: VersionForSkill["files"] = v.files.map((f) => ({ path: f.path }));
+  const unread: string[] = [];
+  if (withSources) {
+    let bytes = 0;
+    let read = 0;
+    for (const f of files) {
+      const meta = v.files.find((x) => x.path === f.path)!;
+      if (!isSourcePath(f.path)) continue;
+      const obj = await env.HPS_TRACES.get(testFileKey(v.id, f.path));
+      if (!obj) {
+        unread.push(f.path);
+        continue;
+      }
+      f.text = await obj.text();
+      if (read < SOURCE_LIMITS.files && bytes + meta.bytes <= SOURCE_LIMITS.bytes) {
+        f.context = true;
+        bytes += meta.bytes;
+        read++;
+      }
+    }
+  }
+  return { id: v.id, entry_html: v.entry_html, files, ...(unread.length ? { unread } : {}) };
+}
+
+/** Everything one run needs, read now from stored state; or the answer to send. */
+async function skillRun(c: Ctx, projectId: string, skillId: string) {
+  const w = await memberWrite(c, projectId);
+  if (w instanceof Response) return w;
+  const skill = CURRICULUM_SKILLS.get(skillId);
+  if (!skill) return refuse(c, 404, "unknown_skill");
+  const input = (w.body.input ?? {}) as Record<string, unknown>;
+  // The input is the skill's input schema or nothing is read (CR-44's gate starts here).
+  const inputProblems = validateAgainstSchema(skill.contract.input_schema, input);
+  if (inputProblems.length) return refuse(c, 422, "invalid_input", { skill: skill.tag, problems: inputProblems });
+  const memory = await loadMemory(c.env, w.project);
+  const needs = new Set<string>(skill.contract.required_context);
+  const version = needs.has("version_files") || needs.has("version_sources") || skill.contract.validation_rules.some((r) => r.startsWith("product_") || r.startsWith("critic_")) ? await versionForSkill(c.env, w.project, memory, input.version_id, needs.has("version_sources") || skill.contract.validation_rules.includes("critic_reviews_ai_failure")) : null;
+  if (version === "unresolved") return refuse(c, 409, "version_unresolved");
+  let experiment: Awaited<ReturnType<typeof memberExperiment>> | null = null;
+  if (needs.has("experiment_records") || skill.contract.write_back_targets.includes("evidence_draft")) {
+    experiment = typeof input.experiment_id === "string" ? await memberExperiment(c, w.s, input.experiment_id) : null;
+    // An experiment of another Project is not this Project's: refused like a missing one.
+    if (!experiment || experiment instanceof Response || experiment.project.id !== w.project.id) return refuse(c, 409, "experiment_unresolved");
+  }
+  const week = runWeek(memory, input);
+  return { ...w, skill, input, memory, version, week, experiment: experiment as Exclude<typeof experiment, Response> };
+}
+
+curriculum.post("/projects/:id/skills/:skill/prepare", async (c) => {
+  const r = await skillRun(c, c.req.param("id"), c.req.param("skill"));
+  if (r instanceof Response) return r;
+  const records = r.experiment && r.skill.contract.required_context.includes("experiment_records") ? await experimentEvidence(r.experiment.record, r.experiment.experiment, Date.now()) : null;
+  const context = modelContextOf(r.skill.contract, r.memory, { week: r.week, version: r.version, records });
+  return c.json({
+    skill: r.skill.tag,
+    capability: r.skill.contract.preferred_capability,
+    // The coach route's request metadata for this run (CR-45): the skill tag and a capability, never a model id.
+    headers: { "x-hps-skill": r.skill.tag, "x-hps-capability": r.skill.contract.preferred_capability },
+    prompt: skillPrompt(r.skill, context, r.input),
+  });
+});
+
+curriculum.post("/projects/:id/skills/:skill/output", async (c) => {
+  const r = await skillRun(c, c.req.param("id"), c.req.param("skill"));
+  if (r instanceof Response) return r;
+  const output = r.body.output;
+  const ctx = skillContextOf(r.memory, r.week, r.version);
+  const checked = checkSkillOutput(r.skill, ctx, r.input, output);
+  // CR-44: an invalid output writes nothing and says why.
+  if (!checked.ok) return refuse(c, 422, checked.code, { skill: r.skill.tag, problems: checked.problems });
+  const written: Array<{ target: string; id: string }> = [];
+  for (const target of r.skill.contract.write_back_targets) {
+    if (target !== "evidence_draft" || !r.experiment) continue;
+    const e = r.experiment;
+    if (e.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
+    const now = Date.now();
+    if ((await e.record.evidenceDrafts(e.experiment.id).catch(() => [])).length >= EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment) return refuse(c, 409, "draft_limit");
+    // Written as the AI (MC-22: every item a draft the student reviews), tagged with the skill (CR-45).
+    const draft = evidenceDraftOf(output as Record<string, unknown>, r.input, { id: newVentureId("drf"), now, skill: r.skill.tag });
+    // CR-44: a draft the store would refuse writes nothing, not even the record task or the
+    // experiment's last-record time (`touchExperiment`, the clock of the 30-day deletion, decision
+    // 6). Its references are resolved first, reading only; `saveDraft` resolves them again.
+    const refusals = await draftRefusals(validateEvidenceDraftShape(draft), (ref) => e.record.resolveEvidenceRef(e.experiment.id, ref));
+    if (refusals.length) return refuse(c, 422, "unresolved_source_refs", { refusals });
+    await ensureExperimentTask(e.record, e.experiment, now);
+    const saved = await saveDraft(c, e, draft, now);
+    if (saved instanceof Response) return saved;
+    written.push({ target, id: saved.id });
+  }
+  return c.json({ skill: r.skill.tag, capability: r.skill.contract.preferred_capability, output, written }, written.length ? 201 : 200);
+});
+
 /** The CR-T02 Worker inventory of this router, as `METHOD /path` under /v1/curriculum. */
 export const CURRICULUM_ROUTES = [
   "GET /v1/curriculum/projects",
@@ -1247,4 +1413,8 @@ export const CURRICULUM_ROUTES = [
   "POST /v1/curriculum/projects/:id/decisions",
   "POST /v1/curriculum/decisions/:id/version",
   "PUT /v1/curriculum/projects/:id/slides/:n",
+  // cr-skills (#1396)
+  "GET /v1/curriculum/skills",
+  "POST /v1/curriculum/projects/:id/skills/:skill/prepare",
+  "POST /v1/curriculum/projects/:id/skills/:skill/output",
 ] as const;

@@ -1,0 +1,87 @@
+{
+  "skill": "deck-builder",
+  "version": "1.0.0",
+  "title": "발표 슬라이드 수정안",
+  "intent": "Propose patches only for the deck slides the team's decision names, each patch citing the evidence behind it; the other slides are left as they are.",
+  "required_context": [
+    "deck_slides",
+    "decisions",
+    "evidence_items"
+  ],
+  "allowed_tools": [
+    "memory_read",
+    "evidence_read"
+  ],
+  "preferred_capability": "text.fast",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "decision_id": {
+        "type": "string",
+        "maxLength": 100,
+        "minLength": 1
+      }
+    },
+    "required": [
+      "decision_id"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "patches": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "slide": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "maxItems": 30
+            }
+          },
+          "required": [
+            "slide",
+            "title",
+            "body",
+            "evidence_refs"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 8,
+        "minItems": 1
+      },
+      "rationale": {
+        "type": "string",
+        "maxLength": 600
+      }
+    },
+    "required": [
+      "patches"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "deck_patches_affected_only",
+    "deck_patches_cite_evidence"
+  ],
+  "write_back_targets": []
+}

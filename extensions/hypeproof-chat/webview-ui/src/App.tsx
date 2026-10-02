@@ -20,6 +20,8 @@ import { VerifyPanel } from "./VerifyPanel";
 import { PublishPanel } from "./PublishPanel";
 import { EvidencePanel } from "./EvidencePanel";
 import { MemoryPanel } from "./MemoryPanel";
+import { SkillsPanel } from "./SkillsPanel";
+import type { SkillsView } from "../../src/skillView";
 import type { MemoryView } from "../../src/memoryView";
 import type { EvidenceView } from "../../src/evidenceView";
 import type { PublishView } from "../../src/publishView";
@@ -50,6 +52,8 @@ interface State {
   evidence: { view: EvidenceView; error: string | null; done: string | null } | null;
   /** cr-memory — the "프로젝트 기억" panel (null = hidden). */
   memory: { view: MemoryView; error: string | null; done: string | null } | null;
+  /** cr-skills — the "커리큘럼 스킬" panel (null = hidden). */
+  skills: { view: SkillsView; running: boolean; error: string | null; done: string | null } | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -80,6 +84,8 @@ type Action =
   | { type: "evidenceClose" }
   | { type: "memoryState"; view: MemoryView | null; error?: string; done?: string }
   | { type: "memoryClose" }
+  | { type: "skillsState"; view: SkillsView | null; running?: boolean; error?: string; done?: string }
+  | { type: "skillsClose" }
   | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
@@ -109,6 +115,7 @@ const initialState: State = {
   testPublish: null,
   evidence: null,
   memory: null,
+  skills: null,
   verifyError: null,
   verifySend: null,
   aiNotice: null,
@@ -165,6 +172,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, memory: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
     case "memoryClose":
       return { ...state, memory: null };
+    case "skillsState":
+      return { ...state, skills: action.view ? { view: action.view, running: action.running === true, error: action.error ?? null, done: action.done ?? null } : null };
+    case "skillsClose":
+      return { ...state, skills: null };
     case "verifySent":
       return { ...state, verifySend: null };
     case "worldOpened":
@@ -286,6 +297,7 @@ export function App() {
         case "publishState": dispatch({ type: "testPublishState", view: msg.view, error: msg.error, errorLines: msg.errorLines, shareUrl: msg.shareUrl }); break;
         case "evidenceState": dispatch({ type: "evidenceState", view: msg.view, error: msg.error, done: msg.done }); break;
         case "memoryState": dispatch({ type: "memoryState", view: msg.view, error: msg.error, done: msg.done }); break;
+        case "skillsState": dispatch({ type: "skillsState", view: msg.view, running: msg.running, error: msg.error, done: msg.done }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -381,6 +393,18 @@ export function App() {
     />
   ) : null;
 
+  const skillsPanel = state.skills ? (
+    <SkillsPanel
+      view={state.skills.view}
+      error={state.skills.error}
+      done={state.skills.done}
+      running={state.skills.running}
+      onRefresh={() => postToHost({ type: "skillsOpen" })}
+      onRun={(skill, form) => postToHost({ type: "skillRun", skill, form })}
+      onClose={() => dispatch({ type: "skillsClose" })}
+    />
+  ) : null;
+
   const retry = (prompt: string) => {
     if (state.streamId) return;
     // Re-send the same user prompt to get a fresh assistant variant.
@@ -468,7 +492,7 @@ export function App() {
         messages={messages}
         pageNotice={state.pageNotice}
         elementPreview={state.elementPreview}
-        verifyPanel={verifyPanel || publishPanel || evidencePanel || memoryPanel ? <>{verifyPanel}{publishPanel}{evidencePanel}{memoryPanel}</> : null}
+        verifyPanel={verifyPanel || publishPanel || evidencePanel || memoryPanel || skillsPanel ? <>{verifyPanel}{publishPanel}{evidencePanel}{memoryPanel}{skillsPanel}</> : null}
         sendLocked={!!state.verify?.running}
         onRemoveElement={() => {
           dispatch({ type: "elementAttached", element: null });

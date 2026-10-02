@@ -193,7 +193,7 @@ It publishes the kiosk fixture, records a decision in the panel, closes the app,
 
 | Step | What the student does | Expected (in student terms) |
 |---|---|---|
-| 1 | Runs "HypeProof: 프로젝트 기억 보기" | A "프로젝트 기억" box: the project title, "아직 문제를 적지 않았어요.", the hypothesis with "아직 확인 중", the experiment "1주차 · …", and "어디까지 확인했나?" with "확인한 것 N개 · 해석 N개 · 가정 N개" |
+| 1 | Runs "HypeProof: 프로젝트 기억 보기" | A "프로젝트 기억" box: the project title, "아직 문제를 적지 않았어요.", the hypothesis with "아직 확인 중", the experiment "1주차 · …", and "확인한 것과 가정" with "확인한 것 N개 · 해석 N개 · 가정 N개" (the heading was the Week 5 question until `cr-skills`, CR-45) |
 | 2 | Opens "결정 기록하기", writes "옵션 선택을 한 단계로 줄인다", ticks one sentence under 근거 and slides 2 and 3, saves | "결정을 기록했어요."; under 결정: "팀 결정: 옵션 선택을 한 단계로 줄인다 · 슬라이드 2, 3". A decision saved with no 근거 ticked reads "근거가 연결되지 않았어요" and is still shown |
 | 3 | Publishes v1 of the kiosk, then picks v0 and v1 under 버전 and presses "비교하기" | The files that changed ("index.html · 바뀜"); with no decision linked to v1: "이 버전을 만든 결정이 기록되지 않았어요." |
 | 4 | Closes the app, clears the chat ("대화 지우기"), reopens and runs the command again | The same hypotheses, experiments, decisions and versions as before |
@@ -213,3 +213,39 @@ curl -s -X POST "$S/experiments/<exp>/drafts/<draft>/review" -H "authorization: 
 After the first: under 가설, "처음엔 "…"라고 믿었어요. "…"를 보고 "…"라고 믿게 됐어요. 그래서 "…"로 바꿨어요." A revision with no decision reads "왜 바뀌었는지는 기록되지 않았어요." After the second: "누구의 일인가 · 학교 매점 손님 · 쓰는 사람, 돈 내는 사람 (가정) · 쓰는 사람이 돈도 내요". After the third: the assumption moves to 확인한 것 with "처음엔 가정이었는데 나중에 확인했어요", and its earlier revision opens under it. The promotion has no button in the panel yet; a `note:` reference to a record marked 연습 or 본인이 말한 것 is refused (`promotion_source_not_real`). Under "지금까지", every entry opens to the record it names (the hypothesis revision, the experiment, the version's files, the evidence item's revisions, the decision with what it rests on, the slide revision). A director's issuer token reads the same box's data at `GET $S/projects/<prj>/memory` and lists the teams at `GET $S/director/projects`.
 
 **Where the data is.** D1: the Hypothesis and Experiment rows of `cr-publish`, extended in place (`revisions`, `stakeholder_id` in their `doc`), and migration 0034's `cr_decisions`, `cr_stakeholders`, `cr_metrics` and `cr_deck_slides` (one row per slide revision). Evidence items are NOT copied: they are the items of the drafts in the measurement-core record (`drafts/<experiment>/<draft>@<revision>` on `HPS_TRACES`), named `ev:<experiment>/<draft>/<item>`. The register, timeline, diff, belief changes and metric values are computed on every read. In the App: nothing beyond `cr-publish`'s remembered Project. These by-hand rows were written from the code and the executed runs, not executed by hand.
+
+## `cr-skills` — Curriculum skills (#1396)
+
+**Flag:** the same `curriculum_runtime: { enabled: true }`. No migration: skills write evidence drafts through `cr-evidence`'s store and read Venture Memory (0032–0034 applied).
+
+**Fastest check (background, no app).**
+
+```bash
+cd worker && node --experimental-strip-types --experimental-sqlite --no-warnings test/cr-skills.test.mjs   # Service, SQLite
+cd worker && npm run test:cr-skills:d1                                                                    # the same on local workerd D1 and R2
+cd extensions/hypeproof-chat && node --experimental-strip-types test/cr-skills.smoke.mjs                    # App session, SDK settings, panel render
+```
+
+**In the app (background).** The same prepared copy, with this branch's extension and webview injected. The scripted model in `app-service.mjs` answers a skill prompt from the prompt alone:
+
+```bash
+GATE=idle HPS_APP_PATH="<app copy>" bash scripts/e2e-quiet.sh npx playwright test -c curriculum-runtime/playwright.config.ts skills-app
+```
+
+It writes `e2e/test-results/cr-app/skills-result.json` (the skill and capability headers the App sent and the Service answered with).
+
+**By hand.** After `cr-memory`'s steps 1–2 (a published kiosk, an accepted draft, a team decision on slides 2–3). A real model answers through the coach route, so a class session must be open (`/console`), and a skill's answer may be refused: that is the gate working, not a crash.
+
+| Step | What the student does | Expected (in student terms) |
+|---|---|---|
+| 1 | Runs "HypeProof: 커리큘럼 스킬" | A "커리큘럼 스킬" box: "N주차 질문: …" (the week the Service runs skills for, the newest running experiment's, read from the curriculum data), and seven choices: 실험 설계, 증거 정리, 제품 수정 계획, 발표 슬라이드 수정안, 인터뷰 준비, 비판적 검토, 데모 연습 |
+| 2 | Picks "실험 설계", leaves the box empty, presses "실행하기" | "AI의 답이 규칙을 지켰어요."; sections 확인할 가정 (one of the open assumptions), 가설, 방법, 성공 기준 (each with a number); "제안이에요. 저장한 것은 없어요." |
+| 3 | Picks "증거 정리", chooses the experiment, presses "실행하기" | Sections 본 것 / 해석 / 가정 / 다음 실험, each line with "(근거 N개)"; "실험 증거에 AI 초안으로 저장했어요. 하나씩 읽고 받아들이거나 고쳐 주세요." The "실험 증거" box shows a new draft whose items wait for review |
+| 4 | Picks "발표 슬라이드 수정안", chooses the decision "… (슬라이드 2, 3)" | Patches for slides 2 and 3 only, each with "근거 N개"; nothing stored |
+| 5 | Picks "인터뷰 준비", writes "주문이 어려운 이유", pastes a few lines of notes in "인터뷰 메모" | Open questions with their purpose; "들으면서 적을 칸" are short labels; "메모 정리 (적은 그대로)" puts each quote under one of those labels and quotes only words that are in the pasted notes |
+| 6 | Picks "비판적 검토" | 근거가 약한 주장, 아직 시험하지 않은 주장 (every slide no experiment confirmed: one resting only on an assumption or an unreviewed AI item counts as not tested), 안전, and, because the kiosk calls `hypeproof.ai`, "AI 실패 대비" with three lines |
+| 7 | Picks "데모 연습" | "데모 순서" lists each step as "1. <하는 일> — <보여 줄 화면>" with the claims under it as "주장: …", each the exact sentence of a reviewed evidence item (only the ending may change, "멈췄다" → "멈췄어요"); "예상 질문" answers are those sentences, or "아직 확인하지 못했어요" |
+| 8 | Any refused answer | "AI의 답이 규칙을 지키지 않아 아무것도 저장하지 않았어요." and one Korean line per problem (for example "본 것(관찰)에 어느 기록에서 봤는지가 빠졌어요."); the rule code (`observation_without_source_refs`) is only on the line's `data-code` attribute, for a teacher or a test; nothing new in "실험 증거" |
+| 9 | Restarts the Service with `off` and reloads the window | "커리큘럼 스킬" is not in the palette; the three skill addresses answer like an unknown address |
+
+**Where the data is.** The skills, their contracts and the v5 curriculum are bundled files in `worker/src/skills/curriculum/` (nothing in the workspace is read). Only the Evidence skill writes: one `hps-evidence-draft/1` revision by `ai`, tagged `skill: "evidence@1.0.0"`, at `drafts/<experiment>/<draft>@1` on `HPS_TRACES`. Every other skill's result is shown and stored nowhere. A skill's model request is a `/v1/chat/completions` call with `x-hps-skill` and `x-hps-capability` (and, on a lesson seat, the profile's `x-hps-lesson-binding`) and no `model`, made once with no retry or model substitution; the Service answers with the same two headers and `x-hps-model`, and logs a `skill_request` line. Writing them onto the usage ledgers is `cr-gateway`'s (CR-34). These by-hand rows were written from the code and the executed runs, not executed by hand.

@@ -1,4 +1,4 @@
-// In-app Experiment Browser run (cr-browser #1391), Venture Memory run (cr-memory #1395, memory-app.spec.ts), AI Verify run (cr-verify #1392,
+// In-app Experiment Browser run (cr-browser #1391), Venture Memory run (cr-memory #1395, memory-app.spec.ts), curriculum skills run (cr-skills #1396, skills-app.spec.ts), AI Verify run (cr-verify #1392,
 // verify-app.spec.ts) and Publish for User Test run (cr-publish #1393, publish-app.spec.ts). Separate from the main suite: it
 // brings its own local Service (app-service.mjs) and never needs wrangler dev.
 //
@@ -19,7 +19,7 @@ process.env.HPS_QUIET_NO_HIDE ||= "1";
 
 export default defineConfig({
   testDir: here,
-  testMatch: /(app-layer|verify-app|publish-app|evidence-app|memory-app)\.spec\.ts$/,
+  testMatch: /(app-layer|verify-app|publish-app|evidence-app|memory-app|skills-app)\.spec\.ts$/,
   timeout: 300_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,
