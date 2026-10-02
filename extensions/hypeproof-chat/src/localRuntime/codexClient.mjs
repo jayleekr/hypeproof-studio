@@ -7,10 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { subscriptionEnv, terminateProcessTree } from "./process.mjs";
 
-function configuredMcpNames(executable) {
+export function configuredMcpNames(executable, execute = execFileSync) {
   try {
     const rows = JSON.parse(
-      execFileSync(executable, ["mcp", "list", "--json"], {
+      execute(executable, ["mcp", "list", "--json"], {
+        env: subscriptionEnv(),
         encoding: "utf8",
         timeout: 20000,
         stdio: ["ignore", "pipe", "pipe"],

@@ -7,8 +7,21 @@ import { localRuntimeConfig } from "../src/localRuntime/index.ts";
 import { startToolServer } from "../src/localRuntime/toolServer.mjs";
 import { jsonProcess, subscriptionEnv } from "../src/localRuntime/process.mjs";
 import { testStateCandidates } from "../src/chatPanelHelpers.ts";
+import { configuredMcpNames } from "../src/localRuntime/codexClient.mjs";
 assert.deepEqual(testStateCandidates("HypeProof Studio Dev", "owned", "unrelated-home"), ["owned"]);
 assert.deepEqual(testStateCandidates("HypeProof Studio", "owned", "legacy-home"), ["owned", "legacy-home"]);
+const priorAdminPassword = process.env.HPS_ADMIN_PASSWORD;
+try {
+  process.env.HPS_ADMIN_PASSWORD = "synthetic-probe-secret";
+  assert.deepEqual(configuredMcpNames(process.execPath, (_exe, args, options) => {
+    assert.deepEqual(args, ["mcp", "list", "--json"]);
+    assert.equal(options.env.HPS_ADMIN_PASSWORD, undefined);
+    return "[]";
+  }), []);
+} finally {
+  if (priorAdminPassword === undefined) delete process.env.HPS_ADMIN_PASSWORD;
+  else process.env.HPS_ADMIN_PASSWORD = priorAdminPassword;
+}
 const root = await mkdtemp(join(tmpdir(), "studio-local-test-"));
 try {
   const cwd = join(root, "work");
