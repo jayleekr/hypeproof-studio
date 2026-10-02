@@ -372,8 +372,9 @@ def main():
     parser.add_argument('--base-app', type=Path)
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--service', choices=['local', 'live'], default='local')
-    parser.add_argument('--provider', choices=['claude', 'codex', 'service'], default='claude',
-                        help='Development funding: local Claude Code subscription (default), Codex subscription, or Service API.')
+    parser.add_argument('--provider', choices=['claude', 'codex', 'service'],
+                        default='codex' if platform.system() == 'Windows' else 'claude',
+                        help='Development funding: local Codex subscription (Windows default), Claude Code subscription (macOS default), or Service API.')
     parser.add_argument('--cli-executable', type=Path, help='Explicit installed native Claude Code or Codex CLI.')
     parser.add_argument('--setup-local', action='store_true', help='Prepare a developer activity/code through an already running local development Service.')
     parser.add_argument('--debug-port', type=int, help='Optional loopback renderer debugging port for actual-app verification.')

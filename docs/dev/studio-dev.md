@@ -34,7 +34,8 @@ python scripts/studio-dev.py --provider codex run
 # Or: python scripts/studio-dev.py --provider claude run
 ```
 
-`scripts/Studio Dev.ps1 -Provider codex` is the Windows entry point. The launcher
+`scripts/Studio Dev.ps1` is the Windows entry point and defaults to Codex.
+Use `-Provider claude` to select Claude Code. The launcher
 finds an installed shell under `%LOCALAPPDATA%\Programs\HypeProof Studio` or
 `Programs\VSCodium`; `--base-app` accepts another installed/unpacked shell directory.
 The default owned state is `%LOCALAPPDATA%\HypeProofStudioDev\<checkout hash>`.
@@ -80,8 +81,9 @@ This is an explicit developer-only exception to the production runtime credentia
 contract (REQ-M13), not a change to classroom authentication. It extends
 ST-REQ-COACH-RUNTIME and ST-TEST-GPT-PRACTICE.
 
-The development launcher defaults to the installed, logged-in **Claude Code** CLI.
-Use `--provider codex` for the local Codex ChatGPT login, or `--provider service`
+The development launcher defaults to the installed, logged-in **Codex** CLI on
+Windows and **Claude Code** CLI on macOS. Use `--provider codex` for the local
+Codex ChatGPT login, `--provider claude` for Claude Code, or `--provider service`
 for the existing Service-funded runtime. Missing CLI/login fails before a build;
 there is no silent fallback to another provider or API billing.
 

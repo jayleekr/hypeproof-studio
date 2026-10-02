@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('claude', 'codex', 'service')][string]$Provider = 'claude',
+  [ValidateSet('claude', 'codex', 'service')][string]$Provider = 'codex',
   [switch]$SetupLocal
 )
 $ErrorActionPreference = 'Stop'
