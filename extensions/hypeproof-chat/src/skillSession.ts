@@ -24,6 +24,33 @@ export interface SkillCompletion {
   status?: number;
 }
 
+/**
+ * The host's one coach-route request for a skill run (`chatPanelProvider.completeSkill`), pure over
+ * `fetchImpl` so a smoke drives the request it really sends: non-streaming, no `model` (the lesson
+ * policy picks it), only the two run metadata headers forwarded, and the lesson binding when the
+ * seat serves one (#751 U3).
+ */
+export async function completeSkillRequest(
+  fetchImpl: typeof fetch,
+  args: { proxyUrl: string; baseHeaders: Record<string, string>; binding: Record<string, string>; prompt: string; headers: Record<string, string> },
+): Promise<SkillCompletion> {
+  const meta: Record<string, string> = {};
+  for (const k of ["x-hps-skill", "x-hps-capability"]) if (typeof args.headers[k] === "string") meta[k] = args.headers[k]!;
+  try {
+    const res = await fetchImpl(args.proxyUrl.replace(/\/+$/, "") + "/chat/completions", {
+      method: "POST",
+      headers: { ...args.baseHeaders, accept: "application/json", ...args.binding, ...meta },
+      body: JSON.stringify({ stream: false, messages: [{ role: "user", content: args.prompt }] }),
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+    const content = json.choices?.[0]?.message?.content;
+    return { ok: typeof content === "string", text: typeof content === "string" ? content : undefined, model: res.headers.get("x-hps-model"), status: res.status };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export interface SkillPorts {
   switchOn(): boolean;
   token(): Promise<string | null>;

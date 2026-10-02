@@ -5,8 +5,9 @@ student listed in the input (their own ids).
 
 - `weak_claims`: every claim that no reviewed, real evidence supports (no evidence, only
   assumptions, or AI items the student has not reviewed). Every such claim must be listed.
-- `missing_tests`: every claim that no verification criterion and no experiment checks, with a
-  test that would check it. Every such claim must be listed.
+- `missing_tests`: every claim that no experiment checks (it cites no reviewed, real evidence
+  that is not an open assumption), with a test that would check it. Every such claim must be
+  listed.
 - `missing_evidence`: what evidence would make a claim stronger.
 - `safety`: risks to the people who use the product.
 - `ai_failure_review`: when the product calls an AI, one entry each for `wrong`, `unsafe` and

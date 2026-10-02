@@ -51,30 +51,6 @@
           "additionalProperties": false
         },
         "maxItems": 20
-      },
-      "criteria": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "text": {
-              "type": "string",
-              "maxLength": 300,
-              "minLength": 1
-            },
-            "claim_id": {
-              "type": "string",
-              "maxLength": 60,
-              "minLength": 1
-            }
-          },
-          "required": [
-            "text",
-            "claim_id"
-          ],
-          "additionalProperties": false
-        },
-        "maxItems": 20
       }
     },
     "required": [],

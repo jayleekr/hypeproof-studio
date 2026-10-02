@@ -8,8 +8,14 @@ Prepare the demo of the product and the questions the audience will likely ask.
   that support it (`evidence_refs`). A claim without such evidence is refused.
 - Every answer carries at least one such claim. When the team has no evidence for a question,
   the answer is exactly "아직 확인하지 못했어요" with no claims; nothing else may stand alone.
-- A number or a quantity word ("모두", "매일", "대부분", "세 명") in `show` or `answer` must also
-  appear in a claim of the same entry that cites evidence; otherwise leave it out.
+- A claim says no more than its evidence: every number or quantity word in a claim's `text`
+  must be in the statement of an evidence item it cites.
+- A number or a quantity word ("모두", "매일", "대부분", "세 명", "스무 명") in `step`, `show` or
+  `answer` must also appear in a claim of the same entry that cites evidence; otherwise leave it
+  out.
+- `step` names what the presenter does ("주문 화면 열기"); it states no result. A `show` without
+  a claim is a short label of what is on screen ("주문 화면"), not a sentence; anything the
+  presenter asserts there goes in `claims`.
 
 ## Output
 

@@ -162,6 +162,9 @@ const PROBLEM_LINES: Record<string, string> = {
   sources_not_read: "제품 파일을 다 읽지 못해서 검토를 받을 수 없어요.",
   answer_without_claim: "근거 없는 대답이 있어요.",
   unsupported_quantity: "근거 없는 숫자나 '모두' 같은 말이 있어요.",
+  claim_quantity_not_in_evidence: "주장의 숫자나 '모두' 같은 말이 근거에 없어요.",
+  show_without_claim: "근거 없이 결과를 말하는 데모 장면이 있어요.",
+  step_asserts: "데모 순서 이름에 확인하지 않은 결과가 들어 있어요.",
   missing: "꼭 있어야 할 칸이 빠졌어요.",
   not_allowed: "정해지지 않은 칸이 들어 있어요.",
   too_few_items: "항목 수가 너무 적어요.",
@@ -210,6 +213,14 @@ const SECTION_NAMES: Record<string, string> = {
 const CASE_NAMES: Record<string, string> = { wrong: "AI가 틀렸을 때", unsafe: "AI가 위험한 답을 할 때", unavailable: "AI가 답하지 못할 때" };
 const list = (v: unknown): Array<Record<string, any>> => (Array.isArray(v) ? v : []);
 const refs = (v: unknown) => (Array.isArray(v) && v.length ? ` (근거 ${v.length}개)` : "");
+/** A claim id in the student's words: `slide:3` is "슬라이드 3", `c2` (the second line the student typed) is "주장 2". */
+export function claimName(id: unknown): string {
+  const v = String(id ?? "");
+  const slide = /^slide:(\d+)$/.exec(v);
+  if (slide) return `슬라이드 ${slide[1]}`;
+  const typed = /^c(\d+)$/.exec(v);
+  return typed ? `주장 ${typed[1]}` : "주장";
+}
 
 /** The accepted output in the student's words, section by section. */
 export function resultSections(skill: string, out: Record<string, any>): Array<{ heading: string; lines: string[] }> {
@@ -239,9 +250,9 @@ export function resultSections(skill: string, out: Record<string, any>): Array<{
       ];
     case "critic":
       return [
-        { heading: "근거가 약한 주장", lines: list(out.weak_claims).map((w) => `${w.claim_id}: ${w.reason}`) },
-        { heading: "아직 시험하지 않은 주장", lines: list(out.missing_tests).map((m) => `${m.claim_id}: ${m.test}`) },
-        { heading: "더 필요한 근거", lines: list(out.missing_evidence).map((m) => `${m.claim_id ? `${m.claim_id}: ` : ""}${m.what}`) },
+        { heading: "근거가 약한 주장", lines: list(out.weak_claims).map((w) => `${claimName(w.claim_id)}: ${w.reason}`) },
+        { heading: "아직 시험하지 않은 주장", lines: list(out.missing_tests).map((m) => `${claimName(m.claim_id)}: ${m.test}`) },
+        { heading: "더 필요한 근거", lines: list(out.missing_evidence).map((m) => `${m.claim_id ? `${claimName(m.claim_id)}: ` : ""}${m.what}`) },
         { heading: "안전", lines: list(out.safety).map((s) => String(s.issue)) },
         { heading: "AI 실패 대비", lines: list(out.ai_failure_review).map((r) => `${CASE_NAMES[r.case] ?? r.case}: ${r.handling === "missing" ? "대비 없음" : "대비 있음"} — ${r.note}`) },
       ].filter((s) => s.lines.length);
@@ -257,5 +268,5 @@ export function resultSections(skill: string, out: Record<string, any>): Array<{
 
 /** What a write-back stored, in the student's words. */
 export function writtenLines(written: ReadonlyArray<{ target: string; id: string }>): string[] {
-  return written.map((w) => (w.target === "evidence_draft" ? "실험 증거에 AI 초안으로 저장했어요. 하나씩 읽고 받아들이거나 고쳐 주세요." : `${w.target} 저장`));
+  return written.map((w) => (w.target === "evidence_draft" ? "실험 증거에 AI 초안으로 저장했어요. 하나씩 읽고 받아들이거나 고쳐 주세요." : "프로젝트에 저장했어요."));
 }

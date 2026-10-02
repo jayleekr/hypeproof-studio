@@ -38,7 +38,7 @@ import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, reso
 import { PublishSession } from "./publishSession";
 import { EvidenceSession } from "./evidenceSession";
 import { MemorySession } from "./memorySession";
-import { SkillSession, type SkillCompletion } from "./skillSession";
+import { SkillSession, completeSkillRequest, type SkillCompletion } from "./skillSession";
 import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
@@ -858,23 +858,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async completeSkill(prompt: string, headers: Record<string, string>): Promise<SkillCompletion> {
     const token = await this.crProjectMemory.refresh();
     if (!token) return { ok: false };
-    const meta: Record<string, string> = {};
-    for (const k of ["x-hps-skill", "x-hps-capability"]) if (typeof headers[k] === "string") meta[k] = headers[k]!;
     const profile = await this.ensureProfile().catch(() => null);
     const binding = lessonBindingHeader(profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined);
-    try {
-      const res = await fetch(this.proxyUrl().replace(/\/+$/, "") + "/chat/completions", {
-        method: "POST",
-        headers: { ...buildProxyHeaders({ token }), accept: "application/json", ...binding, ...meta },
-        body: JSON.stringify({ stream: false, messages: [{ role: "user", content: prompt }] }),
-      });
-      if (!res.ok) return { ok: false, status: res.status };
-      const json = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-      const content = json.choices?.[0]?.message?.content;
-      return { ok: typeof content === "string", text: typeof content === "string" ? content : undefined, model: res.headers.get("x-hps-model"), status: res.status };
-    } catch {
-      return { ok: false };
-    }
+    return completeSkillRequest(fetch, { proxyUrl: this.proxyUrl(), baseHeaders: buildProxyHeaders({ token }), binding, prompt, headers });
   }
 
   /** Post the skills panel state (null hides it with the switch off). */

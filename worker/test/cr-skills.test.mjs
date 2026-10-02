@@ -46,6 +46,8 @@ async function test(name, fn) {
 const SKILL_ROUTES = CURRICULUM_ROUTES.filter((r) => /\/skills/.test(r));
 const MIGRATIONS = ["0032-curriculum-runtime-publish", "0033-curriculum-runtime-evidence", "0034-curriculum-runtime-memory"];
 const VENTURE_TABLES = ["cr_projects", "cr_hypotheses", "cr_product_versions", "cr_experiments", "cr_test_links", "cr_decisions", "cr_stakeholders", "cr_metrics", "cr_deck_slides"];
+/** Every table a run could write: Venture Memory plus each experiment's last-record time (the 30-day deletion clock, decision 6). */
+const STORE_TABLES = [...VENTURE_TABLES, "cr_experiment_records"];
 
 let mf = null;
 async function fixture(opts = {}) {
@@ -155,14 +157,14 @@ async function storeSnapshot(f) {
     } while (cursor);
   }
   const rows = {};
-  for (const t of VENTURE_TABLES) rows[t] = JSON.stringify((await f.env.HPS_DB.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()).results);
+  for (const t of STORE_TABLES) rows[t] = JSON.stringify((await f.env.HPS_DB.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()).results);
   return { keys: new Set(keys), rows };
 }
 function storeDiff(before, after) {
   return {
     added: [...after.keys].filter((k) => !before.keys.has(k)).sort(),
     removed: [...before.keys].filter((k) => !after.keys.has(k)).sort(),
-    tables: VENTURE_TABLES.filter((t) => before.rows[t] !== after.rows[t]),
+    tables: STORE_TABLES.filter((t) => before.rows[t] !== after.rows[t]),
   };
 }
 
@@ -330,8 +332,8 @@ await test("CR-T42 on the coach route: a skill request is answered with its tag 
       assert.equal(off.headers.get("x-hps-skill"), null, "switch off: nothing recorded as a skill request");
     });
     // MU-02 / decision 2: a skill request is ONE upstream call, no retry and no model substitution, on
-    // every provider path that otherwise retries (anthropic, gemini). Control: an ordinary request retries.
-    for (const [provider, key] of [["anthropic", "ANTHROPIC_API_KEY"], ["gemini", "GEMINI_API_KEY"]]) {
+    // every provider path that otherwise retries (anthropic, gemini, glm). Control: an ordinary request retries.
+    for (const [provider, key] of [["anthropic", "ANTHROPIC_API_KEY"], ["gemini", "GEMINI_API_KEY"], ["glm", "GLM_API_KEY"]]) {
       const saved = { provider: env.LLM_PROVIDER, key: env[key] };
       env.LLM_PROVIDER = provider;
       env[key] = "test-key";
@@ -398,7 +400,7 @@ const PRODUCT_OK = { summary: "옵션 선택을 한 화면으로 합친다", cha
 const DECK_OK = { patches: [{ slide: 2, title: "문제", body: "세 명 중 두 명이 옵션에서 멈췄다", evidence_refs: [EV("o1")] }, { slide: 3, title: "해결", body: "옵션을 한 단계로", evidence_refs: [EV("i1")] }] };
 const EVIDENCE_OK = { items: [{ id: "o1", section: "observation", text: "두 세션이 열렸다", source_refs: ["session:s-1", "session:s-2"] }, { id: "a1", section: "assumption", text: "한 단계면 혼자 주문한다", source_refs: [] }] };
 
-await test("CR-T43 positive: Experiment picks an open assumption with countable criteria; Evidence is a valid AI draft; Product Builder touches only files tied to the selected evidence; Deck Builder patches only the affected slides", () => {
+await test("CR-T43 positive: Experiment picks an open assumption with countable criteria; Evidence is a valid AI draft; Product Builder changes only files of the version, each citing usable evidence the student selected; Deck Builder patches only the affected slides", () => {
   assert.deepEqual(problemsOf(gate("experiment", {}, EXPERIMENT_OK)), []);
   assert.deepEqual(problemsOf(gate("evidence", { experiment_id: "exp-1" }, EVIDENCE_OK)), []);
   assert.deepEqual(problemsOf(gate("product-builder", { evidence_refs: [EV("o1"), EV("i1")] }, PRODUCT_OK)), []);
@@ -447,7 +449,7 @@ const NOTES = "학생 메모: 손님이 '옵션이 너무 많아서 뭘 눌러�
 await test("CR-T44 positive: Interview output has only open questions and quotes the notes word for word; the Critic lists exactly what the fixture plants; Demo Coach returns a flow and Q&A on reviewed evidence", () => {
   assert.deepEqual(problemsOf(gate("interview", { goal: "주문이 어려운 이유", notes: NOTES }, INTERVIEW_OK)), []);
   // Instrument controls (too strict?): ordinary open questions pass, in several forms.
-  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?", "옵션을 고를 때 무엇이 가장 어려웠나요?", "What would you like to change?", "주문하면서 어떤 기분이 들었는지 이야기해 주세요."]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
+  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?", "옵션을 고를 때 무엇이 가장 어려웠나요?", "What would you like to change?", "주문하면서 어떤 기분이 들었는지 이야기해 주세요.", "어떤 점이 불편했는지 이야기해 주세요.", "어떤 점이 안 좋았는지 말씀해 주세요.", "무엇을 바꾸고 싶은지 알려 주세요."]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
   for (const l of ["막힌 단계", "한 말 그대로", "다시 쓸 이유"]) assert.equal(rulesMod.isNoteLabel(l), true, l);
   const critic = {
     weak_claims: [{ claim_id: "slide:3", reason: "가정만 근거로 쓴다" }, { claim_id: "slide:4", reason: "근거가 없다" }, { claim_id: "c1", reason: "근거가 없다" }],
@@ -461,9 +463,10 @@ await test("CR-T44 positive: Interview output has only open questions and quotes
     ],
   };
   assert.deepEqual(problemsOf(gate("critic", { claims: [{ id: "c1", text: "학생들이 매일 쓴다" }] }, critic)), []);
-  // A criterion naming c1 checks it: then it need not be a missing test (it is still weak).
+  // A free-text "criterion" in the input checks nothing (review round 2): the input has no such field.
   const checked = { ...critic, missing_tests: critic.missing_tests.filter((m) => m.claim_id !== "c1") };
-  assert.deepEqual(problemsOf(gate("critic", { claims: [{ id: "c1", text: "학생들이 매일 쓴다" }], criteria: [{ text: "열 명 중 다섯 명이 다시 온다", claim_id: "c1" }] }, checked)), []);
+  const madeUp = gate("critic", { claims: [{ id: "c1", text: "학생들이 매일 쓴다" }], criteria: [{ text: "아무 말", claim_id: "c1" }] }, checked);
+  assert.ok(!madeUp.ok && madeUp.code === "invalid_input" && madeUp.problems.includes("$.criteria: not_allowed"), JSON.stringify(madeUp));
   // A product that calls no AI gets no AI review, and the review is not required.
   const noAi = { ...CTX, version: { ...CTX.version, files: [{ path: "index.html", text: PAGE("v1") }] } };
   assert.deepEqual(problemsOf(gate("critic", {}, { ...critic, weak_claims: critic.weak_claims.filter((w) => w.claim_id !== "c1"), missing_tests: critic.missing_tests.filter((m) => m.claim_id !== "c1"), ai_failure_review: [] }, noAi)), []);
@@ -476,7 +479,9 @@ await test("CR-T44 positive: Interview output has only open questions and quotes
 });
 
 await test("CR-T44 negative: planted leading questions, fabricated answers, weak claims, an unchecked claim, an unhandled AI failure and an unsupported demo or Q&A claim are each caught", () => {
-  const LEADING = ["옵션이 너무 많지 않나요?", "이 키오스크 편리하죠?", "한 단계면 더 좋지 않아요?", "얼마나 만족하셨나요?", "Don't you think this is easier?", "이 기능이 필요하다는 데 동의하시나요?", "어떤 점이 좋았나요?", "무엇이든 괜찮으세요?", "어떤 것이든 좋으신가요?", "어느 화면이 마음에 드셨나요?", "How much do you love this feature?", "Do you like the new screen?"];
+  const LEADING = ["옵션이 너무 많지 않나요?", "이 키오스크 편리하죠?", "한 단계면 더 좋지 않아요?", "얼마나 만족하셨나요?", "Don't you think this is easier?", "이 기능이 필요하다는 데 동의하시나요?", "어떤 점이 좋았나요?", "무엇이든 괜찮으세요?", "어떤 것이든 좋으신가요?", "어느 화면이 마음에 드셨나요?", "How much do you love this feature?", "Do you like the new screen?",
+    // Review round 2: the same verdict embedded in a request, presupposing English forms, a praising question.
+    "어떤 점이 가장 좋았는지 이야기해 주세요.", "어떤 점이 마음에 들었는지 알려 주세요.", "왜 이 앱이 더 편리하다고 느끼셨어요?", "왜 이 앱이 좋다고 생각하세요?", "What did you love about it?", "Why is it better than the old kiosk?", "How great was it?", "어떻게 하면 이 훌륭한 앱을 더 많이 쓰실까요?"];
   for (const q of LEADING) {
     const out = { ...INTERVIEW_OK, questions: [...INTERVIEW_OK.questions.slice(0, 3), { text: q, purpose: "planted" }] };
     caught(gate("interview", { goal: "g", notes: NOTES }, out), "leading_question");
@@ -488,6 +493,11 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   caught(gate("interview", { goal: "g", notes: "손님: 옵션이 많다" }, { ...INTERVIEW_OK, structured_notes: [{ topic: "손님은 매일 쓰고 싶다고 함", quote: "옵션" }] }), "topic: not_a_note_field");
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "손님은 '너무 비싸요'라고 답함"] }), "note_fields[1]: not_a_label");
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "매일 쓰고 싶어함"] }), "note_fields[1]: not_a_label");
+  caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "가격이 비싸서 안 쓴다는 의견"] }), "note_fields[1]: not_a_label");
+  // A quote cut out of a longer clause can reverse it: "좋았어요" out of "결제는 안 좋았어요".
+  const reversed = { goal: "g", notes: "손님: 결제는 안 좋았어요. 옵션은 많았어요." };
+  caught(gate("interview", reversed, { ...INTERVIEW_OK, structured_notes: [{ topic: "막힌 단계", quote: "좋았어요" }] }), "answer_not_in_notes");
+  assert.deepEqual(problemsOf(gate("interview", reversed, { ...INTERVIEW_OK, structured_notes: [{ topic: "막힌 단계", quote: "결제는 안 좋았어요" }] })), [], "control: the whole clause is a quote");
 
   const base = {
     weak_claims: [{ claim_id: "slide:3", reason: "r" }, { claim_id: "slide:4", reason: "r" }, { claim_id: "c1", reason: "r" }],
@@ -517,6 +527,13 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   const handled = { ...CTX, version: { ...CTX.version, files: [{ path: "app.js", text: "hypeproof.ai.generate({capability:'text.fast'}).then(show).catch(() => show('잠시 뒤에 다시 해 주세요'))" }] } };
   assert.deepEqual(rulesMod.aiFailureHandling(handled.version.files), { uses_ai: true, unhandled: [] });
   assert.deepEqual(rulesMod.aiFailureHandling(AI_FILES), { uses_ai: true, unhandled: ["app.js"] });
+  // Review round 2: an aliased SDK call and another provider's host or API path are AI calls too.
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "a.js", text: "const ai = window.hypeproof.ai; await ai.generate({})" }]), { uses_ai: true, unhandled: ["a.js"] });
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "b.js", text: "fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST' })" }]), { uses_ai: true, unhandled: ["b.js"] });
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "c.js", text: "fetch('/proxy/v1/messages')" }]).uses_ai, true);
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "d.js", text: "fetch('/menu.json').then((r) => r.json())" }]), { uses_ai: false, unhandled: [] }, "control: a plain fetch is no AI call");
+  const aliased = { ...CTX, version: { ...CTX.version, files: [{ path: "app.js", text: "const ai = window.hypeproof.ai; document.querySelector('#order').onclick = async () => (document.title = (await ai.generate({ capability: 'text.fast' })).text);" }] } };
+  assert.deepEqual(problemsOf(gate("critic", input, base, aliased)), [], "an aliased AI product takes the AI failure review (not product_has_no_ai)");
 
   const demo = (claim) => ({ flow: [{ step: "s", show: "w", claims: [] }], qa: [{ question: "q", answer: "a", claims: [claim] }] });
   caught(gate("demo-coach", {}, demo({ text: "어르신도 혼자 주문해요", evidence_refs: [EV("a1")] })), "qa[0].claims[0]: evidence_not_usable");
@@ -538,6 +555,21 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   caught(free(quiet, { question: "몇 명이 멈췄나요?", answer: "100명이 멈췄어요", claims: [o1] }), "qa[0].answer: unsupported_quantity:100");
   caught(free(quiet, { question: "몇 명이 썼나요?", answer: "100명이 썼어요", claims: [{ text: "100명이 썼어요", evidence_refs: [EV("x1")] }] }), "qa[0].answer: unsupported_quantity:100");
   assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "세 명 중 두 명이 멈췄어요", claims: [o1] })), [], "control: the same quantity with its supported claim passes");
+  assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "3명 중 2명이 멈췄어요", claims: [o1] })), [], "control: digits and Korean number words are one quantity");
+  // Review round 2. D1: a made-up number moved into the claim's own text, citing a reviewed item that says otherwise.
+  caught(free(quiet, { question: "몇 명이 써요?", answer: "100명이 매일 써요", claims: [{ text: "100명이 매일 써요", evidence_refs: [EV("o1")] }] }), "qa[0].claims[0]: claim_quantity_not_in_evidence:100");
+  caught(free(quiet, { question: "몇 명이 써요?", answer: "100명이 매일 써요", claims: [{ text: "100명이 매일 써요", evidence_refs: [EV("o1")] }] }), "qa[0].answer: unsupported_quantity:100");
+  caught(free({ step: "열기", show: "첫 화면", claims: [{ text: "10명 중 9명이 혼자 주문했다", evidence_refs: [EV("o1")] }] }, unconfirmed), "flow[0].claims[0]: claim_quantity_not_in_evidence:10");
+  caught(free(quiet, { question: "다 혼자 했나요?", answer: "네, 모두 혼자 했어요", claims: [{ text: "모두 혼자 했다", evidence_refs: [EV("o1")] }] }), "claim_quantity_not_in_evidence:모두");
+  assert.deepEqual(problemsOf(free(quiet, { question: "결제는요?", answer: "결제 화면은 모두 통과했어요", claims: [{ text: "결제 화면은 모두 통과했다", evidence_refs: [EV("o2")] }] })), [], "control: a share word the cited statement carries");
+  // D3: a flow step's `show` asserting a result with no claim; a `step` asserting one.
+  caught(free({ step: "성적 보여주기", show: "이 앱으로 학생들의 성적이 올랐다는 것을 보여준다", claims: [] }, unconfirmed), "flow[0].show: show_without_claim");
+  caught(free({ step: "성적 보여주기", show: "학생들 성적이 좋아져요", claims: [] }, unconfirmed), "flow[0].show: show_without_claim");
+  caught(free({ step: "100명이 매일 쓰는 키오스크 앱", show: "첫 화면", claims: [] }, unconfirmed), "flow[0].step: unsupported_quantity:100");
+  caught(free({ step: "학생 성적이 올랐던 앱 소개", show: "첫 화면", claims: [] }, unconfirmed), "flow[0].step: step_asserts");
+  // D4 / D6: Korean number words outside 한..열, Sino-Korean, English, full-width digits, share words.
+  for (const [answer, q] of [["스무 명이 썼어요", "20"], ["백 명이 썼어요", "100"], ["스물세 명이 썼어요", "23"], ["five users came back", "5"], ["９명이 썼어요", "9"], ["대다수가 혼자 했어요", "대다수"], ["아무도 못 찾았어요", "아무도"]])
+    caught(free(quiet, { question: "몇 명?", answer, claims: [o1] }), `qa[0].answer: unsupported_quantity:${q}`);
 });
 
 await test("CR-T40/CR-T44 schema validator: minLength, enum and inherited key names are checked, never thrown on", () => {
@@ -578,7 +610,7 @@ await test("CR-T41 positive: valid Evidence output writes only its declared targ
     assert.equal(r.json.written.length, 1);
     const diff = storeDiff(before, await storeSnapshot(f));
     assert.deepEqual(diff.removed, []);
-    assert.deepEqual(diff.tables, [], "no Venture Memory row changed");
+    assert.deepEqual(diff.tables, ["cr_experiment_records"], "no Venture Memory row changed; only the stored draft's experiment moved its last-record time");
     assert.equal(diff.added.length, 1, JSON.stringify(diff.added));
     assert.match(diff.added[0], new RegExp(`/drafts/${s.experiment.id}/${r.json.written[0].id}@1`));
     const ev = await f.api(`/v1/curriculum/experiments/${s.experiment.id}/evidence`, { token: s.token });
@@ -632,6 +664,38 @@ await test("CR-T41 negative: invalid output writes nothing and returns an explic
     // Instrument control: a write the run was not allowed to make shows in the diff.
     await f.r2.put(`curriculum/planted/${Date.now()}`, "x");
     assert.equal(storeDiff(before, await storeSnapshot(f)).added.length, 1);
+  } finally {
+    f.close();
+  }
+});
+
+await test("CR-T41 negative: an answer the store refuses for its references moves no retention clock and creates no record task, on an experiment with records and on one with none", async () => {
+  const f = await fixture();
+  try {
+    const s = await project(f);
+    const bad = { items: [{ id: "o1", section: "observation", text: "없는 기록", source_refs: ["note:never-recorded"] }] };
+    const clock = async (id) => (await f.env.HPS_DB.prepare("SELECT last_record_at FROM cr_experiment_records WHERE experiment_id = ?").bind(id).first())?.last_record_at ?? null;
+    const t0 = await clock(s.experiment.id);
+    assert.ok(t0, "the fixture's notes and drafts set the clock");
+    const before = await storeSnapshot(f);
+    const r = await run(f, s, "evidence", "output", { input: { experiment_id: s.experiment.id }, output: bad });
+    assert.deepEqual([r.status, r.json.error.code], [422, "unresolved_source_refs"], r.text);
+    assert.equal(await clock(s.experiment.id), t0, "the 30-day deletion clock did not move");
+    assert.deepEqual(storeDiff(before, await storeSnapshot(f)), { added: [], removed: [], tables: [] });
+    // A new experiment with no record yet: the refusal neither inserts its clock row nor creates its record task.
+    const e2 = await f.api("/v1/curriculum/experiments", { method: "POST", token: s.token, body: { project_id: s.project.id, product_version_id: s.version, week: 3, question: "두 번째 실험", method: "task_test", success_criteria: ["5명 중 3명 완료"], hypothesis_id: s.hypothesis.id } });
+    assert.equal(e2.status, 201, e2.text);
+    const id2 = e2.json.experiment.id;
+    const mid = await storeSnapshot(f);
+    const r2 = await run(f, s, "evidence", "output", { input: { experiment_id: id2 }, output: bad });
+    assert.deepEqual([r2.status, r2.json.error.code], [422, "unresolved_source_refs"], r2.text);
+    assert.equal(await clock(id2), null, "no clock row for an experiment the refusal would otherwise have started");
+    assert.deepEqual(storeDiff(mid, await storeSnapshot(f)), { added: [], removed: [], tables: [] });
+    // Control: the snapshot sees the clock. A valid answer (an assumption, no references) on the same experiment stores and starts it.
+    const ok = await run(f, s, "evidence", "output", { input: { experiment_id: id2 }, output: { items: [{ id: "a1", section: "assumption", text: "한 단계면 해결된다", source_refs: [] }] } });
+    assert.equal(ok.status, 201, ok.text);
+    assert.ok(await clock(id2));
+    assert.ok(storeDiff(mid, await storeSnapshot(f)).tables.includes("cr_experiment_records"));
   } finally {
     f.close();
   }

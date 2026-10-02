@@ -11,8 +11,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SkillSession } from "../src/skillSession.ts";
-import { extractJsonObject, problemLine, resultSections, skillFormProblems, skillInput } from "../src/skillView.ts";
+import { SkillSession, completeSkillRequest } from "../src/skillSession.ts";
+import { extractJsonObject, problemLine, resultSections, skillFormProblems, skillInput, writtenLines } from "../src/skillView.ts";
 import { buildSdkQueryOptions, profileToAgentOptions } from "../src/sdkCoachHelpers.ts";
 import { lessonBindingHeader } from "../src/proxyClientHelpers.ts";
 import { rendererStatus, renderComponent, visibleText } from "./sx-render.mjs";
@@ -181,21 +181,43 @@ const session = (svc, over = {}) => {
 
 // ── The host's coach-route request carries the run's metadata and no model ──
 {
+  // Driven through a stubbed fetch: the request the host really sends (completeSkillRequest).
+  const sent = [];
+  const stub = async (url, init) => {
+    sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200, headers: { "content-type": "application/json", "x-hps-model": "claude-sonnet-4-6" } });
+  };
+  const runMeta = { "x-hps-skill": "critic@1.0.0", "x-hps-capability": "reasoning.high", "x-planted": "dropped", authorization: "Bearer planted" };
+  const binding = lessonBindingHeader("0123456789abcdef0123456789abcdef");
+  const done = await completeSkillRequest(stub, { proxyUrl: "https://api.test/v1/", baseHeaders: { authorization: "Bearer t" }, binding, prompt: "P", headers: runMeta });
+  assert.deepEqual(done, { ok: true, text: '{"ok":true}', model: "claude-sonnet-4-6", status: 200 });
+  /** What is wrong with one captured request: a model named, a stream, a header other than the run's two metadata headers, the binding, auth and accept. */
+  const requestProblems = (r) => [
+    ...(r.url === "https://api.test/v1/chat/completions" ? [] : [`url:${r.url}`]),
+    ...("model" in r.body ? ["names_model"] : []),
+    ...(r.body.stream === false ? [] : ["streams"]),
+    ...(JSON.stringify(r.body.messages) === JSON.stringify([{ role: "user", content: "P" }]) ? [] : ["messages"]),
+    ...Object.keys(r.headers).filter((k) => !["authorization", "accept", "x-hps-skill", "x-hps-capability", "x-hps-lesson-binding"].includes(k)).map((k) => `header:${k}`),
+    ...(r.headers.authorization === "Bearer t" ? [] : ["auth_overridden"]),
+    ...(r.headers["x-hps-lesson-binding"] === "0123456789abcdef0123456789abcdef" ? [] : ["no_binding"]),
+  ];
+  assert.deepEqual(requestProblems(sent[0]), []);
+  assert.equal(sent[0].headers["x-hps-skill"], "critic@1.0.0");
+  // Instrument control: a request that names a model, streams, forwards a stray header or loses the binding is caught.
+  assert.deepEqual(requestProblems({ ...sent[0], body: { ...sent[0].body, model: "claude-x", stream: true }, headers: { ...sent[0].headers, "x-planted": "1", "x-hps-lesson-binding": undefined } }), ["names_model", "streams", "header:x-planted", "no_binding"]);
+  // No binding on the seat: no header. A refused or broken upstream is a failed completion, never a throw.
+  await completeSkillRequest(stub, { proxyUrl: "https://api.test/v1", baseHeaders: {}, binding: lessonBindingHeader(undefined), prompt: "P", headers: runMeta });
+  assert.equal("x-hps-lesson-binding" in sent[1].headers, false);
+  assert.deepEqual(await completeSkillRequest(async () => new Response("no", { status: 429 }), { proxyUrl: "https://api.test/v1", baseHeaders: {}, binding: {}, prompt: "P", headers: {} }), { ok: false, status: 429 });
+  assert.deepEqual(await completeSkillRequest(async () => { throw new Error("offline"); }, { proxyUrl: "https://api.test/v1", baseHeaders: {}, binding: {}, prompt: "P", headers: {} }), { ok: false });
+  // The provider hands the seat's binding and its token headers to this function.
   const src = readFileSync(new URL("../src/chatPanelProvider.ts", import.meta.url), "utf8");
   const body = /private async completeSkill\([\s\S]*?\n  \}\n/.exec(src)?.[0] ?? "";
-  assert.match(body, /\/chat\/completions/);
-  assert.match(body, /JSON\.stringify\(\{ stream: false, messages: \[\{ role: "user", content: prompt \}\] \}\)/, "the body names no model (the lesson policy picks it)");
-  assert.match(body, /for \(const k of \["x-hps-skill", "x-hps-capability"\]\)/, "only the two metadata headers are forwarded");
-  // Instrument control: a body that names a model is not matched by the same check.
-  assert.doesNotMatch('JSON.stringify({ model: "claude-x", stream: false, messages: [{ role: "user", content: prompt }] })', /JSON\.stringify\(\{ stream: false, messages: \[\{ role: "user", content: prompt \}\] \}\)/);
-  // On a lesson seat the request names the served lesson binding, like a coach turn (#751 U3).
   assert.match(body, /lessonBindingHeader\(profile\?\.lesson_binding\?\.enforced \? profile\.lesson_binding\.key : undefined\)/);
-  assert.match(body, /\.\.\.binding, \.\.\.meta/);
-  assert.deepEqual(lessonBindingHeader("0123456789abcdef0123456789abcdef"), { "x-hps-lesson-binding": "0123456789abcdef0123456789abcdef" });
+  assert.match(body, /completeSkillRequest\(fetch, \{ proxyUrl: this\.proxyUrl\(\), baseHeaders: buildProxyHeaders\(\{ token \}\), binding, prompt, headers \}\)/);
   assert.deepEqual(lessonBindingHeader("token:0123456789abcdef"), { "x-hps-lesson-binding": "token:0123456789abcdef" });
-  assert.deepEqual(lessonBindingHeader(undefined), {}, "no binding: no header");
   assert.deepEqual(lessonBindingHeader("not a key\r\nx: y"), {}, "control: a malformed key is never sent");
-  ok("host: the skill request goes to the coach route with the skill tag, capability and lesson binding, never a model");
+  ok("host: the skill request (driven through a stubbed fetch) goes to the coach route with the skill tag, capability and lesson binding, never a model or a stray header");
 }
 
 // ── Pure helpers ──
@@ -223,6 +245,11 @@ const session = (svc, over = {}) => {
   const critic = resultSections("critic", { weak_claims: [{ claim_id: "slide:3", reason: "가정뿐" }], missing_tests: [], safety: [], ai_failure_review: [{ case: "unavailable", handling: "missing", note: "실패 처리 없음" }] });
   assert.deepEqual(critic.map((x) => x.heading), ["근거가 약한 주장", "AI 실패 대비"]);
   assert.ok(critic[1].lines[0].includes("대비 없음"));
+  // Claim ids read as the student's words; no raw id or target name reaches the result lines.
+  assert.deepEqual(critic[0].lines, ["슬라이드 3: 가정뿐"]);
+  assert.deepEqual(resultSections("critic", { weak_claims: [], missing_tests: [{ claim_id: "c2", test: "다섯 명 시험" }], safety: [], ai_failure_review: [] })[0].lines, ["주장 2: 다섯 명 시험"]);
+  assert.deepEqual(writtenLines([{ target: "something_new", id: "x" }]), ["프로젝트에 저장했어요."]);
+  assert.equal(problemLine("demo_claims_supported $.qa[0].claims[0]: claim_quantity_not_in_evidence:100"), "주장의 숫자나 '모두' 같은 말이 근거에 없어요.");
   ok("helpers: the answer parser takes plain, fenced and embedded JSON and refuses the rest; inputs and result sections");
 }
 
@@ -233,9 +260,9 @@ if (!status.available) {
 } else {
   const props = (view, extra = {}) => ({ view, error: null, done: null, running: false, onRefresh() {}, onRun() {}, onClose() {}, ...extra });
   const pickers = { experiments: [], decisions: [], evidence: [] };
-  const okView = { available: true, notice: null, week: { week: 2, question: "Q2-from-data" }, skills: SKILLS.map((x) => ({ ...x, title: `제목-${x.skill}` })), pickers, result: { skill: "critic", tag: "critic@1.0.0", ok: true, sections: [{ heading: "근거가 약한 주장", lines: ["slide:3: 가정뿐"] }], written: [] } };
+  const okView = { available: true, notice: null, week: { week: 2, question: "Q2-from-data" }, skills: SKILLS.map((x) => ({ ...x, title: `제목-${x.skill}` })), pickers, result: { skill: "critic", tag: "critic@1.0.0", ok: true, sections: [{ heading: "근거가 약한 주장", lines: ["슬라이드 3: 가정뿐"] }], written: [] } };
   const text = visibleText(await renderComponent("SkillsPanel", props(okView)));
-  for (const s of ["커리큘럼 스킬", "2주차 질문: Q2-from-data", "제목-critic", "근거가 약한 주장", "slide:3: 가정뿐", "제안이에요. 저장한 것은 없어요."]) assert.ok(text.includes(s), `${s} in ${text}`);
+  for (const s of ["커리큘럼 스킬", "2주차 질문: Q2-from-data", "제목-critic", "근거가 약한 주장", "슬라이드 3: 가정뿐", "제안이에요. 저장한 것은 없어요."]) assert.ok(text.includes(s), `${s} in ${text}`);
   const refused = visibleText(await renderComponent("SkillsPanel", props({ ...okView, result: { skill: "evidence", tag: "evidence@1.0.0", ok: false, message: "AI의 답이 규칙을 지키지 않아 아무것도 저장하지 않았어요.", problems: ["evidence_draft_valid $.items[0]: observation_without_source_refs"] } })));
   assert.ok(refused.includes("아무것도 저장하지 않았어요") && refused.includes("본 것(관찰)에 어느 기록에서 봤는지가 빠졌어요."));
   assert.ok(!refused.includes("observation_without_source_refs"), "no raw rule code in the text a student reads");

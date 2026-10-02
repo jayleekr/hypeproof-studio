@@ -96,7 +96,7 @@ import {
 import { decisionRefProblems, decisionView, evidenceItemsOf, evidenceRefProblems, memoryState, supportsObservedRole, supportsTeamEvidence, versionDiff, type EvidenceItemView, type MemoryState } from "../lib/curriculum/memory";
 import type { ObservationEvent } from "../lib/measurement-core/legacy-observation";
 import { deleteExperimentData } from "../lib/curriculum/retention";
-import { reviseEvidenceDraft, type EvidenceDraft } from "../lib/measurement-core/interpretation";
+import { draftRefusals, reviseEvidenceDraft, validateEvidenceDraftShape, type EvidenceDraft } from "../lib/measurement-core/interpretation";
 import { runtimeDraft } from "../lib/measurement-core/participant-evidence";
 import { CURRICULUM, CURRICULUM_SKILLS, checkSkillOutput, curriculumWeek, skillPrompt, type CurriculumSkill } from "../skills/index";
 import { evidenceDraftOf } from "../skills/curriculum/rules";
@@ -1367,9 +1367,15 @@ curriculum.post("/projects/:id/skills/:skill/output", async (c) => {
     if (e.experiment.data_deleted_at !== undefined) return refuse(c, 409, "experiment_data_deleted");
     const now = Date.now();
     if ((await e.record.evidenceDrafts(e.experiment.id).catch(() => [])).length >= EVIDENCE_LIMITS.maxDraftRevisionsPerExperiment) return refuse(c, 409, "draft_limit");
-    await ensureExperimentTask(e.record, e.experiment, now);
     // Written as the AI (MC-22: every item a draft the student reviews), tagged with the skill (CR-45).
-    const saved = await saveDraft(c, e, evidenceDraftOf(output as Record<string, unknown>, r.input, { id: newVentureId("drf"), now, skill: r.skill.tag }), now);
+    const draft = evidenceDraftOf(output as Record<string, unknown>, r.input, { id: newVentureId("drf"), now, skill: r.skill.tag });
+    // CR-44: a draft the store would refuse writes nothing, not even the record task or the
+    // experiment's last-record time (`touchExperiment`, the clock of the 30-day deletion, decision
+    // 6). Its references are resolved first, reading only; `saveDraft` resolves them again.
+    const refusals = await draftRefusals(validateEvidenceDraftShape(draft), (ref) => e.record.resolveEvidenceRef(e.experiment.id, ref));
+    if (refusals.length) return refuse(c, 422, "unresolved_source_refs", { refusals });
+    await ensureExperimentTask(e.record, e.experiment, now);
+    const saved = await saveDraft(c, e, draft, now);
     if (saved instanceof Response) return saved;
     written.push({ target, id: saved.id });
   }
