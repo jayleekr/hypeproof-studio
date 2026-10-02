@@ -14,7 +14,12 @@ export type ViolationCode =
   | 'spec.step_id_duplicate'
   | 'spec.step_ref_unknown'
   | 'spec.meta_missing'
-  | 'spec.meta_prerequisites_mismatch';
+  | 'spec.meta_prerequisites_mismatch'
+  | 'spec.block_field_missing'
+  | 'spec.risk_missing'
+  | 'spec.buffer_missing'
+  | 'spec.block_step_unlinked'
+  | 'spec.step_block_unlinked';
 
 export interface ViolationAt {
   file: string;
@@ -98,6 +103,35 @@ export interface Evidence {
   text: string;
 }
 
+// #1467 (E3-1) — ops-specific parsed structures.
+export interface ParsedBlock {
+  key: string;
+  kind: 'normal' | 'buffer' | 'break' | 'wrap-up';
+  start: string | null;
+  durationMin: number | null;
+  stepRefs: string[];
+  fields: {
+    activity: string | null;
+    asset: string | null;
+    artifact: string | null;
+    exitCriteria: string | null;
+    ifStuck: string | null;
+    ifAhead: string | null;
+    ifBehind: string | null;
+  };
+  roles: {
+    facilitator?: string;
+    assistant?: string;
+    learner?: string;
+    parent?: { text: string; role: string };
+  };
+}
+
+export interface ParsedRisk {
+  key: string;
+  firstLine: string | null;
+}
+
 export interface ParsedPlan {
   meta: PlanMeta;
   sections: ParsedSection[];
@@ -111,4 +145,7 @@ export interface ParsedPlan {
   safety: string | null;
   bridgingOpener: string | null;
   violations: Violation[];
+  // ops-only (undefined for lesson files)
+  blocks?: ParsedBlock[];
+  risks?: ParsedRisk[];
 }
