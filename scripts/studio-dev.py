@@ -429,6 +429,10 @@ def main():
 
 
 if __name__ == '__main__':
+    if os.name == 'nt':
+        # Windows redirected output otherwise uses the legacy ANSI code page.
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
     try:
         main()
     except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as error:
