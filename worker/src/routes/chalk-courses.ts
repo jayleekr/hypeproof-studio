@@ -702,7 +702,18 @@ chalkCourses.post(
     }
 
     const rawBody = await c.req.json().catch(() => null) as Record<string, unknown> | null;
-    const html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
+    let html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
+
+    // When html is absent, fall back to the latest draft lesson row in chalk_plan_files.
+    // This ensures G1/G2-9/G3-* checks run consistently regardless of call path.
+    if (html === undefined) {
+      const fallbackRow = await c.env.HPS_DB.prepare(
+        `SELECT html FROM chalk_plan_files
+         WHERE cohort_id=? AND course_id=? AND file='lesson' AND ref_kind='draft'
+         ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+      ).bind(cohort, course).first<{ html: string }>();
+      if (fallbackRow) html = fallbackRow.html;
+    }
 
     const results = runPlanCheck(draft, html);
     return c.json({ results });
