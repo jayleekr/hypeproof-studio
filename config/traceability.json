@@ -3596,8 +3596,12 @@
         "ST-DES-CHALK-INSTRUCTOR"
       ],
       "sources": [
-        { "path": "worker/src/routes/chalk-instructor.ts" },
-        { "path": "extensions/hypeproof-chat/src/chalk/instructorMode.ts" }
+        {
+          "path": "worker/src/routes/chalk-instructor.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/instructorMode.ts"
+        }
       ]
     },
     {
@@ -3610,10 +3614,18 @@
         "ST-IMP-CHALK-INSTRUCTOR-MODE"
       ],
       "sources": [
-        { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
-        { "path": "worker/test/chalk-instructor-brief.test.mjs" },
-        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" },
-        { "path": "extensions/hypeproof-chat/test/instructor-render.test.tsx" }
+        {
+          "path": "worker/test/chalk-instructor-whoami.test.mjs"
+        },
+        {
+          "path": "worker/test/chalk-instructor-brief.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/instructor-render.test.tsx"
+        }
       ]
     },
     {
@@ -3834,9 +3846,15 @@
         "ST-IMP-CHALK-KB-STORE"
       ],
       "sources": [
-        {"path": "worker/src/routes/chalk-courses.ts"},
-        {"path": "worker/src/lib/authoring-draft-write.ts"},
-        {"path": "worker/migrations/0031-chalk-plan-files.sql"}
+        {
+          "path": "worker/src/routes/chalk-courses.ts"
+        },
+        {
+          "path": "worker/src/lib/authoring-draft-write.ts"
+        },
+        {
+          "path": "worker/migrations/0031-chalk-plan-files.sql"
+        }
       ]
     },
     {
@@ -3848,8 +3866,12 @@
         "ST-REQ-CHALK-KB"
       ],
       "sources": [
-        {"path": "worker/test/chalk-courses.test.mjs"},
-        {"path": "worker/test/chalk-draft-check.test.mjs"}
+        {
+          "path": "worker/test/chalk-courses.test.mjs"
+        },
+        {
+          "path": "worker/test/chalk-draft-check.test.mjs"
+        }
       ]
     },
     {
@@ -3922,17 +3944,30 @@
       "label": "Chalk 피드백 기록·비교·이력 구현 (E2-7 / #1466)",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-AUTHORING",
-        "ST-TEST-CHALK-FEEDBACK"
+        "ST-REQ-CHALK-AUTHORING"
       ],
       "sources": [
-        { "path": "worker/migrations/0036-chalk-feedback.sql" },
-        { "path": "worker/src/lib/chalk-plan/units.ts" },
-        { "path": "worker/src/routes/chalk-courses.ts" },
-        { "path": "worker/src/routes/chalk-instructor.ts" },
-        { "path": "worker/src/lib/instructor-auth.ts" },
-        { "path": "extensions/hypeproof-chat/src/chalk/tools.ts" },
-        { "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts" }
+        {
+          "path": "worker/migrations/0036-chalk-feedback.sql"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/units.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-courses.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-instructor.ts"
+        },
+        {
+          "path": "worker/src/lib/instructor-auth.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts"
+        }
       ]
     },
     {
@@ -3945,8 +3980,12 @@
         "ST-IMP-CHALK-FEEDBACK"
       ],
       "sources": [
-        { "path": "worker/test/chalk-feedback.test.mjs" },
-        { "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs" }
+        {
+          "path": "worker/test/chalk-feedback.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
+        }
       ]
     }
   ]
