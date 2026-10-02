@@ -6,6 +6,22 @@ import { workspaceTools } from "../src/localRuntime/tools.ts";
 import { localRuntimeConfig } from "../src/localRuntime/index.ts";
 import { startToolServer } from "../src/localRuntime/toolServer.mjs";
 import { jsonProcess, subscriptionEnv } from "../src/localRuntime/process.mjs";
+import { testStateCandidates } from "../src/chatPanelHelpers.ts";
+import { configuredMcpNames } from "../src/localRuntime/codexClient.mjs";
+assert.deepEqual(testStateCandidates("HypeProof Studio Dev", "owned", "unrelated-home"), ["owned"]);
+assert.deepEqual(testStateCandidates("HypeProof Studio", "owned", "legacy-home"), ["owned", "legacy-home"]);
+const priorAdminPassword = process.env.HPS_ADMIN_PASSWORD;
+try {
+  process.env.HPS_ADMIN_PASSWORD = "synthetic-probe-secret";
+  assert.deepEqual(configuredMcpNames(process.execPath, (_exe, args, options) => {
+    assert.deepEqual(args, ["mcp", "list", "--json"]);
+    assert.equal(options.env.HPS_ADMIN_PASSWORD, undefined);
+    return "[]";
+  }), []);
+} finally {
+  if (priorAdminPassword === undefined) delete process.env.HPS_ADMIN_PASSWORD;
+  else process.env.HPS_ADMIN_PASSWORD = priorAdminPassword;
+}
 const root = await mkdtemp(join(tmpdir(), "studio-local-test-"));
 try {
   const cwd = join(root, "work");
@@ -52,9 +68,11 @@ try {
     tools.call("Write", { file_path: "../escape.txt", content: "x" }),
     /밖/,
   );
-  await writeFile(join(root, "private.txt"), "private");
-  await symlink(join(root, "private.txt"), join(cwd, "link"));
-  await assert.rejects(tools.call("Read", { file_path: "link" }), /밖/);
+  const outside = join(root, "outside");
+  await (await import("node:fs/promises")).mkdir(outside);
+  await writeFile(join(outside, "private.txt"), "private");
+  await symlink(outside, join(cwd, "link"), process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(tools.call("Read", { file_path: "link/private.txt" }), /밖/);
   assert.equal(asks, before);
   await assert.rejects(
     tools.call("Bash", { file_path: "a", command: "echo no" }),
@@ -71,7 +89,7 @@ try {
   const env = {
     HPS_DEV_RUNTIME: "1",
     HPS_DEV_PROVIDER: "claude",
-    HPS_DEV_EXECUTABLE: "/cli/claude",
+    HPS_DEV_EXECUTABLE: process.execPath,
     HPS_DEV_MODEL: "sonnet",
   };
   assert.equal(
@@ -96,6 +114,10 @@ try {
       .provider,
     "claude",
   );
+  for (const executable of ["claude", "../claude", ...(process.platform === "win32" ? ["C:\\cli\\claude.cmd"] : [])]) {
+    assert.throws(() => localRuntimeConfig("HypeProof Studio Dev", "http://127.0.0.1:8787/v1",
+      { ...env, HPS_DEV_EXECUTABLE: executable }), /실행기/);
+  }
   assert.deepEqual(
     subscriptionEnv({
       HOME: "/home",

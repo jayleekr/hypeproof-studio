@@ -4,6 +4,11 @@
 import { coachDegradedNotice, DEFAULT_COACH_NAME, resolveCoachIdentity } from "./coachIdentity.ts";
 import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers.ts";
 
+/** An isolated developer app must not inherit a different app's test account. */
+export function testStateCandidates(appName: string, ownedFile: string, legacyHomeFile: string): string[] {
+  return appName === "HypeProof Studio Dev" ? [ownedFile] : [ownedFile, legacyHomeFile];
+}
+
 export interface CoachStateForResolve {
   name: string;
   personality: string;

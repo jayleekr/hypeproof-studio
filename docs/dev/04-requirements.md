@@ -35,6 +35,7 @@ and test gates.
 | REQ-STUDIO-ISSUER | workshop token mint | issuer token is stored, invalidated on auth failure, and never leaked | `mintStudentToken.ts`, `worker/src/routes/admin.ts` |
 | REQ-STUDIO-REPORT | support report | member report includes safe metadata and request id without raw JTI | `reportProblem.ts`, `worker/src/routes/report.ts` |
 | REQ-STUDIO-RELEASE | installable app | display name, bundle id, data folder, and branding pass verification | `scripts/verify-branding.sh` |
+| REQ-STUDIO-DEV-SUBSCRIPTION | isolated developer runtime | macOS arm64/Windows app copies use explicitly selected CLI subscriptions with local Service authorization, existing approvals, credential isolation and cancellation | `scripts/studio-dev.py`, `src/localRuntime/`, `scripts/test-studio-dev.py`, `test/local-runtime.smoke.mjs` |
 
 ## Acceptance Policy
 

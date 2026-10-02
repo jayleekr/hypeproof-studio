@@ -17,16 +17,18 @@ skills, templates). Every step is "run this", not "figure this out".
 ## 0. 전제 / Prerequisites
 
 - **Claude Code를 쓴다고 가정**합니다. 모든 단계가 Claude Code 실행 기준.
-- 로컬 빌드·개발은 **macOS arm64 전용**. Windows/Linux는 빌드 불가 — 이슈는
-  웹 폼으로(§5). 워크숍 참가자(Win)는 설치본만 받으므로 이 가이드 대상 아님.
+- Full local shell builds target **macOS arm64**. Windows contributors can build
+  and run the extension/webview in an isolated installed-shell copy; follow
+  [Studio development](docs/dev/studio-dev.md). Windows shell/installer builds
+  remain in GitHub Actions; this exception is for developer copies.
 - `jayleekr/hypeproof-studio` 접근 권한 + GitHub 계정.
 
 <details><summary>English</summary>
 
 - **Assumes Claude Code.** Every step is phrased for Claude Code to execute.
-- Local build/dev is **macOS arm64 only**. Windows/Linux can't build — file
-  issues via the web forms (§5). Windows workshop participants only get the
-  installer and are not the audience here.
+- Full local shell builds target **macOS arm64**. Windows extension/webview
+  development uses [the isolated development launcher](docs/dev/studio-dev.md),
+  without rebuilding the shell. Windows shell/installer builds remain in CI.
 - Access to `jayleekr/hypeproof-studio` + a GitHub account.
 </details>
 

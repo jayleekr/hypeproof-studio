@@ -1,4 +1,5 @@
 import type { ResolvedProfile } from "../protocol";
+import { isAbsolute } from "node:path";
 import type { CoachToolAction, SdkActivity } from "../sdkCoachHelpers.ts";
 import { workspaceTools } from "./tools.ts";
 import {
@@ -35,7 +36,8 @@ export function localRuntimeConfig(
     throw Error("로컬 구독 개발 모드는 로컬 수업 서버에서만 사용합니다.");
   const executable = env.HPS_DEV_EXECUTABLE;
   const model = env.HPS_DEV_MODEL;
-  if (!executable?.startsWith("/") || !model)
+  if (!executable || !isAbsolute(executable) || !model ||
+      (process.platform === "win32" && !/\.exe$/i.test(executable)))
     throw Error("개발 실행기로 CLI 설치·로그인을 먼저 확인하세요.");
   return {
     provider,

@@ -27,7 +27,7 @@ import {
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
-import { looksLikeIssuerTokenUnverified } from "./chatPanelHelpers";
+import { looksLikeIssuerTokenUnverified, testStateCandidates } from "./chatPanelHelpers";
 import { localRuntimeConfig } from "./localRuntime";
 import {
   scheduleUpdateChecks,
@@ -966,10 +966,10 @@ async function applyTestBackdoors(
   // typically <userDataDir>/User/hps-test-state.json. Always wins over env
   // (file is more explicit + more reliable).
   try {
-    const candidates = [
+    const candidates = testStateCandidates(vscode.env.appName,
       path.join(context.globalStorageUri.fsPath, "..", "..", "..", "User", "hps-test-state.json"),
       path.join(os.homedir(), ".hps-test-state.json"),
-    ];
+    );
     for (const f of candidates) {
       if (fs.existsSync(f)) {
         // Regardless of whether parsing succeeds, this is the "test run" marker —

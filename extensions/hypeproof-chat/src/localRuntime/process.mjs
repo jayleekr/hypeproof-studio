@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 // Preserve the CLI's own local login. Never copy credential files or forward a
@@ -26,6 +27,25 @@ export function subscriptionEnv(base = process.env) {
   return env;
 }
 
+// Keep lifecycle handling shared by both subscription providers. Windows does
+// not implement POSIX process groups; taskkill stops this child's descendants.
+export function terminateProcessTree(proc) {
+  if (!Number.isInteger(proc?.pid) || proc.pid <= 0) return;
+  try {
+    if (process.platform === "win32") {
+      const taskkill = join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe");
+      const result = spawnSync(taskkill, ["/PID", String(proc.pid), "/T", "/F"], {
+        windowsHide: true, stdio: "ignore", timeout: 10000,
+      });
+      if (result.status !== 0) proc.kill?.();
+    } else {
+      process.kill(-proc.pid, "SIGTERM");
+    }
+  } catch {
+    try { proc.kill?.(); } catch {}
+  }
+}
+
 export function jsonProcess(
   executable,
   args,
@@ -47,17 +67,13 @@ export function jsonProcess(
       cwd,
       env,
       detached: true,
+      windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let finished = false,
       bytes = 0,
       nonJsonLines = 0,
       result;
-    const kill = () => {
-      try {
-        process.kill(-proc.pid, "SIGTERM");
-      } catch {}
-    };
     const end = (error) => {
       if (finished) return;
       finished = true;
@@ -70,7 +86,7 @@ export function jsonProcess(
       // CLI left behind. Such a child is reparented to launchd and finishes on
       // its own; a dev-only run does not get a stronger guarantee here.
       if (error) {
-        kill();
+        terminateProcessTree(proc);
         reject(error);
       } else resolve(result);
     };

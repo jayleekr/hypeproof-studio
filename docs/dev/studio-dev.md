@@ -1,4 +1,4 @@
-# Isolated Studio development (macOS arm64)
+# Isolated Studio development (macOS arm64 and Windows)
 
 This opt-in tool builds the current checkout's chat extension and webview into a
 separate copy of the installed app. It does not change install/update/release CI,
@@ -6,8 +6,9 @@ production Service, lessons, or `/Applications/HypeProof Studio.app`.
 
 ## First run
 
-Prerequisites: official Studio installed, Python 3.10+, Node/npm compatible with
-the checked-in lockfiles, `codesign`, and macOS arm64. No full VSCodium rebuild.
+Prerequisites: official Studio installed, Python 3.10+, and Node/npm compatible
+with the checked-in lockfiles. macOS requires arm64 and `codesign`; Windows uses
+the installed Windows shell. No full VSCodium rebuild or new release download.
 
 ```sh
 npm --prefix extensions/hypeproof-chat ci
@@ -22,12 +23,37 @@ Its `user-data`, `extensions`, `workspace`, logs and app backups are separate.
 Use the launcher; opening the `.app` directly in Finder uses a different default
 profile and does not receive the launcher's settings or isolated token path.
 
+### Windows
+
+Install and log in to the selected Claude Code or Codex CLI, then run in PowerShell:
+
+```powershell
+npm --prefix extensions/hypeproof-chat ci
+npm --prefix extensions/hypeproof-chat/webview-ui ci
+python scripts/studio-dev.py --provider codex run
+# Or: python scripts/studio-dev.py --provider claude run
+```
+
+`scripts/Studio Dev.ps1` is the Windows entry point and defaults to Codex.
+Use `-Provider claude` to select Claude Code. The launcher
+finds an installed shell under `%LOCALAPPDATA%\Programs\HypeProof Studio` or
+`Programs\VSCodium`; `--base-app` accepts another installed/unpacked shell directory.
+The default owned state is `%LOCALAPPDATA%\HypeProofStudioDev\<checkout hash>`.
+Its app copy, settings, workspace, logs and backups are separate from the release.
+Windows uses a native `claude.exe` or `codex.exe`; native npm installations are
+resolved without executing `.cmd`/`.ps1` shims. `--cli-executable` selects another
+installed native executable. CLI login remains owned by that CLI.
+
+Windows shell binaries and their names are preserved. Development identity and
+update settings apply only to the copy. This is extension/webview development,
+not a local Windows shell build, installer, signing or release validation.
+
 `--base-app '/path/to/HypeProof Studio.app'` selects a compatible installed base.
 `--state-dir '/absolute/empty-directory'` overrides the owned development state.
 Non-owned, overlapping and symlink state directories are rejected. Previous app
 copies are retained; no automatic deletion or forced termination is performed.
 The installed base is hashed before/after preparation. A development copy is
-signed locally, not a signed/notarized release distributable.
+ad-hoc signed on macOS; neither platform produces a release distributable.
 
 ## Edit, build, apply
 
@@ -44,8 +70,10 @@ Configuration has a purple DEV title with branch and Service mode.
 The shell/helper names must be preserved. Renaming `package.json.name` or
 `CFBundleName` without rebuilding Helpers causes Electron's
 `Unable to find helper app` fatal error. Only development identity/display
-metadata is changed. New runtime dependencies are not silently packaged: a
-manifest dependency mismatch against the base app is refused.
+metadata is changed. New runtime dependencies are not silently packaged: an
+unbundled runtime dependency mismatch against the base app is refused. Pure JS
+dependencies proven fully included by esbuild can be used with an older shell;
+external dependencies and new SDK trees are not silently packaged.
 
 ## Local subscriptions
 
@@ -53,8 +81,9 @@ This is an explicit developer-only exception to the production runtime credentia
 contract (REQ-M13), not a change to classroom authentication. It extends
 ST-REQ-COACH-RUNTIME and ST-TEST-GPT-PRACTICE.
 
-The development launcher defaults to the installed, logged-in **Claude Code** CLI.
-Use `--provider codex` for the local Codex ChatGPT login, or `--provider service`
+The development launcher defaults to the installed, logged-in **Codex** CLI on
+Windows and **Claude Code** CLI on macOS. Use `--provider codex` for the local
+Codex ChatGPT login, `--provider claude` for Claude Code, or `--provider service`
 for the existing Service-funded runtime. Missing CLI/login fails before a build;
 there is no silent fallback to another provider or API billing.
 
@@ -82,6 +111,9 @@ refuses a remote Service URL. Official app behavior and production model pins
 remain unchanged. Claude uses its documented CLI/MCP connection, with built-in
 tools and unrelated hooks/MCP disabled. Codex uses App Server dynamic tools;
 built-in tools are disabled and its own working directory is disposable.
+Codex models that require Code Mode need the matching `codex-code-mode-host`
+included in their CLI distribution. The adapter enables that transport for
+dynamic Studio tools while continuing to reject built-in tool requests.
 
 Implementation: `src/localRuntime/` owns the shared lifecycle/tool policy and
 small provider adapters. The old `scripts/lib/codex-local-client.mjs` entry point
@@ -94,6 +126,28 @@ create a lesson, issue a token, or promise an AI response. Use the existing loca
 Service setup separately. For an isolated local token, deliberately place it in
 `<state>/local-participant-token.txt` with mode 600; the launcher overrides the
 legacy shared `/tmp/hps-token.txt` import path. No production credentials are copied.
+The Dev app ignores the global `~/.hps-test-state.json` seed, and the launcher
+removes inherited `HPS_TEST_*` variables. A different app's test account cannot
+override this copy's local participant; an explicit test file in its own user-data
+directory remains available for isolated fixtures.
+
+With a development Worker already running at `127.0.0.1:8787`, use `--setup-local`
+to prepare the existing adult developer-practice activity and a signed participant
+code through the Service's admin API:
+
+```powershell
+python scripts/studio-dev.py --provider codex --setup-local run
+```
+
+The Worker must report `env: dev` and have its local `HPS_ADMIN_PASSWORD` configured
+in `worker/.dev.vars` (or the launcher environment). The flag appends a developer
+seat, preserves a compatible active session and refuses to replace another profile.
+It validates the issued code with `/v1/profile`, stores it only in the owned state,
+and lets the app import it. No code or admin password is printed or sent to the AI
+CLI. The flag does not start/replace Wrangler, initialize D1, or operate on production.
+Initialize a fresh local database from `worker/schema.sql` using Wrangler's local
+D1 command and the same `--persist-to` directory as the running development Worker.
+An existing valid local code can still be placed in `local-participant-token.txt`.
 
 `--provider service --service live` explicitly points to production API. Enter your own valid
 participation code in the development app. This preserves the installed app and
@@ -121,6 +175,11 @@ reports a shadowed source, move the generated companion out before rebuilding.
 Actual native evidence is recorded separately in the PR.
 Neither a unit-test pass nor a three-second running process proves AI/tool use.
 
+Windows checks also cover native CLI paths, isolated app identity, byte-range build
+locks, production refusal during local setup, and descendant termination on cancel.
+Actual Windows model/file-tool evidence belongs in a separate execution record.
+Mac regression tests do not constitute a new Mac native-app acceptance run.
+
 ## 팀원이 쓰는 순서
 
 1. 이 PR의 브랜치를 별도 폴더에 체크아웃한다. 공식 앱은 설치된 상태로 둔다.
@@ -131,7 +190,10 @@ Neither a unit-test pass nor a three-second running process proves AI/tool use.
 6. 파일 생성이 허용된 수업에서 작은 텍스트 파일 생성·읽기·수정을 확인한다. 앱 시작 성공과 모델/파일 동작 성공은 별개다.
 7. 소스 수정 후 개발 앱만 종료하고 같은 실행 명령으로 다시 빌드한다. 실행 중인 앱을 강제로 바꾸지 않는다.
 
-로컬 구독 모드는 모델 API 키를 요구하지 않는다. 로컬 수업 서버의 서명·관리 설정과 참여 권한은 별도로 필요하다. 공식 서버용 참여 코드를 로컬 서버에 붙여도 자동으로 호환되지 않는다. 현재 제공 범위는 macOS arm64의 소스 기반 개발 실행이며, 설치 파일을 배포하는 정식 출시가 아니다.
+Local subscription mode needs no model API key. Local Service signing/admin setup
+and participant authorization are still required; a production code is not
+automatically compatible with a local Service. macOS arm64 and Windows support
+extension/webview source development here, not a release installer distribution.
 
 ## 실험을 공식 Studio에 반영하는 절차
 
