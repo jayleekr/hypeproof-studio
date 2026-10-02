@@ -461,7 +461,8 @@ export const CHALK_GENERATOR_BRIEF_DEF: ChalkToolDefinition = {
     {
       cohort: { ...str, description: "코호트 ID" },
       course: { ...str, description: "강의 ID" },
-      file: { ...str, description: "파일 키 (예: lesson). 서버가 스켈레톤을 선택하는 데 사용합니다." },
+      file: { ...str, description: "파일 키 (예: lesson, ops). 서버가 스켈레톤을 선택하는 데 사용합니다." },
+      break_min: { type: "integer", description: "휴식 시간(분). track 형식에만 유효(5~60). workshop이면 서버가 400을 반환합니다." },
     },
     ["cohort", "course"],
   ),
@@ -471,9 +472,12 @@ export async function execGeneratorBrief(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  const { cohort, course, file, break_min } = input as { cohort: string; course: string; file?: string; break_min?: number };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
-  const qs = file ? `?file=${encodeURIComponent(file)}` : "";
+  const params = new URLSearchParams();
+  if (file) params.set("file", file);
+  if (break_min !== undefined) params.set("break_min", String(break_min));
+  const qs = params.size > 0 ? `?${params.toString()}` : "";
   try {
     return await issuerFetch(
       ctx,
@@ -483,9 +487,13 @@ export async function execGeneratorBrief(
     if (e instanceof IssuerHttpError) {
       const b = e.body as Record<string, unknown> | null;
       const code = typeof b?.code === "string" ? b.code : null;
+      const errMsg = typeof b?.error === "string" ? b.error : "";
+      if (e.status === 400) {
+        return { error: code ?? "invalid_request", message: errMsg };
+      }
       if (e.status === 409) {
         if (code === "inputs_missing") {
-          const serverMsg = typeof b?.error === "string" ? b.error : "";
+          const serverMsg = errMsg;
           const hint = "chalk_set_inputs로 먼저 입력값을 설정하세요.";
           const message = serverMsg ? `${serverMsg} — ${hint}` : `입력값이 없습니다. ${hint}`;
           return { error: "inputs_missing", message };
@@ -509,7 +517,8 @@ export const CHALK_OPEN_COURSE_DEF: ChalkToolDefinition = {
     {
       cohort: { ...str, description: "코호트 ID" },
       course: { ...str, description: "강의 ID" },
-      file: { ...str, description: "파일 키 (예: lesson). 서버에서 가져올 파일을 지정합니다." },
+      file: { ...str, description: "파일 키 (예: lesson, ops). 서버에서 가져올 파일을 지정합니다." },
+      break_min: { type: "integer", description: "휴식 시간(분). track 형식 ops 파일에만 유효(5~60). chalk_generator_brief에 넘긴 값과 같아야 합니다." },
     },
     ["cohort", "course"],
   ),
@@ -519,10 +528,12 @@ export async function execOpenCourse(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  const { cohort, course, file, break_min } = input as { cohort: string; course: string; file?: string; break_min?: number };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
 
-  const qs = file ? `?file=${encodeURIComponent(file)}` : "";
+  const planParams = new URLSearchParams();
+  if (file) planParams.set("file", file);
+  const qs = planParams.size > 0 ? `?${planParams.toString()}` : "";
 
   let planResult: { html?: string; [k: string]: unknown } | null = null;
   let fromSkeleton = false;
@@ -535,11 +546,25 @@ export async function execOpenCourse(
   } catch (e) {
     if (e instanceof IssuerHttpError && e.status === 404) {
       // Plan not saved yet — fetch skeleton from brief endpoint.
-      const briefQs = file ? `?file=${encodeURIComponent(file)}` : "";
-      const brief = await issuerFetch(
-        ctx,
-        `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief${briefQs}`,
-      ) as { skeleton_html?: string; [k: string]: unknown };
+      const briefParams = new URLSearchParams();
+      if (file) briefParams.set("file", file);
+      if (break_min !== undefined) briefParams.set("break_min", String(break_min));
+      const briefQs = briefParams.size > 0 ? `?${briefParams.toString()}` : "";
+      let brief: { skeleton_html?: string; [k: string]: unknown };
+      try {
+        brief = await issuerFetch(
+          ctx,
+          `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief${briefQs}`,
+        ) as { skeleton_html?: string; [k: string]: unknown };
+      } catch (briefErr) {
+        if (briefErr instanceof IssuerHttpError && briefErr.status === 400) {
+          const b = briefErr.body as Record<string, unknown> | null;
+          const code = typeof b?.code === "string" ? b.code : null;
+          const errMsg = typeof b?.error === "string" ? b.error : "";
+          return { error: code ?? "invalid_request", message: errMsg };
+        }
+        throw briefErr;
+      }
       const skeletonHtml = typeof brief?.skeleton_html === "string" ? brief.skeleton_html : null;
       if (!skeletonHtml || !ctx.cwd) {
         return { error: "plan_not_found", message: "계획서가 없고 스켈레톤 HTML도 없습니다. chalk_generator_brief를 먼저 호출하세요." };
