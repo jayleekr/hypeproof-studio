@@ -96,6 +96,54 @@ await check("L1", "a window that paused before publishing wakes after two newer 
   assert.deepEqual([(await s.get("envelope", k)).request_id, (await s.get("envelope", k)).state], ["E2", "prepared"]);
 });
 
+await check("L2", "a linked draft superseded by several writes returns its commit once without replaying old text", async (dir) => {
+  const k = "c|p|a|run", successor = new HelpRecordStore(dir);
+  await successor.update("draft", k, () => draft("initial"));
+  let calls = 0, linked = 0;
+  const paused = new HelpRecordStore(dir, { at: async (point) => {
+    if (point !== "linked" || linked++) return;
+    for (const text of ["newer", "newest", "final"]) await successor.update("draft", k, () => draft(text));
+  } });
+  const result = await paused.update("draft", k, () => { calls++; return draft("older"); });
+  assert.equal(calls, 1, "a committed mutation is not evaluated again");
+  assert.equal(result.changed, true); assert.equal(result.value.question, "older");
+  assert.equal((await successor.get("draft", k)).question, "final");
+  await successor.update("draft", k, (value) => value);
+  const remaining = await files(dir);
+  assert.equal(remaining.length, 1, "history and temporary receipts are collected");
+  assert.deepEqual(JSON.parse(await fs.readFile(remaining[0], "utf8")).pending, [], "completed writers leave no ancestor history");
+});
+
+await check("L3", "a linked sending envelope followed by unknown stays unknown and reports its successful transition", async (dir) => {
+  const k = "c|p|a|run|g", successor = new HelpRecordStore(dir);
+  await successor.update("envelope", k, () => env("E1"));
+  let calls = 0, linked = 0;
+  const paused = new HelpRecordStore(dir, { at: async (point) => {
+    if (point !== "linked" || linked++) return;
+    await successor.update("envelope", k, (value) => ({ ...value, state: "unknown" }));
+  } });
+  const result = await paused.update("envelope", k, (value) => {
+    calls++;
+    return value?.state === "prepared" ? { ...value, state: "sending" } : undefined;
+  });
+  assert.equal(calls, 1, "a successful CAS must not be reported as a later no-op");
+  assert.equal(result.changed, true); assert.equal(result.value.state, "sending");
+  assert.equal((await successor.get("envelope", k)).state, "unknown");
+});
+
+await check("L4", "an expired linked receipt fails closed instead of replaying a possibly committed draft", async (dir) => {
+  const k = "c|p|a|run", successor = new HelpRecordStore(dir, {}, () => Date.now() + 11 * 60_000);
+  let calls = 0;
+  const paused = new HelpRecordStore(dir, { at: async (point) => {
+    if (point !== "linked") return;
+    await successor.update("draft", k, () => draft("newer"));
+    await successor.update("draft", k, () => draft("newest"));
+  } });
+  await assert.rejects(paused.update("draft", k, () => { calls++; return draft("older"); }), /help record moved too many times/);
+  assert.equal(calls, 1);
+  assert.equal((await successor.get("draft", k)).question, "newest");
+});
+
 await check("R1", "restart: a new store over the same directory reads every draft and request", async (dir) => {
   const s = new HelpRecordStore(dir); await s.update("draft", "c|p|a|run", () => draft("A")); await s.update("envelope", "c|p|a|run|g", () => env("E1", "unknown"));
   const again = new HelpRecordStore(dir);
@@ -157,6 +205,20 @@ await check("F1", "private files, and a corrupt newest version is skipped and wr
   assert.equal((await s.get("draft", k)).question, "A1", "the corrupt 7 is skipped");
   await s.update("draft", k, () => draft("A2")); assert.equal((await s.get("draft", k)).question, "A2");
   assert.ok((await fs.readdir(path.dirname(f))).includes("8.json"), "the next write went above the corrupt version");
+});
+
+await check("L-legacy", "a successor from an older app without receipts cannot cause replay", async (dir) => {
+  const k = "c|p|a|run", other = new HelpRecordStore(dir); let fired = false, calls = 0;
+  const writer = new HelpRecordStore(dir, { at: async (point) => {
+    if (point !== "linked" || fired) return; fired = true;
+    await other.update("draft", k, () => draft("NEWER"));
+    for (const f of await files(dir)) if (f.endsWith(".json")) {
+      const rec = JSON.parse(await fs.readFile(f, "utf8")); delete rec.commit_id; delete rec.pending;
+      await fs.writeFile(f, JSON.stringify(rec));
+    }
+  } });
+  await assert.rejects(writer.update("draft", k, () => { calls++; return draft("OLDER"); }), /help record moved/);
+  assert.equal(calls, 1); assert.equal((await other.get("draft", k)).question, "NEWER");
 });
 
 const failed = results.filter((r) => r.status === "FAIL");

@@ -64,6 +64,21 @@ try {
     assert.equal((await req(HR, 'GET', undefined, L.teacherToken)).status, 403, 'an instructor token is not a learner');
   });
 
+  await check('I1409 size contract accepts Korean and escaped fields, rejects excessive fields and body bytes', async () => {
+    for (const [id, text] of [['korean-max', '가'.repeat(8000)], ['escaped-max', '\u0001'.repeat(8000)]]) {
+      const content = Object.fromEntries(['question', 'prompt', 'response', 'tool_summary', 'verification'].map(k => [k, text]));
+      content.artifact_url = 'https://example.invalid/' + 'a'.repeat(7976);
+      const r = await req(SH, 'POST', await body(id, A, {content}), sa);
+      assert.equal(r.status, 201, r.raw);
+      assert.equal(r.json.content.question.length, 8000);
+      assert.equal((await req(SH + "/" + id, "DELETE", undefined, sa)).status, 200);
+    }
+    const field = await req(SH, 'POST', await body('field-over', A, {content:{question:'가'.repeat(8001)}}), sa);
+    assert.equal(field.status, 400);
+    const huge = await req(SH, 'POST', await body('body-over', A, {content:{question:'a'.repeat(300000)}}), sa);
+    assert.equal(huge.status, 413); assert.equal(huge.json.reason, 'too_large');
+  });
+
   await check('AT-47 submission re-validates recipient, class and connection before writing', async () => {
     for (const [patch, status, reason] of [[{ recipient_id: 'teacher-b' }, 409, 'recipient_not_assigned'], [{ class_run_id: 'another-class' }, 409, 'class_changed'], [{ grant_id: 'a-replaced-grant' }, 409, 'connection_changed'], [{ class_run_id: '../x' }, 400, undefined]]) {
       const r = await req(SH, 'POST', await body('bad-' + status + (reason ?? ''), A, patch), sa); assert.deepEqual([r.status, r.json.reason], [status, reason], JSON.stringify(patch));
