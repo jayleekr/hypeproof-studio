@@ -394,6 +394,27 @@ else
   fail "STUDENT_SESSION guard not found (student-token.txt may be created unconditionally)"
 fi
 
+# 44. --can-start-session must not appear directly in TOKEN_JSON line (must go via _ISSUE_ARGS array)
+# When STUDENT_SESSION=0 the array stays empty and the flag is never passed to issue-issuer-token.ts.
+# Static check: no line that contains both TOKEN_JSON and issue-issuer-token also contains --can-start-session.
+_CAN_TOKEN_DIRECT="$(grep -n -- '--can-start-session' "$SCRIPT" | grep -v '_ISSUE_ARGS' || true)"
+if [[ -z "$_CAN_TOKEN_DIRECT" ]]; then
+  ok "44: --can-start-session only via _ISSUE_ARGS array (not hardcoded in TOKEN_JSON line)"
+else
+  fail "44: --can-start-session still hardcoded outside _ISSUE_ARGS array:"$'\n'"$_CAN_TOKEN_DIRECT"
+fi
+
+# 45. Bearer token must not appear as an inline -H curl arg (ps exposure check).
+# Allowed:  printf 'Authorization: Bearer ...' > tmpfile  then  -H @file
+# Forbidden: -H "Authorization: Bearer ..." directly in the curl invocation.
+# Detection: any line that contains BOTH -H and "Authorization: Bearer" in quotes.
+_BEARER_ARGV_LINES="$(grep -n -- '-H.*"Authorization: Bearer\|-H.*Authorization: Bearer"' "$SCRIPT" 2>/dev/null || true)"
+if [[ -z "$_BEARER_ARGV_LINES" ]]; then
+  ok "45: no '-H Authorization: Bearer' inline in curl argv (token passed via -H @file)"
+else
+  fail "45: Bearer token passed inline via -H curl arg (ps exposure):"$'\n'"$_BEARER_ARGV_LINES"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]

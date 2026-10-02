@@ -26,7 +26,7 @@ DEV_APP_PID=""
 STUDENT_SESSION=0
 
 if [[ -z "$INPUT" ]]; then
-  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app]" >&2
+  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app] [--student-session]" >&2
   exit 1
 fi
 shift
@@ -354,6 +354,10 @@ if [[ "$COHORT_LINE_COUNT" -ne 1 || -z "$COHORT_ID" ]]; then
 fi
 echo "Profile: $PROFILE_ID  Cohort: $COHORT_ID"
 
+_ISSUE_ARGS=()
+if [[ "${STUDENT_SESSION:-0}" -eq 1 ]]; then
+  _ISSUE_ARGS+=(--can-start-session --max-session-hours 3)
+fi
 TOKEN_JSON="$(HPS_SIGNING_SECRET="$LOCAL_SECRET" \
   node --experimental-strip-types \
   "$WORKTREE_DIR/worker/scripts/issue-issuer-token.ts" \
@@ -361,7 +365,7 @@ TOKEN_JSON="$(HPS_SIGNING_SECRET="$LOCAL_SECRET" \
   --cohorts "$COHORT_ID" \
   --profiles "$PROFILE_ID" \
   --max-hours 4 --days 1 \
-  --can-start-session --max-session-hours 3 2>&1)"
+  ${_ISSUE_ARGS[@]+"${_ISSUE_ARGS[@]}"} 2>&1)"
 
 TOKEN="$(echo "$TOKEN_JSON" | python3 -c "import sys,re; m=re.search(r'\"token\":\s*\"([^\"]+)\"', sys.stdin.read()); print(m.group(1) if m else '')" 2>/dev/null)"
 if [[ -z "$TOKEN" ]]; then
@@ -468,13 +472,17 @@ print(hashlib.sha256(str(Path(sys.argv[1]).resolve()).encode()).hexdigest()[:12]
     echo "[+] Opening student session..."
     _STUDENT_RESP_TMP="$(mktemp "$WORKTREE_DIR/.student-resp-XXXXXX.json")"
     chmod 600 "$_STUDENT_RESP_TMP"
+    _AUTH_HEADER_TMP="$(mktemp "$WORKTREE_DIR/.auth-hdr-XXXXXX")"
+    chmod 600 "$_AUTH_HEADER_TMP"
+    printf 'Authorization: Bearer %s\n' "$(cat "$ISSUER_TOKEN_FILE")" > "$_AUTH_HEADER_TMP"
     _STUDENT_HTTP_STATUS=""
     _STUDENT_HTTP_STATUS="$(curl -s -X POST \
       "http://127.0.0.1:${WRANGLER_PORT}/admin/cohorts/${COHORT_ID}/session/open" \
-      -H "Authorization: Bearer $(cat "$ISSUER_TOKEN_FILE")" \
+      -H @"$_AUTH_HEADER_TMP" \
       -H "Content-Type: application/json" \
       -d "{\"profile_id\":\"${PROFILE_ID}\",\"user\":\"review-student-$$\",\"token_hours\":3,\"session_hours\":3}" \
       -w "%{http_code}" -o "$_STUDENT_RESP_TMP" 2>&1)" || true
+    rm -f "$_AUTH_HEADER_TMP"
     echo "[+] session/open HTTP ${_STUDENT_HTTP_STATUS}"
     _STUDENT_TOKEN="$(python3 -c "
 import sys, json
