@@ -19,7 +19,7 @@ learning outcome or release acceptance.
 The launcher bundled the current extension/webview into a separately identified
 Windows app, preserving the installed shell's file manifest. Its receipt reports
 `official_app_unchanged: true`; applied extension SHA-256:
-`772ba9234f74ceddcc0a560a5f36d2b57a5cb668a1efc01221bac3b71d1675f9`.
+`0577184499a4ab1548f52d15c0ac42465e2635535352008035bdd9c2ddffbbc0`.
 The purple title displayed DEV, local Service and branch. UI inspection used the
 actual Electron window's loopback debugging port, with mouse/keyboard input.
 
@@ -36,6 +36,14 @@ file, then Write, Edit and Read succeeded through the shared Studio host tools.
 The existing action-approval resolver was called for both changes; this profile
 allowed them by policy, so this native run does **not** claim a manually clicked
 approval modal.
+
+After final credential-probe hardening, the Windows default was exercised without
+`--provider`: it selected Codex, rebuilt the app and preserved the activity/file.
+The new native turn again completed Read, Write, Edit and Read successfully.
+The inventory probe now uses the same scrubbed environment as generation;
+a synthetic admin-password boundary test and real account/model probe passed.
+Korean diagnostics also survived a redirected Windows output pipe without
+requiring a caller-provided `PYTHONUTF8` environment variable.
 
 The UI returned `WINDOWS_SUBSCRIPTION_VERIFIED`. A separate filesystem read
 confirmed that exact UTF-8 content in `windows-subscription-check.txt` under the
