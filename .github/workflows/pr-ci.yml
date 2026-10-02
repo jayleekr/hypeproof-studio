@@ -264,6 +264,32 @@ jobs:
           node --experimental-strip-types test/update-installer.smoke.mjs
           node --experimental-strip-types test/update-windows-wrapper.smoke.mjs
 
+  studio-dev-platform-fixtures:
+    name: studio dev / ${{ matrix.os }} fixtures
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install extension dependencies without native model binaries
+        working-directory: extensions/hypeproof-chat
+        run: npm ci --omit=optional
+      - name: Verify isolated launcher and subscription lifecycle controls
+        shell: bash
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python scripts/test-studio-dev.py
+          node --experimental-strip-types extensions/hypeproof-chat/test/local-runtime.smoke.mjs
+          node --experimental-strip-types --test worker/test/codex-rehearsal.test.mjs
+
   extension-test:
     name: extension / smoke
     runs-on: ubuntu-latest

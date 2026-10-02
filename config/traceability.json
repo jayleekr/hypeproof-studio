@@ -133,6 +133,24 @@
       ]
     },
     {
+      "id": "REQ-STUDIO-DEV-SUBSCRIPTION",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "docs/dev/studio-dev.md",
+          "section": "### Windows"
+        },
+        {
+          "path": "docs/dev/studio-dev.md",
+          "section": "## Local subscriptions"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-COACH-SESSION",
       "stage": "test",
       "owner": "jayleekr",
@@ -276,6 +294,7 @@
       "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-COACH-RUNTIME",
+        "REQ-STUDIO-DEV-SUBSCRIPTION",
         "ST-REQ-NATIVE"
       ],
       "sources": [
@@ -296,6 +315,9 @@
         },
         {
           "path": "scripts/test-studio-dev.py"
+        },
+        {
+          "path": "docs/testing/studio-dev-windows-2026-10-02.md"
         }
       ]
     },

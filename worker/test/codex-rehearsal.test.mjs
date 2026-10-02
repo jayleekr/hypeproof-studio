@@ -13,7 +13,8 @@ function protocol({account='chatgpt', turn='success', holdThread=false, external
   assert(args.includes('mcp_servers.synthetic-http.enabled=false'));
   assert(!args.some(a=>a.startsWith('mcp_servers.synthetic-http={command=')));
   assert(args.includes('features.apps=false'));assert(args.includes('features.plugins=false'));
-  assert(args.includes('mcp_servers.synthetic-server={command="false",enabled=false}'));assert(args.includes('mcp_servers={}'));assert(args.includes('features.code_mode_host=false'));
+  assert(args.includes('mcp_servers.synthetic-server={command="false",enabled=false}'));assert(args.includes('mcp_servers={}'));assert(args.includes('features.code_mode_host=true'));
+  for(const flag of ['features.shell_tool=false','features.apply_patch_freeform=false','features.multi_agent=false','features.code_mode=false','features.computer_use=false'])assert(args.includes(flag));
   for(const key of ['OPENAI_API_KEY','CODEX_API_KEY','ANTHROPIC_API_KEY'])assert.equal(options.env[key],undefined);
   const proc=new EventEmitter();proc.stdout=new PassThrough();proc.stderr=new PassThrough();
   send=m=>proc.stdout.write(JSON.stringify(m)+'\n');

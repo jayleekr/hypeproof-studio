@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { subscriptionEnv } from "./process.mjs";
+import { subscriptionEnv, terminateProcessTree } from "./process.mjs";
 
 function configuredMcpNames(executable) {
   try {
@@ -14,6 +14,7 @@ function configuredMcpNames(executable) {
         encoding: "utf8",
         timeout: 20000,
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       }),
     );
     // Use names only; never copy server commands, env or credentials into args.
@@ -64,7 +65,9 @@ export class CodexLocalClient {
         "-c",
         "features.code_mode=false",
         "-c",
-        "features.code_mode_host=false",
+        // Code-mode-only models route even dynamic Studio tools through this
+        // host. Built-in tools remain disabled and receive() rejects them.
+        "features.code_mode_host=true",
         "-c",
         'web_search="disabled"',
         "-c",
@@ -77,7 +80,7 @@ export class CodexLocalClient {
         "mcp_servers={}",
         ...disabledMcp,
       ],
-      { cwd: this.cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"] },
+      { cwd: this.cwd, env, detached: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.pending = new Map();
     this.sequence = 0;
@@ -340,9 +343,7 @@ export class CodexLocalClient {
   close() {
     this.fail(new Error("codex_closed"));
     this.lines.close();
-    try {
-      process.kill(-this.proc.pid, "SIGTERM");
-    } catch {}
-    rmSync(this.cwd, { recursive: true, force: true });
+    terminateProcessTree(this.proc);
+    rmSync(this.cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

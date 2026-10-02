@@ -10,6 +10,7 @@ export function claudeStatus(executable = "claude") {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 15000,
+        windowsHide: true,
       }),
     );
   } catch {
