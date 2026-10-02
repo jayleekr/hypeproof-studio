@@ -48,6 +48,16 @@ export const COMPONENTS = {
   // Region D (SX-17~24). Lives on props alone — it draws the `learningState.evidence` the
   // host sent, and does not recompute the gate.
   EvidenceDrawer: { from: "./src/EvidenceDrawer.tsx", exportName: "EvidenceDrawer" },
+  // cr-verify — "내 제품 테스트" (CR-12–CR-16, CR-81). Lives on props alone: it draws the
+  // VerifyView the host computed and never decides "검증됨" itself.
+  VerifyPanel: { from: "./src/VerifyPanel.tsx", exportName: "VerifyPanel" },
+  PublishPanel: { from: "./src/PublishPanel.tsx", exportName: "PublishPanel" },
+  // cr-evidence (#1394) — the experiment evidence panel.
+  EvidencePanel: { from: "./src/EvidencePanel.tsx", exportName: "EvidencePanel" },
+  // cr-memory (#1395) — the Venture Memory panel; draws the MemoryView the host read.
+  MemoryPanel: { from: "./src/MemoryPanel.tsx", exportName: "MemoryPanel" },
+  // cr-skills (#1396) — the curriculum skills panel; draws the SkillsView the host read.
+  SkillsPanel: { from: "./src/SkillsPanel.tsx", exportName: "SkillsPanel" },
 };
 
 /**

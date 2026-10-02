@@ -1,0 +1,113 @@
+{
+  "skill": "interview",
+  "version": "1.0.0",
+  "title": "인터뷰 준비",
+  "intent": "Prepare open, non-leading interview questions for the goal and, when the student pastes notes, structure them by quoting the notes word for word; never write the interviewee's answers.",
+  "required_context": [
+    "curriculum_week",
+    "problem",
+    "hypotheses",
+    "stakeholders"
+  ],
+  "allowed_tools": [
+    "memory_read"
+  ],
+  "preferred_capability": "text.fast",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {
+        "type": "string",
+        "maxLength": 500,
+        "minLength": 1
+      },
+      "stakeholder": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "notes": {
+        "type": "string",
+        "maxLength": 8000
+      }
+    },
+    "required": [
+      "goal"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "questions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "purpose": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "text",
+            "purpose"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 10,
+        "minItems": 3
+      },
+      "note_fields": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 30,
+          "minLength": 1
+        },
+        "maxItems": 8,
+        "minItems": 1
+      },
+      "structured_notes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "quote": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "topic",
+            "quote"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 30
+      }
+    },
+    "required": [
+      "questions",
+      "note_fields"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "interview_questions_open",
+    "interview_note_fields_are_labels",
+    "interview_notes_verbatim"
+  ],
+  "write_back_targets": []
+}

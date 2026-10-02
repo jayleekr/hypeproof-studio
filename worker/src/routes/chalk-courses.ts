@@ -42,6 +42,10 @@ interface InputsRow {
   revision: number; audience: string; assets_json: string; teaching_style: string;
   requirements: string; format: string; family_session: number; vocab_json: string | null;
 }
+interface InputsWithOptionsRow extends InputsRow {
+  audience_tier: string | null;
+  duration_min: number | null;
+}
 interface VocabInput { goals: string[]; conditions: string[]; learner_level?: string; has_guidance?: boolean }
 
 // ── Auth helper ──────────────────────────────────────────────────────────────
@@ -85,8 +89,9 @@ async function loadVocab(db: D1Database, version: number) {
 function generateSkeleton(opts: {
   course_id: string; knowledge_version: number; format: string;
   family_session: boolean; duration_min: number; methods: string[];
+  audience_tier: string | null;
 }): string {
-  const { course_id, knowledge_version, format, family_session, duration_min, methods } = opts;
+  const { course_id, knowledge_version, format, family_session, duration_min, methods, audience_tier } = opts;
   const parentCol = family_session
     ? `\n      <td data-chalk-role="parent" data-chalk-parent-role=""></td>` : "";
   const homeLink = family_session
@@ -98,8 +103,10 @@ function generateSkeleton(opts: {
   <meta name="chalk:course" content="${course_id}">
   <meta name="chalk:knowledge-version" content="${knowledge_version}">
   <meta name="chalk:format" content="${format}">
+  <meta name="chalk:audience-tier" content="${audience_tier ?? ''}">
   <meta name="chalk:family-session" content="${family_session}">
   <meta name="chalk:duration-min" content="${duration_min}">
+  <meta name="chalk:prerequisites" content="">
   <meta name="chalk:methods" content="${methods.join(" ")}">
   <style>
     body { font-family: sans-serif; background: #fff; color: #111; max-width: 900px; margin: 0 auto; padding: 1rem; font-size: 1rem; }
@@ -116,6 +123,7 @@ function generateSkeleton(opts: {
       <tr><th>과목</th><td></td></tr>
       <tr><th>형식</th><td>${format}</td></tr>
       <tr><th>시간</th><td>${duration_min}분</td></tr>
+      <tr><th>선행 조건</th><td></td></tr>
     </table>
   </section>
 
@@ -221,6 +229,14 @@ chalkCourses.put(
       return c.json({ code: "invalid_request", error: "request_id required" }, 400);
     const profile_id = typeof b.profile_id === "string" ? b.profile_id : "";
 
+    if (b.audience_tier != null && (typeof b.audience_tier !== 'string' || !['lv1', 'lv2', 'adult'].includes(b.audience_tier as string)))
+      return c.json({ code: 'invalid_request', error: 'audience_tier must be one of: lv1, lv2, adult' }, 400);
+    const audienceTier: string | null = typeof b.audience_tier === 'string' ? b.audience_tier : null;
+
+    if (b.duration_min != null && (!Number.isInteger(b.duration_min) || (b.duration_min as number) < 1))
+      return c.json({ code: 'invalid_request', error: 'duration_min must be a positive integer' }, 400);
+    const durationMinInput: number | null = typeof b.duration_min === 'number' ? b.duration_min : null;
+
     const familySession = b.family_session === true ? 1 : 0;
 
     // Vocab validation
@@ -247,7 +263,7 @@ chalkCourses.put(
       vocabJson = JSON.stringify({
         goals: v.goals,
         conditions: v.conditions,
-        learner_level: typeof v.learner_level === "string" ? v.learner_level : "any",
+        learner_level: typeof v.learner_level === "string" ? v.learner_level : undefined,
         has_guidance: typeof v.has_guidance === "boolean" ? v.has_guidance : undefined,
       });
     }
@@ -270,8 +286,9 @@ chalkCourses.put(
       b.requirements, b.format, familySession, vocabJson,
     ]));
 
-    // Extra batch stmt: upsert chalk_course_inputs, conditional on the draft UPDATE succeeding.
-    // SELECT WHERE EXISTS ensures this is a no-op if the CAS UPDATE matched 0 rows.
+    // Extra batch stmts: upsert chalk_course_inputs + chalk_course_input_options,
+    // both conditional on the same CAS WHERE EXISTS. SELECT WHERE EXISTS is a no-op
+    // if the draft UPDATE matched 0 rows.
     const newRevision = (b.expected_revision as number) + 1;
     const boundInputsUpsert = c.env.HPS_DB.prepare(
       `INSERT INTO chalk_course_inputs (cohort_id,course_id,revision,audience,assets_json,teaching_style,requirements,format,family_session,vocab_json,updated_at)
@@ -288,6 +305,18 @@ chalkCourses.put(
       b.requirements as string, b.format as string, familySession, vocabJson, nowMs,
       cohort, course, newRevision, b.request_id as string, hash
     );
+    const boundOptionsUpsert = c.env.HPS_DB.prepare(
+      `INSERT INTO chalk_course_input_options (cohort_id,course_id,audience_tier,duration_min,updated_at)
+       SELECT ?,?,?,?,?
+       WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)
+       ON CONFLICT(cohort_id,course_id) DO UPDATE SET
+         audience_tier=excluded.audience_tier,
+         duration_min=excluded.duration_min,
+         updated_at=excluded.updated_at`
+    ).bind(
+      cohort, course, audienceTier, durationMinInput, nowMs,
+      cohort, course, newRevision, b.request_id as string, hash
+    );
 
     const wr = await writeDraft(c.env.HPS_DB, prior, {
       cohort, course, owner_id: auth.payload.u,
@@ -298,7 +327,7 @@ chalkCourses.put(
       hash, now,
       independent: !!prior.independent,
       profile_scope: auth.scope.profiles ?? [],
-      extra_batch_stmts: [boundInputsUpsert],
+      extra_batch_stmts: [boundInputsUpsert, boundOptionsUpsert],
     });
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent')
@@ -418,10 +447,14 @@ chalkCourses.get(
     if (!VALID_FILES.includes(file as any))
       return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
 
-    // Load inputs
+    // Load inputs (LEFT JOIN to pick up audience_tier/duration_min from options table)
     const inputs = await c.env.HPS_DB.prepare(
-      "SELECT * FROM chalk_course_inputs WHERE cohort_id=? AND course_id=?"
-    ).bind(cohort, course).first<InputsRow>();
+      `SELECT ci.*, cio.audience_tier, cio.duration_min
+       FROM chalk_course_inputs ci
+       LEFT JOIN chalk_course_input_options cio
+         ON ci.cohort_id=cio.cohort_id AND ci.course_id=cio.course_id
+       WHERE ci.cohort_id=? AND ci.course_id=?`
+    ).bind(cohort, course).first<InputsWithOptionsRow>();
     if (!inputs) return c.json({ code: "inputs_missing", error: "입력을 먼저 저장하세요 (PUT .../inputs)" }, 409);
     if (!inputs.vocab_json) return c.json({ code: "inputs_missing", error: "어휘(vocab)를 입력에 포함해야 brief를 만들 수 있습니다" }, 409);
 
@@ -494,11 +527,17 @@ chalkCourses.get(
     ];
 
     const assets = JSON.parse(inputs.assets_json) as string[];
-    const chosenMethodIds = methodResult.chosen.map(m => m.id);
+    const goalMatchedIds = methodResult.chosen.filter((m: any) => !m.no_goal_match).map((m: any) => m.id);
+    const chosenMethodIds = goalMatchedIds.length > 0
+      ? goalMatchedIds
+      : methodResult.chosen.slice(0, 1).map((m: any) => m.id);
+    const methodsWarning: string | undefined = goalMatchedIds.length === 0 && methodResult.chosen.length > 0
+      ? '지금 입력된 목표·조건과 딱 맞는 수업 모형이 없어 상위 1개를 임시로 넣었습니다. 목표나 조건을 바꿔 다시 추천받으면 더 잘 맞는 모형을 고를 수 있습니다.'
+      : undefined;
     const familySession = inputs.family_session === 1;
 
-    // Duration from format default (240 min for workshop)
-    const durationMin = inputs.format === "workshop" ? 240 : 120;
+    // Duration: use stored value if set; fall back to format default.
+    const durationMin = inputs.duration_min ?? (inputs.format === 'workshop' ? 240 : 120);
 
     const skeleton_html = generateSkeleton({
       course_id: course,
@@ -507,11 +546,12 @@ chalkCourses.get(
       family_session: familySession,
       duration_min: durationMin,
       methods: chosenMethodIds,
+      audience_tier: inputs.audience_tier,
     });
 
-    const time_spec = inputs.format === "workshop"
-      ? { format: "workshop", core: ["intro", "explore", "first-try", "improve", "share"], total_min: 240 }
-      : { format: "track", core: ["intro", "practice", "reflect"], total_min: 120 };
+    const time_spec = inputs.format === 'workshop'
+      ? { format: 'workshop', core: ['intro', 'explore', 'first-try', 'improve', 'share'], total_min: durationMin }
+      : { format: 'track', core: ['intro', 'practice', 'reflect'], total_min: durationMin };
 
     return c.json({
       knowledge_version: kbVersion,
@@ -522,12 +562,15 @@ chalkCourses.get(
         requirements: inputs.requirements,
         format: inputs.format,
         family_session: familySession,
+        audience_tier: inputs.audience_tier,
+        duration_min: durationMin,
       },
       vocab,
       methods: {
         chosen: methodResult.chosen,
         excluded: methodResult.excluded,
       },
+      ...(methodsWarning ? { methods_warning: methodsWarning } : {}),
       authoring_order,
       time_spec,
       skeleton_html,
@@ -578,10 +621,17 @@ chalkCourses.get(
 function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
   const results: CheckResultItem[] = [];
 
+  let derivedPrerequisites: string | null = null;
+
   if (htmlOverride !== undefined) {
     const parsed = parsePlan(htmlOverride, 'lesson');
     for (const v of parsed.violations) {
       results.push(fromParserViolation(v));
+    }
+    // Derive prerequisites from parsed plan for gate checks only.
+    // Not stored back to content — plan→lesson derivation is E5-1 (freeze time).
+    if (parsed.meta.prerequisites) {
+      derivedPrerequisites = parsed.meta.prerequisites;
     }
   }
 
@@ -602,7 +652,12 @@ function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
     return results;
   }
 
-  const pedagogyFindings = checkLessonPedagogy(content);
+  // Apply derived prerequisites for gate check (not saved to content).
+  const checkContent = derivedPrerequisites && !content.prerequisites?.trim()
+    ? { ...content, prerequisites: derivedPrerequisites }
+    : content;
+
+  const pedagogyFindings = checkLessonPedagogy(checkContent);
   for (const f of pedagogyFindings) {
     results.push(fromPedagogyFinding(f));
   }

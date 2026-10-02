@@ -137,12 +137,23 @@ export function freezeCollection(src: CollectionSource, scope: SnapshotScope, ba
     const rawLines = dec.decode(s.events).split("\n"), tail = rawLines.pop() ?? "";
     // Bytes after the last newline are an append still in flight (this or another window) or torn by a crash: never part of the copy.
     const torn = tail.length > 0, from = s.current ? scope.run.starts_at - WINDOW_LEAD_MS : scope.run.starts_at, kept: Kept[] = [];
-    let beforeFirst: number | null | undefined;
-    for (const raw of rawLines) {
-      if (!raw.trim()) continue;
-      let e: Record<string, unknown> | null = null; try { const v = JSON.parse(raw); e = v && typeof v === "object" && !Array.isArray(v) ? v : null; } catch { e = null; }
-      const at = e && typeof e.ts === "string" ? Date.parse(e.ts) : NaN;
-      if (Number.isFinite(at) && (at < from || at > nowMs)) { if (!kept.length) beforeFirst = e && Number.isSafeInteger(e.seq) ? (e.seq as number) : null; continue; }
+    const parsed = rawLines.filter((raw) => raw.trim()).map((raw) => {
+      let e: Record<string, unknown> | null = null;
+      try { const v = JSON.parse(raw); e = v && typeof v === "object" && !Array.isArray(v) ? v : null; } catch { /* damaged line */ }
+      return { raw, e, at: e && typeof e.ts === "string" ? Date.parse(e.ts) : NaN };
+    });
+    const hasTime = parsed.some((line) => Number.isFinite(line.at));
+    // A damaged fragment cannot expand the consent window. Keep it only after an in-window
+    // timestamp and, when present, before another in-window timestamp. All-undated legacy
+    // spools retain their existing behavior; they cannot provide stronger time evidence.
+    const nextTime: number[] = new Array(parsed.length); let following = NaN;
+    for (let i = parsed.length - 1; i >= 0; i--) { nextTime[i] = following; if (Number.isFinite(parsed[i].at)) following = parsed[i].at; }
+    const inWindow = (at: number) => at >= from && at <= nowMs;
+    let beforeFirst: number | null | undefined, previous = NaN;
+    for (const [i, { raw, e, at }] of parsed.entries()) {
+      const keep = Number.isFinite(at) ? inWindow(at) : !hasTime || (inWindow(previous) && (!Number.isFinite(nextTime[i]) || inWindow(nextTime[i])));
+      if (Number.isFinite(at)) previous = at;
+      if (!keep) { if (!kept.length) beforeFirst = e && Number.isSafeInteger(e.seq) ? (e.seq as number) : null; continue; }
       kept.push({ raw, e });
     }
     if (!kept.length) continue;

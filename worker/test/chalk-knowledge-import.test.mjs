@@ -574,6 +574,48 @@ console.log("\n[SQL escape: malicious body round-trip]");
 }
 
 // ---------------------------------------------------------------------------
+// parseVocabTable: header row must not become a vocab key
+// ---------------------------------------------------------------------------
+
+console.log("\n[parseVocabTable header-row guard]");
+
+{
+  // Reproduce the exact regex from scripts/chalk-knowledge-import/index.ts.
+  // If the header guard is removed, the "key" entry would appear in the result.
+  function parseVocabTable(section) {
+    const entries = [];
+    const re = /^\|\s+`?([a-z][a-z0-9-]*)`?\s+\|\s+(.+?)\s+\|/gm;
+    let m;
+    while ((m = re.exec(section)) !== null) {
+      if (m[1] === "key") continue;
+      entries.push({ key: m[1], label: m[2].replace(/\*\*/g, "").trim() });
+    }
+    return entries;
+  }
+
+  const sampleSection = `
+| key | label |
+| --- | ----- |
+| \`acquire-procedure\` | 도구·절차의 최초 습득 |
+| \`conceptual-understanding\` | 개념적 이해 |
+`;
+
+  test("parseVocabTable: header row 'key' is not parsed as a vocab key", () => {
+    const result = parseVocabTable(sampleSection);
+    const keys = result.map(e => e.key);
+    assert(!keys.includes("key"), `header row parsed as vocab key: keys=${JSON.stringify(keys)}`);
+  });
+
+  test("parseVocabTable: data rows are parsed correctly", () => {
+    const result = parseVocabTable(sampleSection);
+    const keys = result.map(e => e.key);
+    assert(keys.includes("acquire-procedure"), "acquire-procedure missing");
+    assert(keys.includes("conceptual-understanding"), "conceptual-understanding missing");
+    assertEqual(result.length, 2, `expected 2 entries, got ${result.length}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 

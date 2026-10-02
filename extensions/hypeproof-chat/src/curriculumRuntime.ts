@@ -35,6 +35,13 @@ export type CrBrowserToolName = (typeof CR_BROWSER_TOOL_NAMES)[number];
 export const isCrBrowserTool = (name: string): name is CrBrowserToolName =>
   (CR_BROWSER_TOOL_NAMES as readonly string[]).includes(name);
 
+/** The AI Verify tool names shared by both coach runtimes (cr-verify; CR-12–CR-16). */
+export const CR_VERIFY_TOOL_NAMES = ["verify_criterion", "verify_propose_criteria"] as const;
+export type CrVerifyToolName = (typeof CR_VERIFY_TOOL_NAMES)[number];
+
+export const isCrVerifyTool = (name: string): name is CrVerifyToolName =>
+  (CR_VERIFY_TOOL_NAMES as readonly string[]).includes(name);
+
 /** Workshop tiers; mirrors WORKSHOP_TIERS in sdkCoachHelpers.ts and curriculumRuntimeAllowed in the Worker. */
 const CR_TIERS = new Set(["search-webapp", "website"]);
 
@@ -66,7 +73,7 @@ export interface CrSurfaceInventory {
   proxyTools: readonly string[];
   /** Webview → host message types that only exist for CR. */
   webviewMessages: readonly string[];
-  /** Worker routes as `METHOD /path`. `cr-browser` adds none. */
+  /** Worker routes as `METHOD /path` (`<test-origin>` for the published runtime). `cr-browser` and `cr-verify` add none. */
   workerRoutes: readonly string[];
   /**
    * The allowed exception: commands that delete what an earlier switch-on stored. Shown
@@ -75,12 +82,63 @@ export interface CrSurfaceInventory {
   switchOffWhileStored: readonly string[];
 }
 
+/** The published test runtime's routes, on a test origin (cr-publish; recon §6). */
+export const CR_TEST_ORIGIN_ROUTE = "GET <test-origin>/l/:link/*";
+/** The participant snippet opens the visit's session here, once (CR-21). */
+export const CR_TEST_ORIGIN_SESSION_ROUTE = "POST <test-origin>/l/:link/__hp/session";
+/** The participant snippet's events go here (cr-evidence; CR-23). */
+export const CR_TEST_ORIGIN_EVENTS_ROUTE = "POST <test-origin>/l/:link/__hp/events";
+
 export const CR_SURFACES: CrSurfaceInventory = {
-  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults"],
-  mcpTools: CR_BROWSER_TOOL_NAMES.map((n) => `mcp__hypeproof__${n}`),
-  proxyTools: [...CR_BROWSER_TOOL_NAMES],
-  webviewMessages: ["removeElementContext"],
-  workerRoutes: [],
+  // cr-verify adds "Test my product" (CR-12); cr-publish adds "Publish for user test" (CR-17);
+  // cr-evidence adds the experiment evidence panel (CR-24–CR-27, CR-69); cr-memory the Venture Memory panel (CR-35–CR-38);
+  // cr-skills the curriculum skills panel (CR-43–CR-47).
+  commands: ["hypeproof-chat.pickElement", "hypeproof-chat.browserResults", "hypeproof-chat.testMyProduct", "hypeproof-chat.publishTestVersion", "hypeproof-chat.experimentEvidence", "hypeproof-chat.ventureMemory", "hypeproof-chat.curriculumSkills"],
+  mcpTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES].map((n) => `mcp__hypeproof__${n}`),
+  proxyTools: [...CR_BROWSER_TOOL_NAMES, ...CR_VERIFY_TOOL_NAMES],
+  webviewMessages: ["removeElementContext", "verifyOpen", "verifyStart", "verifyRetest", "verifyFix", "publishOpen", "publishSubmit", "publishLink", "publishRevoke", "evidenceOpen", "evidenceNote", "evidenceDraft", "evidenceReview", "evidenceDelete", "memoryOpen", "memoryDiff", "memoryDecision", "skillsOpen", "skillRun"],
+  // cr-verify adds no Worker route. cr-publish adds the Publish for User Test routes
+  // (worker/src/routes/curriculum.ts `CURRICULUM_ROUTES`) and the test origin's.
+  workerRoutes: [
+    "GET /v1/curriculum/projects",
+    "POST /v1/curriculum/projects",
+    "GET /v1/curriculum/projects/:id",
+    "PUT /v1/curriculum/projects/:id/members",
+    "PUT /v1/curriculum/projects/:id/versions/:digest",
+    "POST /v1/curriculum/experiments",
+    "GET /v1/curriculum/experiments/:id/channels",
+    "POST /v1/curriculum/experiments/:id/links",
+    "POST /v1/curriculum/links/:id/revoke",
+    CR_TEST_ORIGIN_ROUTE,
+    CR_TEST_ORIGIN_SESSION_ROUTE,
+    // cr-evidence: participant evidence, manual records, drafts, deletion, and the admin's cohort controls.
+    "GET /v1/curriculum/experiments/:id/evidence",
+    "POST /v1/curriculum/experiments/:id/notes",
+    "POST /v1/curriculum/experiments/:id/drafts",
+    "POST /v1/curriculum/experiments/:id/drafts/:draft/review",
+    "DELETE /v1/curriculum/experiments/:id",
+    "DELETE /v1/curriculum/experiments/:id/sessions/:sid",
+    CR_TEST_ORIGIN_EVENTS_ROUTE,
+    "GET /admin/curriculum/cohorts/:cohort/controls",
+    "PUT /admin/curriculum/cohorts/:cohort/controls",
+    // cr-memory: Venture Memory reads (member or in-scope director), the director's project list, and the team's writes.
+    "GET /v1/curriculum/projects/:id/memory",
+    "GET /v1/curriculum/projects/:id/memory/diff",
+    "GET /v1/curriculum/director/projects",
+    "PUT /v1/curriculum/projects/:id/problem",
+    "POST /v1/curriculum/projects/:id/hypotheses",
+    "POST /v1/curriculum/projects/:id/hypotheses/:hid/revisions",
+    "POST /v1/curriculum/projects/:id/stakeholders",
+    "POST /v1/curriculum/experiments/:id/stakeholder",
+    "POST /v1/curriculum/projects/:id/metrics",
+    "POST /v1/curriculum/projects/:id/decisions",
+    "POST /v1/curriculum/decisions/:id/version",
+    "PUT /v1/curriculum/projects/:id/slides/:n",
+    // cr-skills: the skill registry and one run's prepare and output gate.
+    "GET /v1/curriculum/skills",
+    "POST /v1/curriculum/projects/:id/skills/:skill/prepare",
+    "POST /v1/curriculum/projects/:id/skills/:skill/output",
+  ],
   switchOffWhileStored: ["hypeproof-chat.clearBrowserResultBytes"],
 };
 

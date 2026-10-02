@@ -450,6 +450,11 @@ export function browserToolLogLine(
       return { icon: "🖱️", label: `${clip(input.ref)} 위에 마우스 올리기` };
     case "browser_reload":
       return { icon: "🔄", label: "새로 고침" };
+    // cr-verify — the runner acting on the page for one criterion (CR-68).
+    case "verify_criterion":
+      return { icon: "🧪", label: "기대 조건 테스트 중" };
+    case "verify_propose_criteria":
+      return { icon: "💡", label: "기대 조건 제안" };
     default:
       return { icon: "🤖", label: name };
   }

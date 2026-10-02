@@ -111,6 +111,23 @@ const fakeZ = { string: () => ({ __zod: "string" }) };
   assert.equal(opened.length, 1, "host.openBrowser never called for rejected URLs");
 }
 
+// ─── browser_open: fetchHead 404 → isError (live server up, file missing) ──────
+{
+  const { factory, registered } = makeFactory();
+  let liveUrl = "http://127.0.0.1:9191/";
+  buildHypeproofMcpServer(factory, fakeZ, {
+    openBrowser: async () => {},
+    screenshot: async () => null,
+    startLivePreview: async () => liveUrl,
+    livePreviewUrl: async () => liveUrl,
+    fetchHead: async () => ({ ok: false, status: 404 }),
+  });
+  const open = registered.find((t) => t.name === "browser_open");
+  const res = await open.handler({ url: liveUrl + "chalk/missing/lesson.html" }, {});
+  assert.equal(res.isError, true, "fetchHead 404: browser_open → isError");
+  assert.ok(res.content[0].text.includes("파일이 없어요"), "error message mentions 파일이 없어요");
+}
+
 // ─── browser_screenshot handler — image content for vision, isError on none ─
 {
   const { factory, registered } = makeFactory();

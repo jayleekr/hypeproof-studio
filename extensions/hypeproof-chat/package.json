@@ -108,6 +108,14 @@
         "title": "Chalk: 초안 검사 (강사용)"
       },
       {
+        "command": "hypeproof-chat.chalk.openCourse",
+        "title": "Chalk: 강의 초안 열기 (강사용)"
+      },
+      {
+        "command": "hypeproof-chat.chalk.savePlan",
+        "title": "Chalk: 계획서 저장 (강사용)"
+      },
+      {
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"
@@ -166,6 +174,36 @@
         "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
       },
       {
+        "command": "hypeproof-chat.testMyProduct",
+        "title": "HypeProof: 내 제품 테스트하기",
+        "icon": "$(beaker)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.publishTestVersion",
+        "title": "HypeProof: 사용자 테스트용으로 공개하기",
+        "icon": "$(globe)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.experimentEvidence",
+        "title": "HypeProof: 실험 증거 보기",
+        "icon": "$(checklist)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.ventureMemory",
+        "title": "HypeProof: 프로젝트 기억 보기",
+        "icon": "$(history)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
+        "command": "hypeproof-chat.curriculumSkills",
+        "title": "HypeProof: 커리큘럼 스킬",
+        "icon": "$(lightbulb)",
+        "enablement": "hypeproof-chat.curriculumRuntimeEnabled"
+      },
+      {
         "command": "hypeproof-chat.clearBrowserResultBytes",
         "title": "HypeProof: 저장된 실험 브라우저 화면 지우기",
         "enablement": "hypeproof-chat.crBrowserBytesStored"
@@ -197,6 +235,31 @@
           "command": "hypeproof-chat.pickElement",
           "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
           "group": "navigation@5"
+        },
+        {
+          "command": "hypeproof-chat.testMyProduct",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@6"
+        },
+        {
+          "command": "hypeproof-chat.publishTestVersion",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@7"
+        },
+        {
+          "command": "hypeproof-chat.experimentEvidence",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@8"
+        },
+        {
+          "command": "hypeproof-chat.ventureMemory",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@9"
+        },
+        {
+          "command": "hypeproof-chat.curriculumSkills",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.curriculumRuntimeEnabled",
+          "group": "navigation@10"
         }
       ],
       "editor/title": [
@@ -224,6 +287,26 @@
         },
         {
           "command": "hypeproof-chat.browserResults",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.testMyProduct",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.publishTestVersion",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.experimentEvidence",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.ventureMemory",
+          "when": "hypeproof-chat.curriculumRuntimeEnabled"
+        },
+        {
+          "command": "hypeproof-chat.curriculumSkills",
           "when": "hypeproof-chat.curriculumRuntimeEnabled"
         },
         {
@@ -321,19 +404,22 @@
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "build:webview": "cd webview-ui && npm install && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools && npm run test:instructor-render",
+    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools && npm run test:chalk-generator && npm run test:instructor-render",
     "test:instructor-render": "NODE_PATH=webview-ui/node_modules node_modules/.bin/esbuild test/instructor-render.test.tsx --bundle --platform=node --format=cjs --loader:.css=empty --loader:.svg=empty --jsx=automatic --external:vscode --banner:js=\"globalThis.window = globalThis.window ?? { acquireVsCodeApi: undefined };\" --outfile=/tmp/instructor-render.test.cjs && node /tmp/instructor-render.test.cjs",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
     "watch:webview": "cd webview-ui && npm run dev",
     "package": "vsce package --no-dependencies",
     "test:classroom-ops:review": "node --experimental-strip-types --test test/classroom-ops-review.test.mjs test/classroom-ops-expiry-review.test.mjs test/classroom-ops-recovery.test.mjs test/sdk-terminal-failure.test.mjs",
-    "test:chalk-tools": "node --experimental-strip-types test/chalk-tools.test.mjs"
+    "test:chalk-tools": "node --experimental-strip-types test/chalk-tools.test.mjs",
+    "test:chalk-generator": "node --experimental-strip-types test/chalk-generator.test.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
     "esbuild": "^0.28.1",
+    "jsqr": "^1.4.0",
+    "qrcode-generator": "^2.0.4",
     "typescript": "^5.4.0"
   }
 }

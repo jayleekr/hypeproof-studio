@@ -481,6 +481,57 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
 
+    // #1295 (E2-6): Chalk 생성 흐름 버튼 명령. 버튼과 AI 도구가 같은 execXxx를 부른다(SUB-07).
+    vscode.commands.registerCommand("hypeproof-chat.chalk.openCourse", async () => {
+      const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz");
+      const enabled = await chalkToolsEnabled(context.secrets);
+      if (!enabled) { vscode.window.showWarningMessage("강사 모드에서만 사용할 수 있습니다."); return; }
+      const cohort = await vscode.window.showInputBox({ prompt: "코호트 ID", placeHolder: "예: sk-biopharm-kids-s1" });
+      if (!cohort) return;
+      const course = await vscode.window.showInputBox({ prompt: "강의 ID", placeHolder: "예: lesson-01" });
+      if (!course) return;
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      try {
+        const result = await callChalkTool(
+          {
+            serverUrl: proxyUrl, secrets: context.secrets, cwd,
+            requestConfirmation: async (msg) => (await vscode.window.showWarningMessage(msg, { modal: true }, "계속", "취소")) === "계속",
+          },
+          "chalk_open_course", { cohort, course },
+        );
+        const parsed = JSON.parse(result) as { local_file?: string };
+        if (parsed.local_file) {
+          const doc = await vscode.workspace.openTextDocument(parsed.local_file);
+          await vscode.window.showTextDocument(doc);
+        }
+      } catch (err) { vscode.window.showErrorMessage(`열기 실패: ${(err as Error).message}`); }
+    }),
+    vscode.commands.registerCommand("hypeproof-chat.chalk.savePlan", async () => {
+      const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz");
+      const enabled = await chalkToolsEnabled(context.secrets);
+      if (!enabled) { vscode.window.showWarningMessage("강사 모드에서만 사용할 수 있습니다."); return; }
+      const cohort = await vscode.window.showInputBox({ prompt: "코호트 ID" });
+      if (!cohort) return;
+      const course = await vscode.window.showInputBox({ prompt: "강의 ID" });
+      if (!course) return;
+      const knowledgeVersion = await vscode.window.showInputBox({ prompt: "지식 버전 (숫자)" });
+      if (!knowledgeVersion) return;
+      const expectedRevision = await vscode.window.showInputBox({ prompt: "현재 revision 번호" });
+      if (!expectedRevision) return;
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      try {
+        const result = await callChalkTool(
+          { serverUrl: proxyUrl, secrets: context.secrets, cwd },
+          "chalk_save_plan",
+          { cohort, course, knowledge_version: Number(knowledgeVersion), expected_revision: Number(expectedRevision), request_id: crypto.randomUUID() },
+        );
+        const panel = vscode.window.createOutputChannel("Chalk 저장 결과", "json");
+        panel.appendLine(result);
+        panel.show(true);
+      } catch (err) { vscode.window.showErrorMessage(`저장 실패: ${(err as Error).message}`); }
+    }),
+
+
     // #72: auto-update commands. The banner in the chat panel calls
     // installUpdate via the openInstallUpdate webview message → provider →
     // here. checkForUpdates is also exposed as a command so the user can
@@ -577,6 +628,13 @@ export async function activate(context: vscode.ExtensionContext) {
     // CR-10 (cr-browser) — the stored browser results, labelled by artifact version. Same
     // gate: the manifest hides it with the switch off and showBrowserResults() re-checks.
     vscode.commands.registerCommand("hypeproof-chat.browserResults", () => provider.showBrowserResults()),
+    // cr-verify — "Test my product" (CR-12). Gated in the manifest, re-checked in the handler.
+    vscode.commands.registerCommand("hypeproof-chat.testMyProduct", () => provider.testMyProduct()),
+    // cr-publish — "Publish for user test" (CR-17). Gated in the manifest, re-checked in the handler.
+    vscode.commands.registerCommand("hypeproof-chat.publishTestVersion", () => provider.publishTestVersion()),
+    vscode.commands.registerCommand("hypeproof-chat.experimentEvidence", () => provider.experimentEvidence()),
+    vscode.commands.registerCommand("hypeproof-chat.ventureMemory", () => provider.ventureMemory()),
+    vscode.commands.registerCommand("hypeproof-chat.curriculumSkills", () => provider.curriculumSkills()),
     // CR-10 — delete the stored browser-result bytes. Gated on "bytes are stored", NOT on
     // the CR switch: what an earlier switch-on stored stays deletable after it goes off.
     vscode.commands.registerCommand("hypeproof-chat.clearBrowserResultBytes", () => provider.clearStoredBrowserResults()),

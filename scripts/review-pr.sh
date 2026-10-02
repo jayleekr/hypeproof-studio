@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # JY dev review: one command from PR number to Dev app window.
 # Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>]
+#                                   [--profile <id>] [--cohort <id>] [--no-app]
 # Wraps studio-dev.py; never touches production values.
-# --vault <path>  explicit path to the curriculum_wiki vault for Chalk knowledge import.
-#                 Falls back to CHALK_VAULT_PATH env var, then auto-detects sibling repo paths.
+# --vault <path>   explicit path to the curriculum_wiki vault for Chalk knowledge import.
+#                  Falls back to CHALK_VAULT_PATH env var, then auto-detects sibling repo paths.
+# --profile <id>   override the default review profile (default: sk-biopharm-kids-2026-grade-3-4-s1).
+# --cohort <id>    override the default review cohort (default: derived from --profile's file).
+#                  If --profile is given without --cohort the cohort is read from that profile file.
+# --no-app         stop before launching the Dev app (step 5); keep the local server running.
+#                  Use for automated pre-flight checks (set_inputs → save_plan flow) without a GUI.
 set -Eeuo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,9 +18,14 @@ INPUT="${1:-}"
 WRANGLER_PORT=8787
 VAULT_PATH_ARG=""
 KB_SQL=""
+REVIEW_PROFILE_ARG=""
+REVIEW_COHORT_ARG=""
+NO_APP=0
+AFTER_SCRIPT=""
+DEV_APP_PID=""
 
 if [[ -z "$INPUT" ]]; then
-  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>]" >&2
+  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app]" >&2
   exit 1
 fi
 shift
@@ -22,6 +33,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --provider) PROVIDER="$2"; shift 2 ;;
     --vault) VAULT_PATH_ARG="$2"; shift 2 ;;
+    --profile) REVIEW_PROFILE_ARG="$2"; shift 2 ;;
+    --cohort) REVIEW_COHORT_ARG="$2"; shift 2 ;;
+    --no-app) NO_APP=1; shift ;;
+    --after) AFTER_SCRIPT="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -90,7 +105,19 @@ cleanup() {
     wait "$SERVER_PID" 2>/dev/null || true
   fi
   pkill -f "wrangler dev.*--port $WRANGLER_PORT" 2>/dev/null || true
-  pkill -f "HypeProof Studio Dev.app/Contents/" 2>/dev/null || true
+  # Kill only the Dev app we launched (by recorded PID), never by process name.
+  if [[ -n "${DEV_APP_PID:-}" ]] && kill -0 "$DEV_APP_PID" 2>/dev/null; then
+    echo "Closing Dev app (PID $DEV_APP_PID)..."
+    kill "$DEV_APP_PID" 2>/dev/null || true
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 1
+      kill -0 "$DEV_APP_PID" 2>/dev/null || break
+    done
+    if kill -0 "$DEV_APP_PID" 2>/dev/null; then
+      echo "Dev app did not exit after SIGTERM; sending SIGKILL (PID $DEV_APP_PID)..."
+      kill -9 "$DEV_APP_PID" 2>/dev/null || true
+    fi
+  fi
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
   [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
@@ -118,6 +145,32 @@ else
   echo "Worktree ready in $(( T1_END - T1 ))ms"
   echo "Building: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
 fi
+
+# ── Step 1.5: clear previous conversation ────────────────────────────────────
+# Clears persisted chat history (chatPanelProvider.ts workspaceState key hypeproofChat.history*)
+# from the Dev state folder so each review starts with a clean slate.
+# The state path mirrors studio-dev.py:19+222 (resolve().parents[1] + sha256[:12]).
+echo ""
+echo "=== [1.5/6] Clear previous conversation ==="
+STATE_HASH="$(python3 - "$WORKTREE_DIR/scripts/studio-dev.py" <<'PY'
+import sys, hashlib, pathlib
+repo = pathlib.Path(sys.argv[1]).resolve().parents[1]
+print(hashlib.sha256(str(repo).encode()).hexdigest()[:12])
+PY
+)"
+STATE_DIR="$HOME/Library/Application Support/HypeProof Studio Development/$STATE_HASH"
+TOTAL_DELETED=0
+if [[ -d "$STATE_DIR/user-data/User/workspaceStorage" ]]; then
+  while IFS= read -r -d '' db; do
+    COUNT_BEFORE=0
+    COUNT_BEFORE="$(sqlite3 "$db" "SELECT COUNT(*) FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null || echo 0)"
+    if [[ "$COUNT_BEFORE" -gt 0 ]]; then
+      sqlite3 "$db" "DELETE FROM ItemTable WHERE key LIKE 'hypeproofChat.history%';" 2>/dev/null || true
+      TOTAL_DELETED=$((TOTAL_DELETED + COUNT_BEFORE))
+    fi
+  done < <(find "$STATE_DIR/user-data/User/workspaceStorage" -name "state.vscdb" -print0 2>/dev/null)
+fi
+[[ $TOTAL_DELETED -gt 0 ]] && echo "이전 대화 비움 (${TOTAL_DELETED}행)" || echo "지울 대화 없음"
 
 # ── Step 2: extension deps ────────────────────────────────────────────────────
 echo ""
@@ -256,14 +309,44 @@ echo "Server ready in $(( T3_END - T3 ))ms"
 echo ""
 echo "=== [4/6] Instructor token ==="
 
-# Auto-detect first available profile and its cohort
-PROFILE_ID="$(grep -h -m1 "^  id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | sed "s/.*id: ['\"]//;s/['\"].*//" | tr -d ' ')"
-COHORT_ID="$(grep -h -m1 "cohort_id:" "$WORKTREE_DIR"/worker/src/profiles/*.ts 2>/dev/null | sed "s/.*cohort_id: ['\"]//;s/['\"].*//" | tr -d ' ')"
+# Default review profile and cohort. Override with --profile / --cohort.
+# Reading all *.ts files with grep -m1 emits one line per file; instead we
+# read only the specific profile file so the value is always exactly one line.
+DEFAULT_PROFILE="sk-biopharm-kids-2026-grade-3-4-s1"
+DEFAULT_PROFILE_FILE="$WORKTREE_DIR/worker/src/profiles/sk-biopharm-kids-s1.ts"
 
-if [[ -z "$PROFILE_ID" || -z "$COHORT_ID" ]]; then
-  echo "WARNING: Could not auto-detect profile/cohort. Use the token issued below manually." >&2
-  PROFILE_ID="unknown-profile"
-  COHORT_ID="unknown-cohort"
+if [[ -n "$REVIEW_PROFILE_ARG" ]]; then
+  PROFILE_ID="$REVIEW_PROFILE_ARG"
+  # Resolve cohort: explicit arg wins; otherwise find the profile file and read it.
+  if [[ -n "$REVIEW_COHORT_ARG" ]]; then
+    COHORT_ID="$REVIEW_COHORT_ARG"
+  else
+    # Search for a profile file whose id: line matches the given profile.
+    PROFILE_FILE="$(grep -rl "id: ['\"]${REVIEW_PROFILE_ARG}['\"]" "$WORKTREE_DIR/worker/src/profiles/" 2>/dev/null | head -1)"
+    if [[ -z "$PROFILE_FILE" ]]; then
+      echo "ERROR: profile '${REVIEW_PROFILE_ARG}' not found in worker/src/profiles/*.ts" >&2
+      exit 1
+    fi
+    COHORT_ID="$(grep -m1 "cohort_id:" "$PROFILE_FILE" | sed "s/.*cohort_id: ['\"]//;s/['\"].*//" | tr -d ' ')"
+  fi
+elif [[ -n "$REVIEW_COHORT_ARG" ]]; then
+  PROFILE_ID="$DEFAULT_PROFILE"
+  COHORT_ID="$REVIEW_COHORT_ARG"
+else
+  PROFILE_ID="$DEFAULT_PROFILE"
+  COHORT_ID="$(grep -m1 "cohort_id:" "$DEFAULT_PROFILE_FILE" | sed "s/.*cohort_id: ['\"]//;s/['\"].*//" | tr -d ' ')"
+fi
+
+# Validate exactly one line each (guards against accidental multiline values).
+PROFILE_LINE_COUNT="$(echo "$PROFILE_ID" | wc -l | tr -d ' ')"
+COHORT_LINE_COUNT="$(echo "$COHORT_ID" | wc -l | tr -d ' ')"
+if [[ "$PROFILE_LINE_COUNT" -ne 1 || -z "$PROFILE_ID" ]]; then
+  echo "ERROR: PROFILE_ID is not exactly one non-empty line (got ${PROFILE_LINE_COUNT} lines): $(echo "$PROFILE_ID" | head -3)" >&2
+  exit 1
+fi
+if [[ "$COHORT_LINE_COUNT" -ne 1 || -z "$COHORT_ID" ]]; then
+  echo "ERROR: COHORT_ID is not exactly one non-empty line (got ${COHORT_LINE_COUNT} lines): $(echo "$COHORT_ID" | head -3)" >&2
+  exit 1
 fi
 echo "Profile: $PROFILE_ID  Cohort: $COHORT_ID"
 
@@ -287,44 +370,113 @@ else
   (umask 077; printf '%s' "$TOKEN" > "$ISSUER_TOKEN_FILE")
   export HPS_DEV_ISSUER_TOKEN_FILE="$ISSUER_TOKEN_FILE"
   echo "Instructor token written to worktree (auto-injected into Dev app)."
-  # Also copy to clipboard as fallback for manual paste.
-  if command -v pbcopy >/dev/null 2>&1; then
-    echo "$TOKEN" | pbcopy
-    echo "Token also copied to clipboard."
+fi
+
+# ── Step 4.5: authoring draft ─────────────────────────────────────────────────
+# Creates a minimal authoring draft so chalk_set_inputs (which requires an existing draft)
+# does not return 404 during review. Writes only to 127.0.0.1 (local D1).
+echo ""
+echo "=== [4.5/6] Authoring draft ==="
+DRAFT_COURSE="review-$(python3 -c 'import time; print(int(time.time()))')"
+DRAFT_REQUEST_ID="$(openssl rand -hex 16)"
+DRAFT_BODY_FILE="$(mktemp "$WORKTREE_DIR/.draft-body-XXXXXX.json")"
+chmod 600 "$DRAFT_BODY_FILE"
+DRAFT_CONTENT='{"schema":"hps-session-design/1","title":"review draft","audience":"","duration_minutes":60,"objective":"","prerequisites":"","starter":"","steps":[]}'
+printf '{"expected_revision":0,"request_id":"%s","profile_id":"%s","content":%s}' \
+  "$DRAFT_REQUEST_ID" "$PROFILE_ID" "$DRAFT_CONTENT" > "$DRAFT_BODY_FILE"
+DRAFT_RESP_FILE="$(mktemp "$WORKTREE_DIR/.draft-resp-XXXXXX.json")"
+DRAFT_HTTP_STATUS=""
+DRAFT_HTTP_STATUS="$(printf 'Authorization: Bearer %s\n' "$TOKEN" | \
+  curl -s -X PUT -H @- -H 'Content-Type: application/json' \
+  --data-binary @"$DRAFT_BODY_FILE" \
+  -w "%{http_code}" -o "$DRAFT_RESP_FILE" \
+  "http://127.0.0.1:${WRANGLER_PORT}/admin/cohorts/${COHORT_ID}/authoring/${DRAFT_COURSE}" \
+  2>&1)" || true
+rm -f "$DRAFT_BODY_FILE"
+if ! [[ "$DRAFT_HTTP_STATUS" =~ ^2 ]]; then
+  echo "ERROR: authoring draft PUT failed (HTTP ${DRAFT_HTTP_STATUS})" >&2
+  echo "  cohort=${COHORT_ID}  course=${DRAFT_COURSE}" >&2
+  echo "  response body: $(cat "$DRAFT_RESP_FILE" 2>/dev/null | head -5)" >&2
+  rm -f "$DRAFT_RESP_FILE"
+  exit 1
+fi
+rm -f "$DRAFT_RESP_FILE"
+echo "Draft created: cohort=${COHORT_ID} course=${DRAFT_COURSE}"
+
+# ── Step 5: Dev app (skipped when --no-app) ───────────────────────────────────
+if [[ "$NO_APP" -eq 1 ]]; then
+  echo ""
+  echo "=== [5/6] Dev app — skipped (--no-app) ==="
+  echo "Local server running at http://127.0.0.1:${WRANGLER_PORT}"
+  echo "Draft: cohort=${COHORT_ID} course=${DRAFT_COURSE}"
+  if [[ -n "${AFTER_SCRIPT:-}" ]]; then
+    echo "Running --after script: ${AFTER_SCRIPT}"
+    # Export context for the after-script. Token value is not exported; only the file path.
+    export REVIEW_SERVER_URL="http://127.0.0.1:${WRANGLER_PORT}"
+    export REVIEW_COHORT="${COHORT_ID}"
+    export REVIEW_COURSE="${DRAFT_COURSE}"
+    export REVIEW_ISSUER_TOKEN_FILE="${ISSUER_TOKEN_FILE:-}"
+    bash "${AFTER_SCRIPT}"
+    echo "=== [6/6] After-script done. Cleaning up. ==="
+  else
+    echo "=== [6/6] Ready (--no-app, no --after). Press Ctrl+C to stop server and clean up. ==="
+    # Keep server alive in foreground; cleanup trap fires on INT/TERM/EXIT.
+    wait "$SERVER_PID" 2>/dev/null || true
   fi
-fi
-
-# ── Step 5: Dev app ───────────────────────────────────────────────────────────
-echo ""
-echo "=== [5/6] Dev app ==="
-
-# Note: instructor (issuer) token is seeded only via HPS_DEV_ISSUER_TOKEN_FILE above.
-# Never write it to local-participant-token.txt (TOKEN_KEY student slot).
-
-T5=$(ms)
-python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
-  --provider "$PROVIDER" \
-  --service local 2>&1
-T5_END=$(ms)
-echo "studio-dev.py run done in $(( T5_END - T5 ))ms"
-
-# ── Step 6: instructions ──────────────────────────────────────────────────────
-echo ""
-echo "=== [6/6] Ready ==="
-echo "HypeProof Studio Dev is running."
-echo ""
-echo "In the app:"
-echo "  1. Click the HypeProof chat icon in the sidebar"
-echo "  2. Select '수업 참여'"
-if [[ -n "${TOKEN:-}" ]] && command -v pbcopy >/dev/null 2>&1; then
-  echo "  3. Paste the token (already in clipboard)"
 else
-  echo "  3. Paste the token shown above"
-fi
-echo ""
-echo "When done reviewing, press Ctrl+C to clean up."
+  echo ""
+  echo "=== [5/6] Dev app ==="
 
-# Wait for the wrangler dev background job (cleanup runs on exit/INT/TERM).
-# || true: prevents a non-zero exit from wrangler from triggering the ERR trap
-# here — the trap was already sent before cleanup; this is normal shutdown.
-wait "$SERVER_PID" 2>/dev/null || true
+  # Note: instructor (issuer) token is seeded only via HPS_DEV_ISSUER_TOKEN_FILE above.
+  # Never write it to local-participant-token.txt (TOKEN_KEY student slot).
+
+  T5=$(ms)
+  DEV_APP_RAW="$(python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
+    --provider "$PROVIDER" \
+    --service local \
+    ${HPS_REVIEW_CDP_PORT:+--cdp-port "$HPS_REVIEW_CDP_PORT"} 2>&1)"
+  echo "$DEV_APP_RAW"
+  DEV_APP_PID="$(echo "$DEV_APP_RAW" | grep -oE 'Development process started: [0-9]+' | grep -oE '[0-9]+$' || true)"
+  T5_END=$(ms)
+  echo "studio-dev.py run done in $(( T5_END - T5 ))ms (dev app PID: ${DEV_APP_PID:-unknown})"
+  DEV_APP_LOG="$HOME/Library/Application Support/HypeProof Studio Development/$(python3 -c "
+import hashlib, sys
+from pathlib import Path
+print(hashlib.sha256(str(Path(sys.argv[1]).resolve()).encode()).hexdigest()[:12])
+" "$WORKTREE_DIR")/app.log"
+
+  # ── Step 6: instructions ────────────────────────────────────────────────────
+  echo ""
+  echo "=== [6/6] Ready ==="
+  echo "HypeProof Studio Dev is running."
+  echo ""
+  echo "In the app:"
+  echo "  1. Click the HypeProof chat icon in the sidebar"
+  echo "  2. 강사 모드 띠(Instructor 배너)가 표시되는지 확인 — 토큰 붙여 넣기 불필요"
+  echo "  3. chalk_set_inputs 호출 시 로그에 찍힌 강의 ID(${DRAFT_COURSE})를 course 인자로 사용"
+  echo ""
+  echo "When done reviewing, press Ctrl+C to clean up."
+
+  # ── 거짓 Ready guard: 15 s survival + initialization log check ──────────────
+  if [[ -n "${DEV_APP_PID:-}" ]]; then
+    echo "Waiting 15 s to verify Dev app survival..."
+    sleep 15
+    if ! kill -0 "$DEV_APP_PID" 2>/dev/null; then
+      echo "ERROR: Dev app (PID $DEV_APP_PID) exited within 15 s of launch." >&2
+      if [[ -f "$DEV_APP_LOG" ]]; then
+        echo "--- app.log (last 20 lines) ---" >&2
+        tail -n 20 "$DEV_APP_LOG" >&2
+      fi
+      exit 1
+    fi
+    if [[ -f "$DEV_APP_LOG" ]] && ! grep -q "update#setState" "$DEV_APP_LOG"; then
+      echo "WARNING: 'update#setState disabled' not yet in app.log; app may still be initializing." >&2
+    fi
+    echo "Dev app alive after 15 s (PID $DEV_APP_PID)."
+  fi
+
+  # Wait for the wrangler dev background job (cleanup runs on exit/INT/TERM).
+  # || true: prevents a non-zero exit from wrangler from triggering the ERR trap
+  # here — the trap was already sent before cleanup; this is normal shutdown.
+  wait "$SERVER_PID" 2>/dev/null || true
+fi

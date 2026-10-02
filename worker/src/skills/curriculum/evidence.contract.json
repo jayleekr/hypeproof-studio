@@ -1,0 +1,93 @@
+{
+  "skill": "evidence",
+  "version": "1.0.0",
+  "title": "증거 정리",
+  "intent": "Sort one experiment's participant sessions and manual records into observation, interpretation, assumption and next experiment, citing the records; the result is stored as an evidence draft the student reviews.",
+  "required_context": [
+    "curriculum_week",
+    "experiments",
+    "experiment_records"
+  ],
+  "allowed_tools": [
+    "evidence_read"
+  ],
+  "preferred_capability": "reasoning.high",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "experiment_id": {
+        "type": "string",
+        "maxLength": 100,
+        "minLength": 1
+      },
+      "focus": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "experiment_id"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 60,
+              "minLength": 1
+            },
+            "section": {
+              "type": "string",
+              "maxLength": 20,
+              "enum": [
+                "observation",
+                "interpretation",
+                "assumption",
+                "next_experiment"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 2000,
+              "minLength": 1
+            },
+            "source_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 260
+              },
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "id",
+            "section",
+            "text",
+            "source_refs"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 60,
+        "minItems": 1
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "evidence_draft_valid"
+  ],
+  "write_back_targets": [
+    "evidence_draft"
+  ]
+}

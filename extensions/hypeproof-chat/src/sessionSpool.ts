@@ -392,11 +392,11 @@ export class SessionSpool {
       await this.writeArtifactSnapshot(s, e);
     });
   }
-  private async writeArtifactSnapshot(s: SessionState, e: { turnId?: string; source: SpoolArtifactSource; path: string; content: string }): Promise<string> {
+  private async writeArtifactSnapshot(s: SessionState, e: { turnId?: string; source: SpoolArtifactSource; path: string; content: string }, force = false): Promise<string> {
     const content = typeof e.content === "string" ? e.content : "";
     const bytes = Buffer.from(content, "utf8");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    if (s.seenArtifactHashes.has(sha256)) return sha256;
+    if (!force && s.seenArtifactHashes.has(sha256)) return sha256;
     s.seenArtifactHashes.add(sha256);
     if (s.seenArtifactHashes.size > SEEN_ARTIFACT_HASHES_MAX) {
       const oldest = s.seenArtifactHashes.values().next().value;
@@ -437,7 +437,7 @@ export class SessionSpool {
         const now = this.session ? this.session.identity : this.pendingIdentity;
         if (!owner.identity || !now || !sameIdentity(owner.identity, now) || (owner.session !== null && this.session !== null && this.session.id !== owner.session)) { resolve(false); return; }
         const s = await this.materialize();
-        const sha256 = await this.writeArtifactSnapshot(s, { source: "existing", path: e.path, content: e.content });
+        const sha256 = await this.writeArtifactSnapshot(s, { source: "existing", path: e.path, content: e.content }, e.approved);
         await this.writeEvent(s, { type: "artifact_approval", artifact_sha256: sha256, path: path.basename(e.path).slice(0, 255), approved: e.approved });
         resolve(true);
       });

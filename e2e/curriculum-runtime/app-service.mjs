@@ -10,14 +10,20 @@
 // It proves transport, enforcement and the browser behaviour, never a real model's
 // judgement. Nothing here reaches production; no key is used.
 //
-//   node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs <port> <token-file> <on|off>
+//   node --experimental-strip-types --experimental-sqlite e2e/curriculum-runtime/app-service.mjs <port> <token-file> <on|off> [publish]
 //
-// Control routes (the spec only): GET /__cr/state · POST /__cr/reset.
+// `publish` (cr-publish #1393): the Service also gets SQLite D1 (schema.sql), an in-memory R2
+// and HPS_TEST_ORIGIN = http://{project}.test.invalid:<port>, so the App can publish a test
+// version and a request whose Host is a test origin reaches the published runtime.
+//
+// Control routes (the spec only): GET /__cr/state · POST /__cr/reset · POST /__cr/plant-dangling
+// (cr-evidence: removes one participant session key behind the record's back, with no tombstone,
+// so a stored draft's reference stops resolving; publish mode only).
 import "../../worker/test/harness/loader.mjs";
 import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 
-const [portArg, tokenFile, switchArg] = process.argv.slice(2);
+const [portArg, tokenFile, switchArg, modeArg] = process.argv.slice(2);
 const { bootApp, createMockEnv, makeCtx, TEST_SECRET } = await import("../../worker/test/harness/index.mjs");
 const { getProfile } = await import("../../worker/src/profiles/index.ts");
 const { issue } = await import("../../worker/src/lib/tokens.ts");
@@ -35,6 +41,18 @@ const env = createMockEnv({
   environment: "development",
   env: { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "synthetic-no-live-key", OPENAI_API_KEY: undefined, ANTHROPIC_PROXY_URL: undefined },
 });
+if (modeArg === "publish") {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { readFileSync } = await import("node:fs");
+  const { sqliteBinding, memoryR2 } = await import("../../worker/test/harness/curriculum.mjs");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys=ON");
+  db.exec(readFileSync(new URL("../../worker/schema.sql", import.meta.url), "utf8"));
+  // The rows usage accounting references (as the classroom-ops fixture mirrors them), so a turn's usage row is not refused.
+  db.prepare("INSERT OR IGNORE INTO cohorts(id, display_name) VALUES(?, ?)").run(cohort, cohort);
+  db.prepare("INSERT OR IGNORE INTO sessions(id, cohort_id, profile_id, starts_at, ends_at) VALUES(?, ?, ?, ?, ?)").run("cr-app-session", cohort, profile.id, new Date(Date.now() - 60_000).toISOString(), new Date(Date.now() + 6 * 3600_000).toISOString());
+  Object.assign(env, { HPS_DB: sqliteBinding(db), HPS_TRACES: memoryR2(), HPS_TEST_ORIGIN: process.env.HPS_TEST_ORIGIN || `http://{project}.test.invalid:${portArg}` });
+}
 const now = Date.now();
 await env.HPS_KV.put(`cohort:${cohort}:active_session`, JSON.stringify({ session_id: "cr-app-session", profile_id: profile.id, starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now + 6 * 3600_000).toISOString() }));
 await env.HPS_KV.put(`cohort:${cohort}:roster`, JSON.stringify({ users: ["cr-adult-a"] }));
@@ -67,7 +85,7 @@ const recordLines = (text) => text.split("\n").filter((l) => /^- \[(console|exce
 const blocks = (content) => (typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : []);
 const textOf = (content) => blocks(content).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 
-const state = { requests: [], runs: {} };
+const state = { requests: [], runs: {}, verify: [], skills: [], skillHeaders: [] };
 
 /** The next move for one upstream request: a tool call or the final text. */
 function agent(body) {
@@ -82,6 +100,15 @@ function agent(body) {
   const images = start >= 0 ? blocks(msgs[start].content).filter((b) => b.type === "image").length : 0;
   state.requests.push({ at: Date.now(), tools: (body.tools ?? []).map((t) => t.name), userText, images, system: JSON.stringify(body.system ?? "").slice(0, 200000) });
   if (/\[cr:again\]/.test(userText)) return again(msgs.slice(start + 1));
+  // cr-verify (#1392): a run started from the "내 제품 테스트" panel, a fix request, a proposal.
+  if (/\[Studio 제품 테스트 [^\]]+\]/.test(userText)) return verifyRun(userText, msgs.slice(start + 1));
+  if (/\[hps-fix-request\/1\]/.test(userText)) {
+    state.verify.push({ kind: "fix", text: userText.slice(0, 30000) });
+    return { text: "[로컬 시험 응답] 그 결과를 보고 고칠게요." };
+  }
+  if (/\[cr:propose\]/.test(userText)) return propose(msgs.slice(start + 1));
+  // cr-skills (#1396): a curriculum skill run's prompt (skill, schema, context, input).
+  if (/^## Skill\n[a-z-]+@\d/m.test(userText)) return { text: skillAnswer(userText) };
   const scenario = /\[cr:flow(?::([a-z0-9-]+))?\]/.exec(userText);
   if (!scenario) return { text: "[로컬 시험 응답] 받았어요." };
   const plant = scenario[1] ?? "";
@@ -141,6 +168,69 @@ function again(after) {
   run.steps = 1;
   return finish(run, null, "끝까지 됨");
 }
+// ── cr-verify: the scripted agent's plans, chosen by words in the student's criterion ──
+// The plan is the agent's interpretation of a criterion; the runner, not the agent, judges.
+const ORDER = [
+  { action: "click", target: { role: "button", name: "주문 시작" } },
+  { action: "select", target: { role: "combobox", name: "음료 고르기" }, value: "아이스티" },
+  { action: "click", target: { role: "button", name: "수량 늘리기" } },
+  { action: "click", target: { role: "button", name: "장바구니에 담기" } },
+  { action: "click", target: { role: "button", name: "주문하기" } },
+];
+function planFor(text) {
+  if (/흔들/.test(text)) return { steps: [{ action: "navigate", path: "/index.html?plant=flaky" }, ...ORDER], expect: [{ kind: "text", text: "주문이 완료되었어요" }] };
+  if (/바깥|외부/.test(text)) return { steps: [{ action: "navigate", path: "https://example.com/" }], expect: [{ kind: "text", text: "x" }] };
+  if (/결제 완료/.test(text)) return { steps: ORDER, expect: [{ kind: "text", text: "결제 완료" }] };
+  if (/오류/.test(text)) return { steps: ORDER, expect: [{ kind: "no_errors" }] };
+  if (/주문이 완료/.test(text)) return { steps: ORDER, expect: [{ kind: "text", text: "주문이 완료되었어요" }] };
+  return { steps: [ORDER[0]], expect: [{ kind: "element", role: "combobox", name: "음료 고르기" }] };
+}
+/** One verify_criterion per criterion of the run, in order, then a short answer. */
+function verifyRun(userText, after) {
+  const criteria = [...userText.matchAll(/^- ([0-9a-f-]{36}): (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
+  const round = after.filter((m) => m.role === "assistant").length;
+  const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  if (round === 0) state.verify.push({ kind: "start", at: Date.now() });
+  if (round > 0) state.verify.push({ kind: "result", round, isError: last?.is_error === true, text: textOf(last?.content).slice(0, 2000) });
+  if (round < criteria.length) {
+    const c = criteria[round];
+    state.verify.push({ kind: "call", id: c.id, text: c.text, at: Date.now() });
+    return { tool: "verify_criterion", input: { criterion_id: c.id, plan: JSON.stringify(planFor(c.text)) } };
+  }
+  return { text: `[로컬 시험 응답] 기대 조건 ${criteria.length}개를 테스트했어요. 결과는 테스트 창에 있어요.` };
+}
+function propose(after) {
+  const round = after.filter((m) => m.role === "assistant").length;
+  if (round === 0) return { tool: "verify_propose_criteria", input: { criteria: JSON.stringify(["주문 시작을 누르면 음료 고르기가 보인다"]) } };
+  const last = blocks(after.at(-1)?.content).find((b) => b.type === "tool_result");
+  state.verify.push({ kind: "proposed", isError: last?.is_error === true, text: textOf(last?.content).slice(0, 500) });
+  return { text: "[로컬 시험 응답] 조건 하나를 제안했어요. 확인해 주세요." };
+}
+
+/**
+ * cr-skills: the scripted model's answer to a skill prompt, computed only from the prompt it
+ * received. "[cr:skill-bad]" in the input plants an answer that breaks the skill's rules.
+ */
+function skillAnswer(userText) {
+  const tag = /^## Skill\n(\S+)/m.exec(userText)[1];
+  const context = JSON.parse(/^## Context\n(.*)$/m.exec(userText)?.[1] ?? "{}");
+  const bad = /\[cr:skill-bad\]/.test(userText);
+  state.skills.push({ at: Date.now(), tag, context_keys: Object.keys(context).sort(), bad });
+  if (tag.startsWith("experiment@")) {
+    const open = (context.register?.assumed ?? []).find((i) => i.assumption_status === "open");
+    return "```json\n" + JSON.stringify({
+      ...(open ? { assumption_ref: open.id } : {}),
+      assumption: open?.statement ?? "처음 쓰는 사람은 도움 없이 주문하지 못한다",
+      why_riskiest: "틀리면 키오스크가 쓸모없다",
+      hypothesis: "버튼이 크면 처음 쓰는 사람 5명 중 3명이 도움 없이 주문한다",
+      method: "task_test",
+      procedure: ["새 버전을 공개한다", "다섯 명에게 주문을 부탁한다"],
+      success_criteria: bad ? ["사람들이 좋아한다"] : ["5명 중 3명이 도움 없이 주문을 마친다"],
+    }) + "\n```";
+  }
+  return "{}";
+}
+
 function finish(run, failedAt, why) {
   run.failedAt = failedAt;
   run.done = true;
@@ -183,11 +273,24 @@ globalThis.fetch = async (input, init) => {
 const server = createServer(async (req, res) => {
   try {
     if (req.url === "/__cr/state") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(state));
-    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; return res.writeHead(204).end(); }
+    if (req.url === "/__cr/reset") { state.requests = []; state.runs = {}; state.verify = []; state.skills = []; state.skillHeaders = []; return res.writeHead(204).end(); }
     const parts = [];
     for await (const p of req) parts.push(p);
     const body = Buffer.concat(parts);
-    const r = await app.fetch(new Request(`http://127.0.0.1:${portArg}${req.url}`, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), env, makeCtx());
+    if (req.url === "/__cr/plant-dangling" && modeArg === "publish") {
+      const { project, session } = JSON.parse(body.toString("utf8"));
+      const key = `curriculum/${encodeURIComponent(cohort)}/${encodeURIComponent(project)}/sessions/published/${encodeURIComponent(session)}`;
+      const had = (await env.HPS_TRACES.get(key)) !== null;
+      await env.HPS_TRACES.delete(key);
+      return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ removed: had }));
+    }
+    // A test origin (cr-publish: `*.test.invalid`, or an ngrok host given as HPS_TEST_ORIGIN for a
+    // phone) keeps its own Host so the Service dispatches it as one; everything else is this Service.
+    const h = req.headers.host ?? "";
+    const host = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || !h ? `127.0.0.1:${portArg}` : h;
+    const r = await app.fetch(new Request(`http://${host}${req.url}`, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), env, makeCtx());
+    // cr-skills: what the coach route recorded for a skill request, and whether the App named a model.
+    if (req.headers["x-hps-skill"]) state.skillHeaders.push({ sent: { skill: req.headers["x-hps-skill"], capability: req.headers["x-hps-capability"], model_in_body: JSON.parse(body.toString("utf8") || "{}").model ?? null }, answered: { status: r.status, skill: r.headers.get("x-hps-skill"), capability: r.headers.get("x-hps-capability"), model: r.headers.get("x-hps-model") } });
     res.writeHead(r.status, Object.fromEntries(r.headers));
     if (r.body) for await (const chunk of r.body) res.write(Buffer.from(chunk));
     res.end();
