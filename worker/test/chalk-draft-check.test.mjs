@@ -107,7 +107,8 @@ await check('T-C3 normal check returns results array with at fields', async () =
     assert.ok('message' in item, 'item has message');
     assert.ok('source' in item, 'item has source');
     assert.ok('blocks_confirm' in item, 'item has blocks_confirm');
-    assert.equal(item.judge, 'machine');
+    // judge may be 'machine' or 'human' (human-only items are included from #1465)
+    assert.ok(['machine', 'human'].includes(item.judge), `unexpected judge: ${item.judge}`);
   }
 });
 

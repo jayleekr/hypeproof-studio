@@ -3915,6 +3915,35 @@
           "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-JUDGEMENTS",
+      "stage": "implementation",
+      "label": "Context judgement items and records — server (E2-5 / #1465)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-GEN-SERVER"
+      ],
+      "sources": [
+        {"path": "worker/src/routes/chalk-courses.ts"},
+        {"path": "worker/src/lib/chalk-judge-prompts.ts"},
+        {"path": "worker/src/lib/instructor-auth.ts"},
+        {"path": "worker/migrations/0037-chalk-judgements.sql"}
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-JUDGEMENTS",
+      "stage": "test",
+      "label": "Context judgement items and records — tests (E2-5 / #1465)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-JUDGEMENTS"
+      ],
+      "sources": [
+        {"path": "worker/test/chalk-judgements.test.mjs"}
+      ]
     }
   ]
 }

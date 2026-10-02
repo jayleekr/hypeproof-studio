@@ -1306,7 +1306,7 @@ CREATE TABLE IF NOT EXISTS chalk_course_input_options (
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
--- #1465 E2-5: migration 0036-chalk-judgements.sql. Ops: apply at next release (J2).
+-- #1465 E2-5: migration 0037-chalk-judgements.sql. Ops: apply at next release (J2).
 CREATE TABLE IF NOT EXISTS chalk_judgements (
   judgement_id    TEXT NOT NULL PRIMARY KEY,
   cohort_id       TEXT NOT NULL,

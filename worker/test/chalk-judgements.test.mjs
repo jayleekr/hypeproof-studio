@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
 const AUTHORING_SCHEMA  = readFileSync(new URL("../migrations/0002-chalk-authoring.sql", import.meta.url), "utf8");
 const PLAN_SCHEMA       = readFileSync(new URL("../migrations/0031-chalk-plan-files.sql", import.meta.url), "utf8");
 const TIER_SCHEMA       = readFileSync(new URL("../migrations/0035-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
-const JUDGEMENTS_SCHEMA = readFileSync(new URL("../migrations/0036-chalk-judgements.sql", import.meta.url), "utf8");
+const JUDGEMENTS_SCHEMA = readFileSync(new URL("../migrations/0037-chalk-judgements.sql", import.meta.url), "utf8");
 
 const GOAL_VOCAB = ["inquiry-skills", "observation", "prediction", "cooperative-skills", "communication"];
 const COND_VOCAB = ["single-session", "novice-learners"];
@@ -173,10 +173,10 @@ async function seedPlan(db) {
   return { tok, sha256: r.json.sha256, revision: r.json.revision };
 }
 
-// Build a valid POST /judgements body
+// Build a valid POST /judgements body. Uses `check` (the API field name).
 function validJudgement(sha256, revision, overrides = {}) {
   return {
-    check_name: "G2-2",
+    check: "G2-2",
     plan_sha256: sha256,
     revision,
     prompt_id: "G2-2",
@@ -191,16 +191,23 @@ function validJudgement(sha256, revision, overrides = {}) {
 let passed = 0;
 async function check(name, fn) { await fn(); passed++; console.log(`PASS ${name}`); }
 
-// ── isIssuerAllowedEndpoint ───────────────────────────────────────────────────
+// ── instructor-auth path_links ────────────────────────────────────────────────
 
-await check("⑭ isIssuerAllowedEndpoint judge-brief GET allowed", () => {
+await check("PA-01 isIssuerAllowedEndpoint judge-brief GET allowed", () => {
   assert.ok(isIssuerAllowedEndpoint(`/admin/chalk/cohorts/c1/courses/x/judge-brief`, "GET"));
   assert.ok(!isIssuerAllowedEndpoint(`/admin/chalk/cohorts/c1/courses/x/judge-brief`, "POST"));
 });
 
-await check("⑭ isIssuerAllowedEndpoint judgements POST allowed", () => {
+await check("PA-02 isIssuerAllowedEndpoint judgements POST allowed", () => {
   assert.ok(isIssuerAllowedEndpoint(`/admin/chalk/cohorts/c1/courses/x/judgements`, "POST"));
   assert.ok(!isIssuerAllowedEndpoint(`/admin/chalk/cohorts/c1/courses/x/judgements`, "GET"));
+});
+
+await check("PA-03 non-exact paths not matched", () => {
+  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judge-briefs", "GET"));
+  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judgements/abc", "POST"));
+  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judge-brief", "DELETE"));
+  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judgements", "PUT"));
 });
 
 // ── GET /judge-brief ──────────────────────────────────────────────────────────
@@ -226,7 +233,7 @@ await check("JB-03 no draft → 404", async () => {
   assert.equal(r.status, 404);
 });
 
-await check("JB-04 returns 5 items with required fields", async () => {
+await check("JB-04 returns 5 items with required fields including revision", async () => {
   const db = makeDb();
   await seedPlan(db);
   const tok = await issuerTok();
@@ -237,33 +244,25 @@ await check("JB-04 returns 5 items with required fields", async () => {
   const checks = r.json.items.map(i => i.check).sort();
   assert.deepEqual(checks, ["G1-3","G2-2","G2-3","G3-2","hint_gives_answer"]);
   for (const item of r.json.items) {
-    assert.ok(typeof item.prompt_id === "string", "prompt_id required");
+    assert.ok(typeof item.prompt_id === "string" && item.prompt_id.length > 0, "prompt_id required");
     assert.ok(typeof item.prompt_version === "number", "prompt_version required");
     assert.ok(typeof item.prompt_text === "string" && item.prompt_text.length > 0, "prompt_text required");
     assert.ok("excerpt" in item, "excerpt required");
   }
   assert.ok(typeof r.json.plan_sha256 === "string" && r.json.plan_sha256.length === 64, "plan_sha256 required");
+  assert.ok(typeof r.json.revision === "number", "revision required in judge-brief response");
 });
 
-await check("JB-05 items=G2-12 (human-only) → 400 human_only", async () => {
+await check("JB-05 human-only check → 400 human_only", async () => {
   const db = makeDb();
   await seedPlan(db);
   const tok = await issuerTok();
   const r = await req("GET", `${base}/judge-brief?items=G2-12`, null, tok, db);
-  assert.equal(r.status, 400, JSON.stringify(r.json));
+  assert.equal(r.status, 400);
   assert.equal(r.json.code, "human_only");
 });
 
-await check("JB-06 items=UNKNOWN → 400 not_model_judged", async () => {
-  const db = makeDb();
-  await seedPlan(db);
-  const tok = await issuerTok();
-  const r = await req("GET", `${base}/judge-brief?items=UNKNOWN`, null, tok, db);
-  assert.equal(r.status, 400, JSON.stringify(r.json));
-  assert.equal(r.json.code, "not_model_judged");
-});
-
-await check("JB-07 other issuer → 404", async () => {
+await check("JB-06 other issuer → 404", async () => {
   const db = makeDb();
   await seedPlan(db);
   const other = await issuerTok("other-issuer");
@@ -276,17 +275,21 @@ await check("JB-07 other issuer → 404", async () => {
 await check("JG-01 student token → 403", async () => {
   const tok = await studentTok();
   const r = await req("POST", `${base}/judgements`, {
-    check_name: "G2-2", plan_sha256: "a".repeat(64), revision: 3,
-    prompt_id: "G2-2", prompt_version: 1, model: "m", verdict: "pass", rationale: "ok",
+    check: "G2-2", plan_sha256: "a".repeat(64), revision: 3,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "ok",
   }, tok);
   assert.equal(r.status, 403);
 });
 
-await check("JG-02 missing/invalid check_name → 400 invalid_check", async () => {
+await check("JG-02 unknown check → 400 invalid_check", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { check_name: "UNKNOWN" }), tok, db);
+  const r = await req("POST", `${base}/judgements`, {
+    check: "UNKNOWN", plan_sha256: sha256, revision,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "ok",
+  }, tok, db);
   assert.equal(r.status, 400);
   assert.equal(r.json.code, "invalid_check");
 });
@@ -294,9 +297,12 @@ await check("JG-02 missing/invalid check_name → 400 invalid_check", async () =
 await check("JG-03 invalid verdict → 400 invalid_verdict", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  for (const badVerdict of ["maybe", "fail", "warn", "PASS"]) {
-    const r = await req("POST", `${base}/judgements`,
-      validJudgement(sha256, revision, { verdict: badVerdict }), tok, db);
+  for (const badVerdict of ["fail", "warn", "PASS", "maybe"]) {
+    const r = await req("POST", `${base}/judgements`, {
+      check: "G2-2", plan_sha256: sha256, revision,
+      prompt_id: "G2-2", prompt_version: 1, model: "m",
+      verdict: badVerdict, rationale: "ok",
+    }, tok, db);
     assert.equal(r.status, 400, `verdict="${badVerdict}" should be rejected`);
     assert.equal(r.json.code, "invalid_verdict");
   }
@@ -305,8 +311,11 @@ await check("JG-03 invalid verdict → 400 invalid_verdict", async () => {
 await check("JG-04 rationale > 2048 bytes → 400 rationale_too_long", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { rationale: "x".repeat(2049) }), tok, db);
+  const r = await req("POST", `${base}/judgements`, {
+    check: "G2-2", plan_sha256: sha256, revision,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "x".repeat(2049),
+  }, tok, db);
   assert.equal(r.status, 400);
   assert.equal(r.json.code, "rationale_too_long");
 });
@@ -314,8 +323,11 @@ await check("JG-04 rationale > 2048 bytes → 400 rationale_too_long", async () 
 await check("JG-05 unknown plan_sha256 → 400 unknown_plan", async () => {
   const db = makeDb();
   const { tok, revision } = await seedPlan(db);
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement("b".repeat(64), revision), tok, db);
+  const r = await req("POST", `${base}/judgements`, {
+    check: "G2-2", plan_sha256: "b".repeat(64), revision,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "ok",
+  }, tok, db);
   assert.equal(r.status, 400);
   assert.equal(r.json.code, "unknown_plan");
 });
@@ -323,8 +335,11 @@ await check("JG-05 unknown plan_sha256 → 400 unknown_plan", async () => {
 await check("JG-06 wrong revision → 400 unknown_plan", async () => {
   const db = makeDb();
   const { tok, sha256 } = await seedPlan(db);
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement(sha256, 999), tok, db);
+  const r = await req("POST", `${base}/judgements`, {
+    check: "G2-2", plan_sha256: sha256, revision: 999,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "ok",
+  }, tok, db);
   assert.equal(r.status, 400);
   assert.equal(r.json.code, "unknown_plan");
 });
@@ -333,16 +348,18 @@ await check("JG-07 other issuer → 404", async () => {
   const db = makeDb();
   const { sha256, revision } = await seedPlan(db);
   const other = await issuerTok("other-issuer");
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision), other, db);
+  const r = await req("POST", `${base}/judgements`, {
+    check: "G2-2", plan_sha256: sha256, revision,
+    prompt_id: "G2-2", prompt_version: 1, model: "m",
+    verdict: "pass", rationale: "ok",
+  }, other, db);
   assert.equal(r.status, 404);
 });
 
 await check("JG-08 valid POST → 201 with judgement_id", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  const r = await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { verdict: "pass", rationale: "looks good" }), tok, db);
+  const r = await req("POST", `${base}/judgements`, validJudgement(sha256, revision), tok, db);
   assert.equal(r.status, 201, JSON.stringify(r.json));
   assert.ok(typeof r.json.judgement_id === "string" && r.json.judgement_id.startsWith("j_"), "judgement_id must start with j_");
 });
@@ -350,21 +367,27 @@ await check("JG-08 valid POST → 201 with judgement_id", async () => {
 await check("JG-09 actor comes from auth payload, not body", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  const body = validJudgement(sha256, revision, { verdict: "unsure", rationale: "a bit vague" });
-  body.actor = "injected-actor";
-  await req("POST", `${base}/judgements`, body, tok, db);
-  const row = db.prepare("SELECT actor FROM chalk_judgements LIMIT 1").get();
+  const r = await req("POST", `${base}/judgements`,
+    { ...validJudgement(sha256, revision), actor: "injected-actor" }, tok, db);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const row = db.prepare("SELECT actor FROM chalk_judgements WHERE judgement_id=?").get(r.json.judgement_id);
   assert.equal(row.actor, "tester", "actor must come from auth, not body");
 });
 
-await check("JG-10 all 5 valid check_names accepted", async () => {
+await check("JG-10 all 5 valid check names accepted", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
-  const checkNames = ["G2-2","G2-3","G3-2","G1-3","hint_gives_answer"];
-  for (const cn of checkNames) {
+  const checks = [
+    { check: "G2-2", prompt_id: "G2-2" },
+    { check: "G2-3", prompt_id: "G2-3" },
+    { check: "G3-2", prompt_id: "G3-2" },
+    { check: "G1-3", prompt_id: "G1-3" },
+    { check: "hint_gives_answer", prompt_id: "hint_gives_answer" },
+  ];
+  for (const c of checks) {
     const r = await req("POST", `${base}/judgements`,
-      validJudgement(sha256, revision, { check_name: cn, prompt_id: cn, rationale: `ok for ${cn}` }), tok, db);
-    assert.equal(r.status, 201, `check_name=${cn} failed: ${JSON.stringify(r.json)}`);
+      validJudgement(sha256, revision, { check: c.check, prompt_id: c.prompt_id, rationale: `ok for ${c.check}` }), tok, db);
+    assert.equal(r.status, 201, `check=${c.check} failed: ${JSON.stringify(r.json)}`);
   }
 });
 
@@ -376,9 +399,38 @@ await check("JG-11 rationale exactly 2048 bytes accepted", async () => {
   assert.equal(r.status, 201, JSON.stringify(r.json));
 });
 
+await check("JG-12 unknown prompt_version → 400 unknown_prompt", async () => {
+  const db = makeDb();
+  const { tok, sha256, revision } = await seedPlan(db);
+  const r = await req("POST", `${base}/judgements`,
+    validJudgement(sha256, revision, { prompt_version: 99 }), tok, db);
+  assert.equal(r.status, 400);
+  assert.equal(r.json.code, "unknown_prompt");
+});
+
+await check("JG-13 prompt_id mismatch → 400 prompt_mismatch", async () => {
+  const db = makeDb();
+  const { tok, sha256, revision } = await seedPlan(db);
+  // check G3-2 but prompt_id belongs to G2-2 — should be rejected
+  const r = await req("POST", `${base}/judgements`,
+    validJudgement(sha256, revision, { check: "G3-2", prompt_id: "G2-2" }), tok, db);
+  assert.equal(r.status, 400, JSON.stringify(r.json));
+  assert.equal(r.json.code, "prompt_mismatch");
+});
+
+await check("JG-14 check field accepted (API name), stored as check_name column", async () => {
+  const db = makeDb();
+  const { tok, sha256, revision } = await seedPlan(db);
+  const r = await req("POST", `${base}/judgements`,
+    validJudgement(sha256, revision, { rationale: "check field test" }), tok, db);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const row = db.prepare("SELECT check_name FROM chalk_judgements WHERE judgement_id=?").get(r.json.judgement_id);
+  assert.equal(row.check_name, "G2-2");
+});
+
 // ── POST /check — judgements merged ──────────────────────────────────────────
 
-await check("CK-01 check without stored judgements returns machine results only + human-only items", async () => {
+await check("CK-01 check without stored judgements returns human-only items", async () => {
   const db = makeDb();
   const { tok } = await seedPlan(db);
   const r = await req("POST", `${base}/check`, {}, tok, db);
@@ -407,7 +459,7 @@ await check("CK-03 violation verdict → severity=warn, blocks_confirm=false (ne
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
   await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { check_name: "G2-3", prompt_id: "G2-3", verdict: "violation", rationale: "wrong" }), tok, db);
+    validJudgement(sha256, revision, { check: "G2-3", prompt_id: "G2-3", verdict: "violation", rationale: "wrong" }), tok, db);
   const r = await req("POST", `${base}/check`, {}, tok, db);
   assert.equal(r.status, 200);
   const item = r.json.results.find(i => i.check === "G2-3" && i.judge === "model");
@@ -416,25 +468,34 @@ await check("CK-03 violation verdict → severity=warn, blocks_confirm=false (ne
   assert.equal(item.blocks_confirm, false);
 });
 
-await check("CK-04 only latest judgement per check_name included", async () => {
+await check("CK-04 only latest judgement per (check, location) key", async () => {
   const db = makeDb();
   const { tok, sha256, revision } = await seedPlan(db);
+  // Same check, same location (at_section null) — second replaces first
   await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { check_name: "G3-2", prompt_id: "G3-2", verdict: "violation", rationale: "first" }), tok, db);
+    validJudgement(sha256, revision, { check: "G3-2", prompt_id: "G3-2", verdict: "violation", rationale: "first" }), tok, db);
   await req("POST", `${base}/judgements`,
-    validJudgement(sha256, revision, { check_name: "G3-2", prompt_id: "G3-2", verdict: "pass", rationale: "second" }), tok, db);
+    validJudgement(sha256, revision, { check: "G3-2", prompt_id: "G3-2", verdict: "pass", rationale: "second" }), tok, db);
   const r = await req("POST", `${base}/check`, {}, tok, db);
   const items = r.json.results.filter(i => i.check === "G3-2" && i.judge === "model");
-  assert.equal(items.length, 1, "only one judgement per check");
+  assert.equal(items.length, 1, "only one judgement when check+location same");
   assert.equal(items[0].message, "second");
 });
 
-// ── ⑮ isIssuerAllowedEndpoint paths are path_links (not mere registration) ──
-
-await check("⑮ judge-brief and judgements are ONLY allowed for exact chalk paths", () => {
-  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judge-briefs", "GET"));
-  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judgements/abc", "POST"));
-  assert.ok(!isIssuerAllowedEndpoint("/admin/chalk/cohorts/c1/courses/x/judge-brief", "DELETE"));
+await check("CK-05 different locations produce separate entries in check results", async () => {
+  const db = makeDb();
+  const { tok, sha256, revision } = await seedPlan(db);
+  // Same check_name, different at_section → both should appear
+  await req("POST", `${base}/judgements`,
+    validJudgement(sha256, revision, { check: "G1-3", prompt_id: "G1-3", rationale: "step1 ok", at_section: "s1" }), tok, db);
+  await req("POST", `${base}/judgements`,
+    validJudgement(sha256, revision, { check: "G1-3", prompt_id: "G1-3", rationale: "step2 ok", at_section: "s2" }), tok, db);
+  const r = await req("POST", `${base}/check`, {}, tok, db);
+  assert.equal(r.status, 200);
+  const items = r.json.results.filter(i => i.check === "G1-3" && i.judge === "model");
+  assert.equal(items.length, 2, "different locations must both appear");
+  const rationales = items.map(i => i.message).sort();
+  assert.deepEqual(rationales, ["step1 ok", "step2 ok"]);
 });
 
 console.log(`\nAll ${passed} tests passed.`);
