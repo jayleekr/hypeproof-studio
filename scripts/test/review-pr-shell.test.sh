@@ -339,6 +339,61 @@ else
   fail "review-pr.sh: 거짓 Ready guard missing (need 15 s sleep + exit 1 path)"
 fi
 
+# 37. --student-session arg declared in script
+if grep -q '\-\-student-session' "$SCRIPT"; then
+  ok "--student-session arg declared in script"
+else
+  fail "--student-session arg not found in script"
+fi
+
+# 38. --can-start-session flag on issuer token issuance
+if grep -q '\-\-can-start-session' "$SCRIPT"; then
+  ok "--can-start-session present on issue-issuer-token invocation"
+else
+  fail "--can-start-session not found in script"
+fi
+
+# 39. cleanup includes student-token.txt removal
+if grep -q 'student-token\.txt' "$SCRIPT"; then
+  ok "student-token.txt referenced in cleanup"
+else
+  fail "student-token.txt not found in script (cleanup target missing)"
+fi
+
+# 40. student-token value never echoed to stdout/stderr
+# printf to a file (> file) is allowed; echo/printf to stdout is not.
+# We accept printf that redirects to a file (contains '>') but reject bare echo/printf.
+_STUDENT_LOG_LINES="$(grep -nE 'echo.*_STUDENT_TOKEN|printf.*_STUDENT_TOKEN' "$SCRIPT" | grep -v '>' || true)"
+if [[ -n "$_STUDENT_LOG_LINES" ]]; then
+  fail "student token value echoed to stdout/stderr (security violation): $_STUDENT_LOG_LINES"
+else
+  ok "student token value not echoed to stdout/stderr (only written to file)"
+fi
+
+# 41. session/open curl uses 127.0.0.1 (not localhost or 0.0.0.0)
+CURL_SESSION_LINE="$(grep 'session/open' "$SCRIPT" || true)"
+if echo "$CURL_SESSION_LINE" | grep -q '127\.0\.0\.1'; then
+  ok "session/open curl uses 127.0.0.1 (not localhost)"
+else
+  fail "session/open curl does not use 127.0.0.1"
+fi
+
+# 42. session/open response written to tmp file, not logged directly
+# Verify the response body goes to a temp file variable, not stdout.
+if grep -q '_STUDENT_RESP_TMP' "$SCRIPT"; then
+  ok "session/open response captured in tmp file (not logged directly)"
+else
+  fail "_STUDENT_RESP_TMP not found — response body may be logged"
+fi
+
+# 43. --student-session absent → student-token.txt not created (static check)
+# When STUDENT_SESSION=0, the open block is gated on [[ "$STUDENT_SESSION" -eq 1 ]].
+if grep -q 'STUDENT_SESSION.*-eq.*1' "$SCRIPT"; then
+  ok "student session block gated on STUDENT_SESSION=1 (absent flag → no file)"
+else
+  fail "STUDENT_SESSION guard not found (student-token.txt may be created unconditionally)"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
