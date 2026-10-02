@@ -409,21 +409,24 @@ await check('T-G17 student mode (no browserTools): live_preview_start + browser_
   assert.ok(names.includes('Read'), 'Read must still be present');
 });
 
-// ─── T-G18: browser_open 라우팅 — browserTools.call 위임 ─────────────────
-await check('T-G18 mergeBrowserTools routes browser_open to browserTools.call', async () => {
+// ─── T-G18: browser_open 라우팅 — url이 실제로 전달되는지 단언 ─────────────
+await check('T-G18 mergeBrowserTools routes browser_open and passes the url input through', async () => {
   let calledWith = null;
   const BROWSER_DEFS = [
     { name: 'live_preview_start', description: '', inputSchema: {} },
     { name: 'browser_open', description: '', inputSchema: {} },
   ];
+  const TARGET_URL = 'http://127.0.0.1:3000/chalk/lesson-01/lesson.html';
   const browserTools = {
     definitions: BROWSER_DEFS,
     call: async (name, input) => { calledWith = { name, input }; return 'opened'; },
   };
   const mockWork = { definitions: [], call: async () => { throw new Error('base call must not be reached'); } };
   const merged = mergeBrowserTools(mockWork, browserTools);
-  const result = await merged.call('browser_open', { url: 'http://127.0.0.1:3000/' });
+  const result = await merged.call('browser_open', { url: TARGET_URL });
   assert.equal(calledWith?.name, 'browser_open', 'browser_open이 browserTools.call로 위임되지 않았다');
+  // The url must be passed through to browserTools.call, not ignored.
+  assert.deepEqual(calledWith?.input, { url: TARGET_URL }, `url이 browserTools.call에 전달되지 않았다: ${JSON.stringify(calledWith?.input)}`);
   assert.equal(result, 'opened', '결과가 browserTools.call 반환값과 다르다');
 });
 

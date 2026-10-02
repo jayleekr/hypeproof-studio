@@ -76,7 +76,13 @@ import {
 import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
 import { LocalRecord } from "../../../worker/src/lib/measurement-core/local-record";
 import { isMinorTier } from "./sdkCoachHelpers";
-import { toMcpToolResult } from "./browserMcp";
+import {
+  toMcpToolResult,
+  BROWSER_OPEN_TOOL_DEF,
+  LIVE_PREVIEW_START_TOOL_DEF,
+  runBrowserOpen,
+  runLivePreviewStart,
+} from "./browserMcp";
 
 // #525 — a plain editor command registered in the core. The browser-only API cannot
 // bring a tab to the front (BrowserTab has no show()/reveal()), so this path is used
@@ -90,20 +96,9 @@ const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
 
-// Instructor-mode browser tool definitions (local runtime path). Mirrored from
-// browserMcp.ts names so the server recognises them when the path switches to SDK.
-const INSTRUCTOR_LOCAL_BROWSER_DEFS: { name: string; description: string; inputSchema: unknown }[] = [
-  {
-    name: "live_preview_start",
-    description: "학생 워크스페이스를 로컬 라이브 서버(127.0.0.1)로 서빙하고 통합 브라우저에서 엽니다. 파일이 바뀌면 자동 새로고침됩니다.",
-    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
-  },
-  {
-    name: "browser_open",
-    description: "통합 브라우저에서 URL을 엽니다. localhost/127.0.0.1 주소만 허용됩니다.",
-    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
-  },
-];
+// Instructor-mode browser tool definitions — use the canonical defs from browserMcp.ts
+// so the description and inputSchema stay in sync with the student SDK path.
+const INSTRUCTOR_LOCAL_BROWSER_DEFS = [LIVE_PREVIEW_START_TOOL_DEF, BROWSER_OPEN_TOOL_DEF] as const;
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
 import {
   matchWorldRef,
@@ -3570,27 +3565,42 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             : undefined;
           // Browser tools for the local runtime: live_preview_start + browser_open.
           // Reuses INSTRUCTOR_TOOL_PROFILE.sdk_tools.browser to stay in sync with the policy.
+          // Delegates to runBrowserOpen / runLivePreviewStart (same logic as the SDK MCP path)
+          // via a minimal BrowserMcpHost so the instructor gets 404 checks, #507 port
+          // correction and #526 displacement notices without duplicating that logic here.
+          // Instructor allows loopback-only; no CR gating and no approval modal needed.
           const browserTools: BrowserToolsForLocal | undefined =
             INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser
-              ? {
-                  definitions: INSTRUCTOR_LOCAL_BROWSER_DEFS,
-                  call: async (name: string, input: unknown) => {
-                    if (name === "live_preview_start") {
-                      const url = await this.startLivePreview();
-                      if (!url) return "라이브 프리뷰를 시작하지 못했어요 (작업 폴더가 없나요?).";
-                      return `라이브 프리뷰를 시작하고 브라우저에 열었어요: ${url}`;
-                    }
-                    if (name === "browser_open") {
-                      const url = typeof (input as Record<string, unknown>)?.url === "string"
-                        ? (input as Record<string, unknown>).url as string : "";
-                      if (!isLoopbackUrl(url)) return `이 주소는 열 수 없어요: ${url}`;
-                      const opened = await this.startLivePreview();
-                      if (!opened) return "라이브 프리뷰를 시작하지 못했어요.";
-                      return `브라우저에서 ${url} 을 열었어요.`;
-                    }
-                    throw new Error(`알 수 없는 브라우저 도구: ${name}`);
-                  },
-                }
+              ? (() => {
+                  const instructorHost: BrowserMcpHost = {
+                    openBrowser: async (url: string) => {
+                      await vscode.window.openBrowserTab(url, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
+                    },
+                    screenshot: async () => null,
+                    startLivePreview: () => this.startLivePreview(),
+                    fetchHead: async (url: string) => {
+                      try {
+                        const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(3000) });
+                        return { ok: r.ok, status: r.status };
+                      } catch {
+                        return { ok: false, status: 0 };
+                      }
+                    },
+                  };
+                  return {
+                    definitions: [...INSTRUCTOR_LOCAL_BROWSER_DEFS],
+                    call: async (name: string, input: unknown) => {
+                      const r =
+                        name === "live_preview_start"
+                          ? await runLivePreviewStart(instructorHost)
+                          : name === "browser_open"
+                            ? await runBrowserOpen(instructorHost, typeof (input as Record<string, unknown>)?.url === "string" ? (input as Record<string, unknown>).url as string : "")
+                            : null;
+                      if (!r) throw new Error(`알 수 없는 브라우저 도구: ${name}`);
+                      return r.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+                    },
+                  };
+                })()
               : undefined;
           const result=await runInstructorTurn({
             local,cwd,
