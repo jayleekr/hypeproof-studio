@@ -587,6 +587,10 @@ export const CHALK_SAVE_PLAN_DEF: ChalkToolDefinition = {
       cohort: { ...str, description: "코호트 ID" },
       course: { ...str, description: "강의 ID" },
       file: { ...str, description: "파일 키 (lesson 또는 ops). 기본값: lesson" },
+      feedback_id: {
+        ...str,
+        description: "chalk_record_feedback이 돌려준 feedback_id. 해당 피드백을 반영한 저장임을 서버에 알립니다.",
+      },
     },
     ["cohort", "course"],
   ),
@@ -596,7 +600,7 @@ export async function execSavePlan(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  const { cohort, course, file, feedback_id } = input as { cohort: string; course: string; file?: string; feedback_id?: string };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
   if (!ctx.cwd) throw new Error("작업 폴더(cwd)가 설정되지 않았습니다.");
 
@@ -617,11 +621,13 @@ export async function execSavePlan(
       : await resolveKnowledgeVersion(ctx, html);
   const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
   const request_id = randomUUID().replace(/-/g, "");
+  const putBody: Record<string, unknown> = { html, file: file ?? "lesson", knowledge_version, expected_revision, request_id };
+  if (feedback_id !== undefined) putBody.feedback_id = feedback_id;
   try {
     const result = await issuerFetch(
       ctx,
       `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
-      { method: "PUT", body: { html, file: file ?? "lesson", knowledge_version, expected_revision, request_id } },
+      { method: "PUT", body: putBody },
     ) as Record<string, unknown>;
     return result;
   } catch (e) {

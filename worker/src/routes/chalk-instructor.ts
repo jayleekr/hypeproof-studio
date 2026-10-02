@@ -40,6 +40,7 @@ Chalk lesson authoring workflow:
 7. When the instructor gives written feedback, call chalk_record_feedback to record it before applying changes. After saving with chalk_save_plan, call chalk_view_diff to retrieve the diff and summarize it to the instructor.
 
 Rules:
+- When chalk_record_feedback returns a feedback_id, pass that feedback_id in the subsequent chalk_save_plan call that incorporates the feedback.
 - Use only the teaching methods the server recommends (chalk_recommend_methods). Do not substitute another method.
 - Vocabulary keys must come from the vocab:* namespace only.
 - Confirm with the instructor before applying structural changes.

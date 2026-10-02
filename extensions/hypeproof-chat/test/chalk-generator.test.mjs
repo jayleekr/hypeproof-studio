@@ -579,4 +579,53 @@ await check('T-G24 chalk_view_diff: GET /diff with from+to params', async () => 
   server.close();
 });
 
+// ─── T-G25: feedback_id 있으면 PUT body에 포함, 없으면 키 없음 (#1485) ────────
+await check('T-G25 execSavePlan includes feedback_id in PUT body when given; omits key when absent', async () => {
+  const tmpDir = join(tmpdir(), `chalk-test-feedback-${Date.now()}`);
+  const course = 'lesson-01';
+  const filePath = workingCopyPath(tmpDir, course, 'lesson');
+  await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
+  await writeFile(filePath, '<html>draft</html>', 'utf-8');
+
+  // Case A: feedback_id provided → must appear in PUT body
+  let bodyA = '';
+  await withMockServer((req, res) => {
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: 1 }));
+      return;
+    }
+    let b = '';
+    req.on('data', c => b += c);
+    req.on('end', () => { bodyA = b; });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ revision: 2, sha256: 'abc', findings: [] }));
+  }, async (port) => {
+    await execSavePlan(fakeCtx(port, { cwd: tmpDir }), { cohort: 'c1', course, knowledge_version: 3, feedback_id: 'fb-abc123' });
+    const parsedA = JSON.parse(bodyA);
+    assert.equal(parsedA.feedback_id, 'fb-abc123', 'feedback_id must be in PUT body when given');
+  });
+
+  // Case B: feedback_id absent → key must not appear in PUT body
+  const filePath2 = workingCopyPath(tmpDir, course, 'lesson');
+  await writeFile(filePath2, '<html>draft</html>', 'utf-8');
+  let bodyB = '';
+  await withMockServer((req, res) => {
+    if (req.method === 'GET' && req.url?.includes('/authoring/')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ revision: 1 }));
+      return;
+    }
+    let b = '';
+    req.on('data', c => b += c);
+    req.on('end', () => { bodyB = b; });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ revision: 2, sha256: 'abc', findings: [] }));
+  }, async (port) => {
+    await execSavePlan(fakeCtx(port, { cwd: tmpDir }), { cohort: 'c1', course, knowledge_version: 3 });
+    const parsedB = JSON.parse(bodyB);
+    assert.ok(!('feedback_id' in parsedB), `feedback_id must NOT be in PUT body when absent, got: ${JSON.stringify(parsedB)}`);
+  });
+});
+
 console.log(`\n${passed} tests passed`);
