@@ -72,3 +72,21 @@ export function resolveSkills(names: readonly string[] | undefined): string {
 export function isKnownSkill(name: string): name is SkillName {
   return name in SKILLS;
 }
+
+// ── Curriculum skills (cr-skills #1396; CR-43–CR-47; recon R7) ──────────────
+//
+// The same registry, extended: curriculum skills are bundled pairs `<id>.md` +
+// `<id>.contract.json` under `./curriculum/`, loaded by one loader that REFUSES a skill whose
+// contract misses a field (the coaching skills above keep warning on an unknown name). They are
+// not appended to the coach's system prefix: a student runs one on demand through
+// `/v1/curriculum/projects/:id/skills/:skill/*`, behind the CR switch.
+export {
+  CURRICULUM,
+  CURRICULUM_SKILLS,
+  CURRICULUM_SKILLS_REFUSED,
+  checkSkillOutput,
+  curriculumWeek,
+  loadCurriculumSkills,
+  skillPrompt,
+  type CurriculumSkill,
+} from "./curriculum/registry.ts";

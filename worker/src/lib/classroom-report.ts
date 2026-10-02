@@ -106,11 +106,11 @@ export function validateDraft(value: unknown, job: { capability_model: string; r
   }
   if (new Set(d.findings.map((f) => f.capability)).size !== d.findings.length) return fail('finding_invalid');
   if (typeof d.next_experiment !== 'string' || d.next_experiment.length > 300) return fail('draft_invalid');
-  if (model.status === 'legacy') { if (!d.legacy || typeof d.legacy.fingerprint !== 'string' || !/^[a-f0-9]{16,64}$/.test(d.legacy.fingerprint)) return fail('legacy_fingerprint_missing'); if (d.legacy.marker_review_complete !== true) return { ok: true, draft: d, state: 'review_required', reason: 'marker_review_missing' }; }
-  else if (d.legacy) return fail('legacy_conversion', 'quarantined');
   // Scope is derived from the verified input, never from evaluator prose.
   if (typeof inputText !== 'string') d.input_sessions = { sessions: inputText.sessions.map((s) => ({ session_id: s.session_id, part: s.part, events: indexInput(s.text).length })), omitted: inputText.omitted, reasons: inputText.reasons };
   else delete d.input_sessions;
+  if (model.status === 'legacy') { if (!d.legacy || typeof d.legacy.fingerprint !== 'string' || !/^[a-f0-9]{16,64}$/.test(d.legacy.fingerprint)) return fail('legacy_fingerprint_missing'); if (d.legacy.marker_review_complete !== true) return { ok: true, draft: d, state: 'review_required', reason: 'marker_review_missing' }; }
+  else if (d.legacy) return fail('legacy_conversion', 'quarantined');
   // Bytes verified but behaviour coverage unknown/gappy: the draft is kept and says so; it is not a complete observation.
   return { ok: true, draft: d, state: job.input_coverage === 'complete' ? 'review_required' : 'partial', reason: job.input_coverage === 'complete' ? '' : 'input_' + job.input_coverage };
 }
@@ -133,7 +133,7 @@ export function composeReport(draft: Draft, ctx: { class_runs_with_evidence: num
   ];
   if (ctx.class_runs_with_evidence >= 2) sections.splice(2, 0, { title: '최근 반복된 패턴', items: [], note: `근거가 있는 수업 ${ctx.class_runs_with_evidence}회를 함께 본 경우에만 적습니다. 검수자가 회차별 근거를 확인한 뒤 작성합니다.` });
   if (ctx.coverage !== 'complete') sections.unshift({ title: '이 보고서가 본 범위', items: [], note: ctx.coverage === 'gaps' ? '수업 기록 일부가 빠져 있습니다. 빠진 구간의 행동은 이 보고서에 없습니다.' : ctx.coverage === 'damaged' ? '수업 기록 일부가 손상돼 읽을 수 없었습니다. 읽을 수 있었던 장면만 서술합니다.' : ctx.coverage === 'range_unknown' ? '기록의 시작과 끝을 확인할 수 없었습니다. 기록에 남은 장면만 서술합니다.' : '이 기록에는 순번이 없어 빠진 구간이 있는지 확인할 수 없습니다. 기록에 남은 장면만 서술합니다.' });
-  if (draft.input_sessions) { const scope = draft.input_sessions; sections.push({ title: '이 보고서에 포함된 기록', items: scope.sessions.map((s) => ({ text: `세션 ${s.part} · ${s.session_id} · 기록 ${s.events}개` })), note: `읽지 못한 세션 ${scope.omitted.unreadable}개 · 상한으로 제외된 세션 ${scope.omitted.over_limit}개. ${scope.reasons.length ? '일부 구간의 완전성을 확인하지 못했습니다. 빠진 행동은 추측하지 않습니다.' : '같은 수업의 재시작 전후 기록이며 여러 회차의 성장 기록이 아닙니다.'}` }); }
+  if (draft.input_sessions) { const scope = draft.input_sessions; sections.push({ title: '이 보고서에 포함된 기록', items: scope.sessions.map((s) => ({ text: `세션 ${s.part} · ${s.session_id} · 기록 ${s.events}개` })), note: `읽지 못한 세션 ${scope.omitted.unreadable}개 · 상한으로 제외된 세션 ${scope.omitted.over_limit}개. ${scope.reasons.length ? '일부 구간의 완전성을 확인하지 못했습니다. 빠진 행동은 추측하지 않습니다.' : scope.sessions.length > 1 ? '같은 수업의 여러 세션 기록이며 여러 회차의 성장 기록이 아닙니다.' : '이번 수업의 한 세션 기록이며 여러 회차의 성장 기록이 아닙니다.'}` }); }
   // Versions and counts are method detail: folded, never the headline, and never a score.
   return { sections, method: { capability_model: draft.versions.capability_model, rubric: draft.versions.rubric, evaluator: draft.versions.evaluator, renderer_revision: draft.versions.renderer_revision, observed_findings: observed.length, not_yet_seen: rest.length, scope: ctx.class_runs_with_evidence >= 2 ? 'cumulative' : 'single_class' } };
 }

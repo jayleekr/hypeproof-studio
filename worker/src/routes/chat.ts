@@ -9,6 +9,7 @@ import { captureUsageCost } from '../lib/usage-costs';
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
 import { persistRequestSettings, readRequestSettings, validTurnId } from '../lib/request-settings';
 import { servedModelSelection } from '../lib/lesson-model-policy';
+import { skillRequestOf } from "../skills/curriculum/request";
 import {nativeObservationScope} from '../lib/native-observation-scope';
 // POST /v1/chat/completions
 //
@@ -708,6 +709,18 @@ chat.post("/chat/completions", async (c) => {
     recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json({ error: { message: "bad json body", type: "request" } }, 400);
   }
+  // cr-skills (#1396, CR-45) — a curriculum skill's request names its skill and a capability, never a
+  // model: checked and recorded here, resolved by the existing lesson model policy below.
+  const skillCall = skillRequestOf({ skill: c.req.header("x-hps-skill"), capability: c.req.header("x-hps-capability") }, body, curriculumRuntimeAllowed(profile));
+  if (skillCall && !skillCall.ok) {
+    recordFailure(400, ERROR_KIND.BAD_REQUEST);
+    return c.json({ error: { type: "skill_request", code: skillCall.code, message: "skill request refused", request_id: c.get("requestId") } }, 400);
+  }
+  if (skillCall) {
+    c.header("x-hps-skill", skillCall.tag);
+    c.header("x-hps-capability", skillCall.capability);
+    console.log(JSON.stringify({ event: "skill_request", request_id: usageRequestId, skill: skillCall.tag, capability: skillCall.capability, cohort_id: payload.c, profile_id: profile.id }));
+  }
   const coach: CoachContext = {
     // #747 — a lesson-fixed identity is instructor-set (already in the gated
     // system_prompt); the client's headers are then ignored so a participant
@@ -846,8 +859,9 @@ chat.post("/chat/completions", async (c) => {
       gBody.stream = stream;
       if (stream) gBody.stream_options = { include_usage: true };
       await admit(gBody,'openai-chat');
-      // Retry transient 503s, then fall back to gemini-2.5-flash.
-      const g = multi ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
+      // Retry transient 503s, then fall back to gemini-2.5-flash. A curriculum skill request (cr-skills)
+      // is one upstream call with no substitution (MU-02, decision 2), like a multi-agent request.
+      const g = multi || skillCall?.ok ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
         : await callGeminiResilient(gBody, apiKey);
       upstream = g.response;
       modelLabel = g.model;        // analytics + response reflect the real model
@@ -878,7 +892,7 @@ chat.post("/chat/completions", async (c) => {
       gBody.stream = stream;
       modelLabel = gBody.model;
       await admit(gBody,'anthropic-messages');
-      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
+      upstream = await (multi||executionAccess||skillCall?.ok ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
@@ -901,7 +915,7 @@ chat.post("/chat/completions", async (c) => {
       const effective = applyRequestEffort(aBody as unknown as Record<string,unknown>, profile, modelLabel, c.req.header('x-hps-effort'));
       effortReceipt = effective.receipt;
       await admit(effective.body,'anthropic-messages');
-      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
+      upstream = await (multi||executionAccess||skillCall?.ok ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
         signal: requestSignal,
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,

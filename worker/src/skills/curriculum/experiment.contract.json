@@ -1,0 +1,101 @@
+{
+  "skill": "experiment",
+  "version": "1.0.0",
+  "title": "실험 설계",
+  "intent": "Pick the riskiest assumption the team still holds open and turn it into the smallest test this week: a hypothesis, a procedure and countable success criteria.",
+  "required_context": [
+    "curriculum_week",
+    "problem",
+    "hypotheses",
+    "experiments",
+    "register"
+  ],
+  "allowed_tools": [
+    "memory_read",
+    "evidence_read"
+  ],
+  "preferred_capability": "reasoning.high",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "focus": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "week": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "assumption_ref": {
+        "type": "string",
+        "maxLength": 300
+      },
+      "assumption": {
+        "type": "string",
+        "maxLength": 500,
+        "minLength": 1
+      },
+      "why_riskiest": {
+        "type": "string",
+        "maxLength": 600,
+        "minLength": 1
+      },
+      "hypothesis": {
+        "type": "string",
+        "maxLength": 500,
+        "minLength": 1
+      },
+      "method": {
+        "type": "string",
+        "maxLength": 40,
+        "enum": [
+          "task_test",
+          "interview",
+          "observation"
+        ]
+      },
+      "procedure": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 300,
+          "minLength": 1
+        },
+        "maxItems": 8,
+        "minItems": 1
+      },
+      "success_criteria": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 300,
+          "minLength": 1
+        },
+        "maxItems": 5,
+        "minItems": 1
+      }
+    },
+    "required": [
+      "assumption",
+      "why_riskiest",
+      "hypothesis",
+      "method",
+      "procedure",
+      "success_criteria"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "experiment_tests_open_assumption",
+    "experiment_criteria_countable"
+  ],
+  "write_back_targets": []
+}

@@ -84,6 +84,16 @@ export const MCP_CR_BROWSER_TOOLS = [
   MCP_BROWSER_RELOAD,
 ] as const;
 
+/**
+ * AI Verify tools (cr-verify, CR-12–CR-16): the coach hands the runner a criterion's plan
+ * (`verify_criterion`) or proposes criteria the student must confirm
+ * (`verify_propose_criteria`). Same grant and switch as the CR browser tools; short names
+ * match the proxy's CR_VERIFY_TOOLS one for one.
+ */
+export const MCP_VERIFY_CRITERION = "mcp__hypeproof__verify_criterion";
+export const MCP_VERIFY_PROPOSE = "mcp__hypeproof__verify_propose_criteria";
+export const MCP_CR_VERIFY_TOOLS = [MCP_VERIFY_CRITERION, MCP_VERIFY_PROPOSE] as const;
+
 /** MCP CallToolResult content we produce (structural subset of the MCP SDK type). */
 export type McpContentBlock =
   | { type: "text"; text: string }
@@ -201,6 +211,8 @@ export interface BrowserMcpHost {
   crEnabled?(): boolean;
   /** CR-11 — may an agent open `url`? Asked only while `crEnabled()` is true. */
   crScope?(url: string): { ok: true } | { ok: false; reason: string };
+  /** cr-verify — run `verify_criterion` / `verify_propose_criteria` (VerifySession). */
+  verify?(name: string, input: Record<string, unknown>): Promise<McpToolResult>;
 }
 
 /**
@@ -639,6 +651,10 @@ export function buildHypeproofMcpServer(
     );
   };
 
+  /** cr-verify — delegated to the host's VerifySession, the one the proxy path runs (CR-03). */
+  const verifyOrFail = async (name: string, input: Record<string, unknown>): Promise<McpToolResult> =>
+    host.verify ? host.verify(name, input) : { content: [{ type: "text", text: "지금은 제품 테스트를 쓸 수 없어요." }], isError: true };
+
   const browserRead = factory.tool(
     "browser_read",
     "지금 열려 있는 페이지의 접근성/DOM 스냅샷을 **텍스트로** 읽는다. 상호작용 요소마다 " +
@@ -730,6 +746,19 @@ export function buildHypeproofMcpServer(
         "페이지를 새로 고친다. 새 문서가 되므로 이전 ref는 무효가 된다. 결과에 새로 고친 뒤의 관찰이 온다.",
         {},
         async () => inspectOrFail("browser_reload", {}, absent),
+      ),
+      // cr-verify — the runner, not the model, judges each criterion (CR-15).
+      factory.tool(
+        "verify_criterion",
+        "학생이 시작한 제품 테스트에서 기대 조건 하나를 실행한다. criterion_id와 plan(JSON 문자열 {steps, expect})을 준다. 러너가 미리보기를 새로 열어 단계를 실행하고 관찰로 판정한다.",
+        { criterion_id: z.string(), plan: z.string() },
+        async (args: Record<string, unknown>) => verifyOrFail("verify_criterion", { criterion_id: String(args["criterion_id"] ?? ""), plan: String(args["plan"] ?? "") }),
+      ),
+      factory.tool(
+        "verify_propose_criteria",
+        "학생에게 관찰 가능한 기대 조건 1~5개를 제안한다(criteria: JSON 배열 문자열). 학생이 확인해야 테스트에 쓰인다.",
+        { criteria: z.string() },
+        async (args: Record<string, unknown>) => verifyOrFail("verify_propose_criteria", { criteria: String(args["criteria"] ?? "") }),
       ),
     );
   }

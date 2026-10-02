@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
 `;
 const AUTHORING_SCHEMA = readFileSync(new URL("../migrations/0002-chalk-authoring.sql", import.meta.url), "utf8");
 const PLAN_SCHEMA = readFileSync(new URL("../migrations/0031-chalk-plan-files.sql", import.meta.url), "utf8");
-const TIER_DURATION_SCHEMA = readFileSync(new URL("../migrations/0032-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
+const TIER_DURATION_SCHEMA = readFileSync(new URL("../migrations/0035-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
 
 const GOAL_VOCAB = ["inquiry-skills", "observation", "creative-thinking"];
 const COND_VOCAB = ["single-session", "novice-learners"];

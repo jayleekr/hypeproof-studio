@@ -11,6 +11,8 @@
 //                                               overwritten: link() fails if another window made n+1 first, and the loser
 //                                               re-reads and re-decides — the same compare-and-swap as the U2 inbox index
 //                                               (classroomInboxStore.ts). There is no lock to steal after a crash.
+// Commit identities and active ancestor receipts distinguish a successful link superseded by another writer from a stale
+// lower-version link after collection. Temporary files keep receipts alive until confirmation; successors prune completed IDs.
 //
 // Two windows writing different records never touch the same file. The same draft is last-write-wins; a request is
 // compare-and-set inside `change`. A crash leaves the previous version or the new one, never half of one (a stray tmp file
@@ -28,7 +30,7 @@ const VERSION_RE = /^(\d{1,12})\.json$/;
 const TMP_RE = /^\.\d+\..+\.tmp$/;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 32);
 const code = (e: unknown) => (e as NodeJS.ErrnoException)?.code;
-interface Rec<T> { v: 1; key: string; value: T | null; at: number }
+interface Rec<T> { v: 1; key: string; value: T | null; at: number; commit_id?: string; pending?: string[] }
 
 export interface HelpStoreHooks {
   /** Test seam: called at each boundary of a commit so a test can pause, kill or race a writer exactly there. */
@@ -68,18 +70,22 @@ export class HelpRecordStore {
     throw new HelpCommitLost();
   }
 
-  /** Atomic create-if-absent with the complete bytes in place: the name appears only when the content is whole. */
-  private async writeOnce(target: string, text: string): Promise<"created" | "exists" | "retry"> {
+  /** Keep only receipts whose writer is still awaiting confirmation. No permanent per-write history. */
+  private async pending(dir: string, rec: Rec<unknown> | null): Promise<string[]> {
+    const ids = [...new Set([rec?.commit_id, ...(Array.isArray(rec?.pending) ? rec.pending : [])])].filter((id): id is string => typeof id === "string" && TMP_RE.test(id) && path.basename(id) === id);
+    const present = await Promise.all(ids.map(async (id) => await fs.stat(path.join(dir, id)).then(() => id, () => null)));
+    return present.filter((id): id is string => id !== null);
+  }
+
+  /** Atomic create-if-absent; retain the temporary file until the caller confirms this particular commit. */
+  private async writeOnce(target: string, tmp: string, text: string): Promise<"created" | "exists" | "retry"> {
     await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-    const tmp = path.join(path.dirname(target), `.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
-    try {
-      let fh; try { fh = await fs.open(tmp, "wx", 0o600); } catch (e) { if (code(e) === "ENOENT") return "retry"; throw e; } // the sweep removed an empty directory
-      try { await fh.writeFile(text, "utf8"); await fh.sync().catch(() => undefined); } finally { await fh.close(); }
-      await this.hooks.at?.("tmp_written", path.basename(target));
-      try { await fs.link(tmp, target); } catch (e) { if (code(e) === "EEXIST") return "exists"; if (code(e) === "ENOENT") return "retry"; throw e; }
-      await this.hooks.at?.("linked", path.basename(target));
-      return "created";
-    } finally { await fs.unlink(tmp).catch(() => undefined); }
+    let fh; try { fh = await fs.open(tmp, "wx", 0o600); } catch (e) { if (code(e) === "ENOENT") return "retry"; throw e; }
+    try { await fh.writeFile(text, "utf8"); await fh.sync().catch(() => undefined); } finally { await fh.close(); }
+    await this.hooks.at?.("tmp_written", path.basename(target));
+    try { await fs.link(tmp, target); } catch (e) { if (code(e) === "EEXIST") return "exists"; if (code(e) === "ENOENT") return "retry"; throw e; }
+    await this.hooks.at?.("linked", path.basename(target));
+    return "created";
   }
 
   async get<K extends HelpKind>(kind: K, key: string): Promise<Kinds[K] | null> { return (await this.current<Kinds[K]>(this.dirOf(kind, key), key)).rec?.value ?? null; }
@@ -95,11 +101,20 @@ export class HelpRecordStore {
       if (attempt) await new Promise((r) => setTimeout(r, Math.min(50, attempt * 2) * Math.random()));
       const cur = await this.current<Kinds[K]>(dir, key), was = cur.rec?.value ?? null, next = change(was, cur.n > 0);
       if (next === undefined || (next === null && was === null)) return { value: was, changed: false };
-      const target = cur.top + 1, rec: Rec<Kinds[K]> = { v: 1, key, value: next, at: this.now() };
-      if ((await this.writeOnce(path.join(dir, `${target}.json`), JSON.stringify(rec))) !== "created") continue;
-      // A writer that woke up late may have created a number that is no longer the highest. Only the highest counts.
-      const seen = await this.current(dir, key);
-      if (seen.n === target) { await this.collect(dir, target); return { value: next, changed: true }; }
+      const target = cur.top + 1, id = `.${process.pid}.${randomUUID()}.tmp`, tmp = path.join(dir, id);
+      const rec: Rec<Kinds[K]> = { v: 1, key, value: next, at: this.now(), commit_id: id, pending: await this.pending(dir, cur.rec) };
+      try {
+        if ((await this.writeOnce(path.join(dir, `${target}.json`), tmp, JSON.stringify(rec))) !== "created") continue;
+        const seen = await this.current(dir, key);
+        // A successor carries receipts only for commits it actually observed. Version numbers alone are insufficient:
+        // collection lets a writer paused BEFORE link recreate a lower number, which must still retry (L1).
+        if (seen.rec?.commit_id === id || (Array.isArray(seen.rec?.pending) && seen.rec.pending.includes(id))) {
+          await this.collect(dir, seen.n); return { value: next, changed: true };
+        }
+        // A sweep can expire receipts; an older App may write without them. Never replay without confirmation evidence.
+        if (!seen.rec?.commit_id || !(await fs.stat(tmp).catch(() => null))) throw new HelpCommitLost();
+      } finally { await fs.unlink(tmp).catch(() => undefined); }
+
     }
     throw new HelpCommitLost();
   }

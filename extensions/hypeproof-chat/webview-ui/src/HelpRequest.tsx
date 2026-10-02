@@ -99,14 +99,14 @@ export function HelpRequest(props: { view: HelpView | null; post: Post }) {
         <label className="hp-help-consent"><input type="checkbox" data-help-consent="" checked={consent} onChange={(ev) => setConsent(ev.target.checked)} /> 위 내용을 이 강사에게 보내는 데 동의합니다</label>
         <div className="hp-help-actions">
           <button type="button" className="hp-cta-quiet" data-help-send="" disabled={!consent} onClick={() => props.post({ type: "helpSend", key, requestId: e.request_id, consent })}>동의하고 보내기</button>
-          <button type="button" className="hp-cta-quiet" data-help-cancel="" onClick={() => props.post({ type: "helpCancel", key })}>보내지 않기</button>
+          <button type="button" className="hp-cta-quiet" data-help-cancel="" onClick={() => props.post({ type: "helpCancel", key, requestId: e.request_id })}>보내지 않기</button>
         </div>
       </section>}
       {key && e && e.state !== "prepared" && <section className="hp-help-preview" data-help-pending={e.request_id}>
         <p className="hp-inbox-meta">보낸 요청이 서버에 저장됐는지 아직 확인하지 못했습니다. 같은 요청으로 다시 확인하므로 두 번 보내지지 않습니다.</p>
         <div className="hp-help-actions">
           <button type="button" className="hp-cta-quiet" data-help-retry="" onClick={() => props.post({ type: "helpRetry", key })}>다시 확인</button>
-          <button type="button" className="hp-cta-quiet" data-help-discard="" onClick={() => props.post({ type: "helpDiscard", key })}>보내지 않기(지우기)</button>
+          <button type="button" className="hp-cta-quiet" data-help-discard="" onClick={() => props.post({ type: "helpDiscard", key, requestId: e.request_id })}>보내지 않기(지우기)</button>
         </div>
       </section>}
 

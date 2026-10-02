@@ -1306,3 +1306,134 @@ CREATE TABLE IF NOT EXISTS chalk_course_input_options (
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
+
+-- cr-publish (#1393) — Venture Memory: migration 0032-curriculum-runtime-publish.sql.
+CREATE TABLE IF NOT EXISTS cr_projects (
+  id         TEXT PRIMARY KEY,
+  cohort_id  TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  -- The student who created it: the per-student bound on Projects (one conditional insert).
+  creator    TEXT,
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_projects_cohort ON cr_projects(cohort_id);
+CREATE INDEX IF NOT EXISTS idx_cr_projects_creator ON cr_projects(cohort_id, creator);
+
+CREATE TABLE IF NOT EXISTS cr_hypotheses (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  -- The statement while the hypothesis is open (NULL once it is not): two starts sent at the
+  -- same time with the same statement store one hypothesis (unique per Project).
+  open_statement TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_hypotheses_project ON cr_hypotheses(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_hypotheses_open_statement ON cr_hypotheses(project_id, open_statement);
+
+CREATE TABLE IF NOT EXISTS cr_product_versions (
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  id         TEXT NOT NULL,
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS cr_experiments (
+  id                 TEXT PRIMARY KEY,
+  project_id         TEXT NOT NULL REFERENCES cr_projects(id),
+  hypothesis_id      TEXT NOT NULL REFERENCES cr_hypotheses(id),
+  product_version_id TEXT NOT NULL,
+  doc                TEXT NOT NULL,
+  revision           INTEGER NOT NULL DEFAULT 1,
+  -- The digest of the start's fields while the experiment is running with no link yet (NULL
+  -- after its first link): starts sent at the same time with the same fields store one row.
+  open_start_key     TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_experiments_project ON cr_experiments(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_experiments_open_start ON cr_experiments(project_id, open_start_key);
+
+CREATE TABLE IF NOT EXISTS cr_test_links (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES cr_projects(id),
+  experiment_id TEXT NOT NULL REFERENCES cr_experiments(id),
+  doc           TEXT NOT NULL,
+  expires_at    INTEGER NOT NULL,
+  revoked_at    INTEGER,
+  -- Participant sessions opened through this link: the per-link bound on session keys and
+  -- the index of the per-channel counts (CR-73). The sessions themselves are on R2.
+  sessions_opened INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_test_links_experiment ON cr_test_links(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_cr_test_links_project ON cr_test_links(project_id);
+
+-- cr-evidence (#1394) — migration 0033: per-link rate windows and per-cohort data controls.
+-- Policy and rate state only; participant evidence stays in the measurement-core record on R2.
+CREATE TABLE IF NOT EXISTS cr_link_rates (
+  link_id      TEXT NOT NULL REFERENCES cr_test_links(id),
+  kind         TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count        INTEGER NOT NULL,
+  PRIMARY KEY (link_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS cr_cohort_controls (
+  cohort_id  TEXT PRIMARY KEY,
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  updated_by TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- cr_experiment_records: when an experiment's last manual record, draft or draft review was
+-- written (decision 6). An experiment ends at the later of this and its last link's end; one
+-- with no row and no link holds nothing to delete and is never swept. A time, never a copy.
+CREATE TABLE IF NOT EXISTS cr_experiment_records (
+  experiment_id  TEXT PRIMARY KEY REFERENCES cr_experiments(id),
+  last_record_at INTEGER NOT NULL
+);
+
+-- cr-memory (#1395) — migration 0034: the rest of Venture Memory (decisions, stakeholders, metrics, deck slides).
+-- Structure and references only; evidence items stay in the measurement-core record (SX-48).
+CREATE TABLE IF NOT EXISTS cr_decisions (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_decisions_project ON cr_decisions(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_stakeholders (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_stakeholders_project ON cr_stakeholders(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_metrics (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cr_metrics_project ON cr_metrics(project_id);
+
+CREATE TABLE IF NOT EXISTS cr_deck_slides (
+  project_id TEXT NOT NULL REFERENCES cr_projects(id),
+  number     INTEGER NOT NULL CHECK (number BETWEEN 1 AND 8),
+  revision   INTEGER NOT NULL,
+  doc        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, number, revision)
+);

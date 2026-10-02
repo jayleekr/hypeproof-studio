@@ -23,6 +23,13 @@ export interface Env {
   RESEND_API_KEY?: string;
   RESEND_WEBHOOK_SECRET?: string;
   HPS_DELIVERY_FROM?: string;
+  /**
+   * cr-publish (#1393) — where published test versions are served, one origin per project:
+   * `https://{project}.<test-domain>` (production, live only after Jay approves the DNS and route),
+   * `http://{project}.test.invalid:<port>` (local/e2e), or one dev-only host without `{project}`
+   * (an ngrok URL, refused in production). Unset (default): no test link can be issued.
+   */
+  HPS_TEST_ORIGIN?: string;
   /** Public https origin of this Service, for the link inside the message. */
   HPS_PUBLIC_BASE_URL?: string;
   /** Explicit opt-in; migrations and approved contracts must precede activation. */
