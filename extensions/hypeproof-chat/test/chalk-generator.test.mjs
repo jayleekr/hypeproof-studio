@@ -488,7 +488,9 @@ await check('T-G20 runBrowserOpen #507: wrong loopback port corrected to live se
 await check('T-G21 chalk_record_feedback present in CHALK_TOOL_DEFINITIONS', async () => {
   const def = CHALK_TOOL_DEFINITIONS.find(d => d.name === 'chalk_record_feedback');
   assert.ok(def, 'chalk_record_feedback must be in CHALK_TOOL_DEFINITIONS');
-  assert.deepEqual(def.inputSchema.required.sort(), ['cohort_id', 'course_id', 'request_id', 'text'].sort());
+  // request_id is tool-generated — not in schema required (coach must not supply it).
+  assert.deepEqual(def.inputSchema.required.sort(), ['cohort_id', 'course_id', 'text'].sort());
+  assert.ok(!def.inputSchema.required.includes('request_id'), 'request_id must not be in required (tool-generated)');
   assert.equal(def.inputSchema.additionalProperties, false);
 });
 
@@ -500,10 +502,10 @@ await check('T-G22 chalk_view_diff present in CHALK_TOOL_DEFINITIONS', async () 
   assert.equal(def.inputSchema.additionalProperties, false);
 });
 
-// ─── T-G23: chalk_record_feedback calls POST /feedback with auto-filled base_revision ──
-await check('T-G23 chalk_record_feedback: POST /feedback auto-fills base_revision from server', async () => {
+// ─── T-G23: chalk_record_feedback calls POST /feedback with auto-filled base_revision + request_id ──
+await check('T-G23 chalk_record_feedback: POST /feedback auto-fills base_revision and request_id', async () => {
   let capturedPath = null;
-  let capturedBody = null;
+  let capturedBodies = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', d => body += d);
@@ -515,8 +517,9 @@ await check('T-G23 chalk_record_feedback: POST /feedback auto-fills base_revisio
       } else {
         // POST /feedback
         capturedPath = req.url;
-        capturedBody = JSON.parse(body);
-        res.end(JSON.stringify({ feedback_id: 'fb_test-req-01', base_revision: 5, created_at: 12345 }));
+        const parsed = JSON.parse(body);
+        capturedBodies.push(parsed);
+        res.end(JSON.stringify({ feedback_id: `fb_${parsed.request_id}`, base_revision: 5, created_at: 12345 }));
       }
     });
   });
@@ -529,18 +532,20 @@ await check('T-G23 chalk_record_feedback: POST /feedback auto-fills base_revisio
     currentModel: 'claude-sonnet-5',
   };
 
-  const result = await callChalkTool(ctx, 'chalk_record_feedback', {
-    cohort_id: 'c1', course_id: 'crs1',
-    text: '피드백 내용',
-    request_id: 'test-req-01',
-  });
-  const parsed = JSON.parse(result);
+  // Call twice with the same text — each call gets a distinct server-generated request_id.
+  const result1 = await callChalkTool(ctx, 'chalk_record_feedback', { cohort_id: 'c1', course_id: 'crs1', text: '피드백 내용' });
+  const result2 = await callChalkTool(ctx, 'chalk_record_feedback', { cohort_id: 'c1', course_id: 'crs1', text: '피드백 내용' });
+  const parsed1 = JSON.parse(result1);
+  const parsed2 = JSON.parse(result2);
 
-  assert.ok(parsed.feedback_id, 'feedback_id must be returned');
-  assert.ok(capturedBody !== null, `capturedBody must be set; capturedPath=${capturedPath}`);
-  assert.equal(capturedBody.base_revision, 5, 'base_revision must be auto-filled from fetchExpectedRevision');
-  assert.equal(capturedBody.model, 'claude-sonnet-5', 'model must be auto-filled from ctx.currentModel');
-  assert.equal(capturedBody.request_id, 'test-req-01');
+  assert.ok(parsed1.feedback_id, 'feedback_id must be returned on first call');
+  assert.ok(parsed2.feedback_id, 'feedback_id must be returned on second call');
+  assert.notEqual(parsed1.feedback_id, parsed2.feedback_id, 'same text → two calls → different feedback_ids');
+
+  assert.equal(capturedBodies.length, 2, 'two POST /feedback requests must reach server');
+  assert.notEqual(capturedBodies[0].request_id, capturedBodies[1].request_id, 'tool-generated request_ids must differ');
+  assert.equal(capturedBodies[0].base_revision, 5, 'base_revision must be auto-filled from fetchExpectedRevision');
+  assert.equal(capturedBodies[0].model, 'claude-sonnet-5', 'model must be auto-filled from ctx.currentModel');
 
   server.close();
 });

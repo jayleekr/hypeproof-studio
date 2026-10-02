@@ -195,7 +195,7 @@ await check("FB-02 GET /diff in allowlist", async () => {
 });
 
 // ── POST /feedback ────────────────────────────────────────────────────────────
-await check("FB-03 POST /feedback 201 creates record", async () => {
+await check("FB-03 POST /feedback 200 creates record", async () => {
   const db = makeDb();
   const { itok } = await seedDraftAndPlan(db);
   const r = await req("POST", `${base}/feedback`, {

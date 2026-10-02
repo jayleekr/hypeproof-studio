@@ -645,16 +645,15 @@ export async function execSavePlan(
 
 export const CHALK_RECORD_FEEDBACK_DEF: ChalkToolDefinition = {
   name: "chalk_record_feedback",
-  description: "강사의 피드백을 서버에 기록하고 feedback_id를 반환합니다. base_revision과 model은 현재 상태에서 자동 채워집니다.",
+  description: "강사의 피드백을 서버에 기록하고 feedback_id를 반환합니다. base_revision·model·request_id는 자동 채워집니다.",
   inputSchema: {
     type: "object",
     properties: {
       cohort_id: { type: "string" },
       course_id: { type: "string" },
       text: { type: "string", description: "피드백 본문 (16 KB 이하)" },
-      request_id: { type: "string", description: "멱등성 키 (a-z A-Z 0-9 _ - 1~128자)" },
     },
-    required: ["cohort_id", "course_id", "text", "request_id"],
+    required: ["cohort_id", "course_id", "text"],
     additionalProperties: false,
   },
 };
@@ -680,7 +679,9 @@ async function execRecordFeedback(ctx: ChalkToolContext, input: Record<string, u
   const cohort = input.cohort_id as string;
   const course = input.course_id as string;
   const text = input.text as string;
-  const requestId = input.request_id as string;
+  // request_id is tool-generated: each call is a new feedback session.
+  // Idempotency window is one tool invocation; the coach must not reuse an old id.
+  const requestId = randomUUID().replace(/-/g, "");
 
   const baseRevision = await fetchExpectedRevision(ctx, cohort, course);
   const model = ctx.currentModel ?? "unknown";
