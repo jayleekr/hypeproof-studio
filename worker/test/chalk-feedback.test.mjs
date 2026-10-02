@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
 const AUTHORING_SCHEMA = readFileSync(new URL("../migrations/0002-chalk-authoring.sql", import.meta.url), "utf8");
 const PLAN_SCHEMA = readFileSync(new URL("../migrations/0031-chalk-plan-files.sql", import.meta.url), "utf8");
 const TIER_DURATION_SCHEMA = readFileSync(new URL("../migrations/0035-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
-const FEEDBACK_SCHEMA = readFileSync(new URL("../migrations/00XX-chalk-feedback.sql", import.meta.url), "utf8");
+const FEEDBACK_SCHEMA = readFileSync(new URL("../migrations/0036-chalk-feedback.sql", import.meta.url), "utf8");
 
 const profileId = listProfiles().find(p => p.session.cohort_id === COHORT)?.id;
 assert.ok(profileId, "profile not found for COHORT");
@@ -210,7 +210,7 @@ await check("FB-03 POST /feedback 201 creates record", async () => {
   assert.ok(typeof r.json.created_at === "number");
 });
 
-await check("FB-04 POST /feedback idempotent on same request_id", async () => {
+await check("FB-04a POST /feedback idempotent on same request_id in same course", async () => {
   const db = makeDb();
   const { itok } = await seedDraftAndPlan(db);
   const body = { text: "피드백", model: "claude-sonnet-5", base_revision: 2, request_id: "fb-req-idem" };
@@ -218,8 +218,37 @@ await check("FB-04 POST /feedback idempotent on same request_id", async () => {
   const r2 = await req("POST", `${base}/feedback`, body, itok, db);
   assert.equal(r1.status, 200);
   assert.equal(r2.status, 200);
-  assert.equal(r1.json.feedback_id, r2.json.feedback_id);
+  assert.equal(r1.json.feedback_id, r2.json.feedback_id, "same course + same request_id must return same feedback_id");
   assert.equal(r1.json.created_at, r2.json.created_at);
+});
+
+await check("FB-04b POST /feedback same request_id in different course → two rows, both 200", async () => {
+  const db = makeDb();
+  const itok = await issuerTok();
+  // seed two courses
+  const course2 = "test-course-2";
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(COHORT, "test-course", "tester", "", 1,
+    '{"schema":"hps-session-design/1","title":"","audience":"","duration_minutes":120,"objective":"","prerequisites":"","starter":"","steps":[]}',
+    "req-seed-c1", "hash-seed-c1", now);
+  db.prepare(
+    `INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(COHORT, course2, "tester", "", 1,
+    '{"schema":"hps-session-design/1","title":"","audience":"","duration_minutes":120,"objective":"","prerequisites":"","starter":"","steps":[]}',
+    "req-seed-c2", "hash-seed-c2", now);
+  const SHARED_REQ_ID = "shared-req-id-01";
+  const base2 = `/admin/chalk/cohorts/${COHORT}/courses/${course2}`;
+  const r1 = await req("POST", `${base}/feedback`, { text: "fb1", model: "m", base_revision: 1, request_id: SHARED_REQ_ID }, itok, db);
+  const r2 = await req("POST", `${base2}/feedback`, { text: "fb2", model: "m", base_revision: 1, request_id: SHARED_REQ_ID }, itok, db);
+  assert.equal(r1.status, 200, `course1: ${JSON.stringify(r1.json)}`);
+  assert.equal(r2.status, 200, `course2: ${JSON.stringify(r2.json)}`);
+  assert.notEqual(r1.json.feedback_id, r2.json.feedback_id, "different courses must produce different feedback_ids");
+  const rows = db.prepare("SELECT feedback_id FROM chalk_feedback WHERE request_id=?").all(SHARED_REQ_ID);
+  assert.equal(rows.length, 2, "two rows must exist");
 });
 
 await check("FB-05 POST /feedback 400 on missing text", async () => {
@@ -251,7 +280,7 @@ await check("FB-07 POST /feedback 403 on student token", async () => {
 });
 
 // ── GET /diff ─────────────────────────────────────────────────────────────────
-await check("FB-08 GET /diff no prior revision returns changes:[]", async () => {
+await check("FB-08 GET /diff no prior revision returns changes:[] with sha256", async () => {
   const db = makeDb();
   const { itok } = await seedDraftAndPlan(db);
   const r = await req("GET", `${base}/diff?file=lesson`, null, itok, db);
@@ -259,9 +288,11 @@ await check("FB-08 GET /diff no prior revision returns changes:[]", async () => 
   assert.deepEqual(r.json.changes, []);
   assert.equal(r.json.from_revision, null);
   assert.equal(r.json.to_revision, 2);
+  assert.equal(r.json.from_sha256, null);
+  assert.ok(typeof r.json.to_sha256 === "string" && r.json.to_sha256.length > 0, "to_sha256 must be present");
 });
 
-await check("FB-09 GET /diff with two revisions returns changes", async () => {
+await check("FB-09 GET /diff with two revisions returns changes and sha256", async () => {
   const db = makeDb();
   const { itok } = await seedDraftAndPlan(db);
   // save updated plan at revision 3
@@ -277,12 +308,53 @@ await check("FB-09 GET /diff with two revisions returns changes", async () => {
   assert.ok(r.json.changes.length > 0, "should have at least one change");
   const objChange = r.json.changes.find(c => c.key.startsWith("objectives/"));
   assert.ok(objChange, "objectives change must appear");
+  assert.ok(typeof r.json.from_sha256 === "string", "from_sha256 must be present");
+  assert.ok(typeof r.json.to_sha256 === "string", "to_sha256 must be present");
+  assert.notEqual(r.json.from_sha256, r.json.to_sha256, "shas differ when content differs");
 });
 
-await check("FB-10 GET /diff unknown from revision 404", async () => {
+await check("FB-09b GET /diff ref≤R: from/to with no direct file save resolves to nearest earlier save", async () => {
   const db = makeDb();
   const { itok } = await seedDraftAndPlan(db);
-  const r = await req("GET", `${base}/diff?file=lesson&from=99&to=2`, null, itok, db);
+  // lesson saved at r=2 (MINIMAL). Save lesson again at r=4 (UPDATED) — no lesson at r=3.
+  // Step 1: bump draft to r=3 via ops save.
+  await req("PUT", `${base}/plan`, {
+    file: "ops", html: "<html></html>", knowledge_version: 1, expected_revision: 2,
+    request_id: "ops-r3",
+  }, itok, db);
+  // Step 2: save lesson at r=4.
+  await req("PUT", `${base}/plan`, {
+    file: "lesson", html: UPDATED_LESSON_HTML, knowledge_version: 1, expected_revision: 3,
+    request_id: "lesson-r4",
+  }, itok, db);
+  // from=3 (no lesson at r=3) → resolves to r=2 content (MINIMAL)
+  // to=5   (no lesson at r=5) → resolves to r=4 content (UPDATED)
+  // Bump draft to r=5 with another ops save.
+  await req("PUT", `${base}/plan`, {
+    file: "ops", html: "<html>v2</html>", knowledge_version: 1, expected_revision: 4,
+    request_id: "ops-r5",
+  }, itok, db);
+  const r = await req("GET", `${base}/diff?file=lesson&from=3&to=5`, null, itok, db);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.from_revision, 3);
+  assert.equal(r.json.to_revision, 5);
+  assert.ok(r.json.changes.length > 0, "changes must exist (MINIMAL vs UPDATED)");
+  assert.notEqual(r.json.from_sha256, r.json.to_sha256, "shas differ");
+});
+
+await check("FB-10 GET /diff from >= to → 400", async () => {
+  const db = makeDb();
+  const { itok } = await seedDraftAndPlan(db);
+  const r = await req("GET", `${base}/diff?file=lesson&from=2&to=2`, null, itok, db);
+  assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.json)}`);
+});
+
+await check("FB-10b GET /diff from before any file save → 404", async () => {
+  const db = makeDb();
+  const { itok } = await seedDraftAndPlan(db);
+  // from=99 → no file at or before r=99 that is earlier than to — but to=100 also has no file at all.
+  const r = await req("GET", `${base}/diff?file=lesson&from=1&to=99`, null, itok, db);
+  // to=99 resolves to r=2 (ref ≤ 99) — that exists. from=1 resolves to ref ≤ 1 — no file → 404.
   assert.equal(r.status, 404);
 });
 

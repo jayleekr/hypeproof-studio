@@ -1438,7 +1438,7 @@ CREATE TABLE IF NOT EXISTS cr_deck_slides (
   PRIMARY KEY (project_id, number, revision)
 );
 
--- ── migrations/00XX-chalk-feedback.sql (#1466 E2-7) ──
+-- ── migrations/0036-chalk-feedback.sql (#1466 E2-7) ──
 CREATE TABLE IF NOT EXISTS chalk_feedback (
   feedback_id   TEXT PRIMARY KEY,
   cohort_id     TEXT NOT NULL,
@@ -1447,8 +1447,9 @@ CREATE TABLE IF NOT EXISTS chalk_feedback (
   text          TEXT NOT NULL,
   model         TEXT NOT NULL,
   actor         TEXT NOT NULL,
-  request_id    TEXT NOT NULL UNIQUE,
+  request_id    TEXT NOT NULL,
   created_at    INTEGER NOT NULL,
+  UNIQUE(cohort_id, course_id, request_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
 CREATE TABLE IF NOT EXISTS chalk_feedback_revisions (

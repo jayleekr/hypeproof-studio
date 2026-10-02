@@ -3926,7 +3926,7 @@
         "ST-TEST-CHALK-FEEDBACK"
       ],
       "sources": [
-        { "path": "worker/migrations/00XX-chalk-feedback.sql" },
+        { "path": "worker/migrations/0036-chalk-feedback.sql" },
         { "path": "worker/src/lib/chalk-plan/units.ts" },
         { "path": "worker/src/routes/chalk-courses.ts" },
         { "path": "worker/src/routes/chalk-instructor.ts" },

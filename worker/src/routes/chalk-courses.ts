@@ -788,26 +788,41 @@ chalkCourses.post(
 
     const fb = b as unknown as FeedbackBody;
     const nowMs = Date.now();
-    const feedbackId = `fb_${fb.request_id}`;
+    // Server-generated ID: avoids PK collision when two courses use the same request_id.
+    const feedbackId = `fb_${crypto.randomUUID().replace(/-/g, '')}`;
 
-    // Idempotent: if request_id already exists for this course, return it.
-    const existing = await c.env.HPS_DB.prepare(
-      "SELECT feedback_id, base_revision, created_at FROM chalk_feedback WHERE request_id=? AND cohort_id=? AND course_id=?"
-    ).bind(fb.request_id, cohort, course).first<{ feedback_id: string; base_revision: number; created_at: number }>();
-    if (existing) {
-      return c.json({ feedback_id: existing.feedback_id, base_revision: existing.base_revision, created_at: existing.created_at });
-    }
-
+    // Idempotent: INSERT … ON CONFLICT DO NOTHING, then SELECT — safe under concurrent requests.
     await c.env.HPS_DB.prepare(
       `INSERT INTO chalk_feedback (feedback_id,cohort_id,course_id,base_revision,text,model,actor,request_id,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(cohort_id,course_id,request_id) DO NOTHING`
     ).bind(feedbackId, cohort, course, fb.base_revision, fb.text, fb.model, auth.payload.u, fb.request_id, nowMs).run();
 
-    return c.json({ feedback_id: feedbackId, base_revision: fb.base_revision, created_at: nowMs });
+    const row = await c.env.HPS_DB.prepare(
+      "SELECT feedback_id, base_revision, created_at FROM chalk_feedback WHERE cohort_id=? AND course_id=? AND request_id=?"
+    ).bind(cohort, course, fb.request_id).first<{ feedback_id: string; base_revision: number; created_at: number }>();
+    if (!row) return c.json({ code: "internal_error", error: "failed to read feedback row" }, 500);
+
+    return c.json({ feedback_id: row.feedback_id, base_revision: row.base_revision, created_at: row.created_at });
   },
 );
 
 // ── GET /diff ─────────────────────────────────────────────────────────────────
+// "File F at revision R" = latest chalk_plan_files row where ref ≤ R (not exact match).
+// This means if lesson was saved at r1 and inputs at r2, asking for to=2 gives the r1 content.
+
+interface PlanFileRowWithSha { html: string; sha256: string }
+
+async function planFileAtOrBefore(
+  db: D1Database,
+  cohort: string, course: string, file: string, revision: number,
+): Promise<PlanFileRowWithSha | null> {
+  return db.prepare(
+    `SELECT html, sha256 FROM chalk_plan_files
+     WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND CAST(ref AS INTEGER) <= ?
+     ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+  ).bind(cohort, course, file, revision).first<PlanFileRowWithSha>();
+}
 
 chalkCourses.get(
   "/chalk/cohorts/:cohort/courses/:course/diff",
@@ -826,7 +841,7 @@ chalkCourses.get(
     if (!VALID_FILES.includes(file as any))
       return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
 
-    // Resolve 'to' revision (default: latest).
+    // Resolve 'to' revision (default: latest for this file).
     let toRevision: number;
     if (toStr !== undefined) {
       const parsed = parseInt(toStr, 10);
@@ -840,36 +855,38 @@ chalkCourses.get(
       toRevision = latest.rev;
     }
 
-    const toRow = await c.env.HPS_DB.prepare(
-      "SELECT html FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND ref=?"
-    ).bind(cohort, course, file, String(toRevision)).first<{ html: string }>();
-    if (!toRow) return c.json({ code: "not_found", error: "to revision not found" }, 404);
-
-    // Resolve 'from' revision (optional: absent → use previous).
+    // Resolve 'from' revision (optional: absent → find previous file save before toRevision).
     let fromRevision: number | null = null;
     if (fromStr !== undefined) {
       const parsed = parseInt(fromStr, 10);
       if (!Number.isFinite(parsed) || parsed < 1) return c.json({ code: "invalid_request", error: "from must be a positive integer" }, 400);
+      if (parsed >= toRevision) return c.json({ code: "invalid_request", error: "from must be less than to" }, 400);
       fromRevision = parsed;
     } else {
-      // Find previous revision before toRevision.
+      // Previous file save strictly before toRevision.
       const prevRow = await c.env.HPS_DB.prepare(
-        "SELECT MAX(CAST(ref AS INTEGER)) AS rev FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND CAST(ref AS INTEGER) < ?"
+        `SELECT MAX(CAST(ref AS INTEGER)) AS rev FROM chalk_plan_files
+         WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND CAST(ref AS INTEGER) < ?`
       ).bind(cohort, course, file, toRevision).first<{ rev: number | null }>();
       fromRevision = prevRow?.rev ?? null;
     }
 
+    const toRow = await planFileAtOrBefore(c.env.HPS_DB, cohort, course, file, toRevision);
+    if (!toRow) return c.json({ code: "not_found", error: "to revision not found" }, 404);
+
     if (fromRevision === null) {
-      // No previous revision available.
-      return c.json({ from_revision: null, to_revision: toRevision, file, changes: [] });
+      return c.json({ from_revision: null, to_revision: toRevision, file, from_sha256: null, to_sha256: toRow.sha256, changes: [] });
     }
 
-    const fromRow = await c.env.HPS_DB.prepare(
-      "SELECT html FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND ref=?"
-    ).bind(cohort, course, file, String(fromRevision)).first<{ html: string }>();
+    const fromRow = await planFileAtOrBefore(c.env.HPS_DB, cohort, course, file, fromRevision);
     if (!fromRow) return c.json({ code: "not_found", error: "from revision not found" }, 404);
 
+    // Same content → skip diff.
+    if (fromRow.sha256 === toRow.sha256) {
+      return c.json({ from_revision: fromRevision, to_revision: toRevision, file, from_sha256: fromRow.sha256, to_sha256: toRow.sha256, changes: [] });
+    }
+
     const changes = diffUnits(planUnits(fromRow.html, file), planUnits(toRow.html, file));
-    return c.json({ from_revision: fromRevision, to_revision: toRevision, file, changes });
+    return c.json({ from_revision: fromRevision, to_revision: toRevision, file, from_sha256: fromRow.sha256, to_sha256: toRow.sha256, changes });
   },
 );

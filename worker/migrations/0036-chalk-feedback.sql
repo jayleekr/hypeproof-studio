@@ -1,5 +1,7 @@
--- #1466 (E2-7) — Chalk feedback and revision link tables.
--- AT-33 대상. 번호는 PR 열 때 리드가 정한다. 운영 D1 적용은 J2 전에는 하지 않음.
+-- #1466 (E2-7) — Chalk feedback record and revision link tables.
+-- chalk_feedback: one row per instructor feedback session (server-generated id).
+-- chalk_feedback_revisions: links a plan revision to the feedback that prompted it.
+-- Production D1 apply: after M2 gate only.
 CREATE TABLE IF NOT EXISTS chalk_feedback (
   feedback_id   TEXT PRIMARY KEY,
   cohort_id     TEXT NOT NULL,
@@ -8,8 +10,9 @@ CREATE TABLE IF NOT EXISTS chalk_feedback (
   text          TEXT NOT NULL,
   model         TEXT NOT NULL,
   actor         TEXT NOT NULL,
-  request_id    TEXT NOT NULL UNIQUE,
+  request_id    TEXT NOT NULL,
   created_at    INTEGER NOT NULL,
+  UNIQUE(cohort_id, course_id, request_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
 CREATE TABLE IF NOT EXISTS chalk_feedback_revisions (
