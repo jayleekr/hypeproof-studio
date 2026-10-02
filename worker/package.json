@@ -50,7 +50,7 @@
     "test:classroom-ops:review": "node --experimental-strip-types --experimental-sqlite --test test/classroom-ops-review.test.mjs test/classroom-ops-staging-config.test.mjs",
     "test:chalk-knowledge": "node --experimental-strip-types test/chalk-knowledge.test.mjs",
     "test:chalk-knowledge-import": "node --experimental-strip-types --experimental-sqlite test/chalk-knowledge-import.test.mjs",
-    "test:chalk-instructor": "node --experimental-strip-types test/chalk-instructor-whoami.test.mjs && node --experimental-strip-types test/chalk-instructor-brief.test.mjs && node --experimental-strip-types --experimental-sqlite test/chalk-ops-plan.test.mjs"
+    "test:chalk-instructor": "node --experimental-strip-types test/chalk-instructor-whoami.test.mjs && node --experimental-strip-types test/chalk-instructor-brief.test.mjs && node --experimental-strip-types --experimental-sqlite test/chalk-ops-plan.test.mjs && node --experimental-strip-types --experimental-sqlite test/chalk-derive.test.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7"

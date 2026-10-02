@@ -3982,6 +3982,9 @@
       "sources": [
         {
           "path": "worker/test/chalk-derive.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-derive.test.mjs"
         }
       ]
     }
