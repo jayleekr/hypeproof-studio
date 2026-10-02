@@ -1,7 +1,8 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import type { BrowserToolsForLocal } from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
 import { chalkToolsEnabled } from './chalk/tools';
-import { runInstructorTurn } from './chalk/instructorTurn';
+import { runInstructorTurn, INSTRUCTOR_TOOL_PROFILE } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -45,6 +46,7 @@ import {
   pickRevealTabIndex,
   browserTabCoverage,
   toProxyToolResult,
+  isLoopbackUrl,
 } from "./browserControlHelpers";
 import { isCurriculumRuntimeEnabled, CR_CONTEXT_KEY } from "./curriculumRuntime";
 import { artifactVersionFor } from "./artifactVersion";
@@ -87,6 +89,21 @@ const observationKey = (b: {format?: string; scope: string; program: string}) =>
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
+
+// Instructor-mode browser tool definitions (local runtime path). Mirrored from
+// browserMcp.ts names so the server recognises them when the path switches to SDK.
+const INSTRUCTOR_LOCAL_BROWSER_DEFS: { name: string; description: string; inputSchema: unknown }[] = [
+  {
+    name: "live_preview_start",
+    description: "학생 워크스페이스를 로컬 라이브 서버(127.0.0.1)로 서빙하고 통합 브라우저에서 엽니다. 파일이 바뀌면 자동 새로고침됩니다.",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: "browser_open",
+    description: "통합 브라우저에서 URL을 엽니다. localhost/127.0.0.1 주소만 허용됩니다.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+  },
+];
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
 import {
   matchWorldRef,
@@ -3419,11 +3436,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
               // before MultiEdit existed) stacks five "미리보기를 열었어요" lines and
               // reopens the live server just as many times. Open once, after the last
               // save (debounce).
-              if (this.revealTimer) clearTimeout(this.revealTimer);
-              this.revealTimer = setTimeout(() => {
-                this.revealTimer = undefined;
-                void this.revealWrittenHtml(fp, streamId);
-              }, 900);
+              // Instructor mode uses live_preview_start + browser_open; skip
+              // the student auto-preview when the instructor writes an HTML file.
+              if (!this._instructorMode.isInstructor) {
+                if (this.revealTimer) clearTimeout(this.revealTimer);
+                this.revealTimer = setTimeout(() => {
+                  this.revealTimer = undefined;
+                  void this.revealWrittenHtml(fp, streamId);
+                }, 900);
+              }
             }
             break;
         }
@@ -3529,7 +3550,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (local) {
         if (this._instructorMode.isInstructor === true) {
           // Instructor path — bypasses student token, ensureProfile, lesson gates, spool
-          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write only).
+          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write + browser).
           const cwd=this.resolveCoachCwd();
           if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
           // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
@@ -3547,11 +3568,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 },
               }
             : undefined;
+          // Browser tools for the local runtime: live_preview_start + browser_open.
+          // Reuses INSTRUCTOR_TOOL_PROFILE.sdk_tools.browser to stay in sync with the policy.
+          const browserTools: BrowserToolsForLocal | undefined =
+            INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser
+              ? {
+                  definitions: INSTRUCTOR_LOCAL_BROWSER_DEFS,
+                  call: async (name: string, input: unknown) => {
+                    if (name === "live_preview_start") {
+                      const url = await this.startLivePreview();
+                      if (!url) return "라이브 프리뷰를 시작하지 못했어요 (작업 폴더가 없나요?).";
+                      return `라이브 프리뷰를 시작하고 브라우저에 열었어요: ${url}`;
+                    }
+                    if (name === "browser_open") {
+                      const url = typeof (input as Record<string, unknown>)?.url === "string"
+                        ? (input as Record<string, unknown>).url as string : "";
+                      if (!isLoopbackUrl(url)) return `이 주소는 열 수 없어요: ${url}`;
+                      const opened = await this.startLivePreview();
+                      if (!opened) return "라이브 프리뷰를 시작하지 못했어요.";
+                      return `브라우저에서 ${url} 을 열었어요.`;
+                    }
+                    throw new Error(`알 수 없는 브라우저 도구: ${name}`);
+                  },
+                }
+              : undefined;
           const result=await runInstructorTurn({
             local,cwd,
             history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
             brief:this._instructorMode.brief,
             chalkCtx,
+            browserTools,
             signal:ctrl.signal,onDelta,onActivity,
             requestApproval:async action=>{
               let prompted=false;

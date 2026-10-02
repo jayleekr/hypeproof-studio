@@ -4,13 +4,13 @@
 
 import type { ResolvedProfile } from "../protocol";
 import { runLocalCoach } from "../localRuntime/index.ts";
-import type { LocalRuntimeConfig } from "../localRuntime/index.ts";
+import type { LocalRuntimeConfig, BrowserToolsForLocal } from "../localRuntime/index.ts";
 import type { ChalkToolContext } from "./tools";
 import type { SdkActivity, CoachToolAction } from "../sdkCoachHelpers";
 
 // Instructor tool policy — NOT a student profile.
-// Grants Read + Write (workspace tools) only.
-// Shell, browser, subagents are off — instructor only needs file inspection and Chalk tools.
+// Grants Read + Write (workspace tools) + browser (live_preview_start / browser_open).
+// Shell and subagents are off.
 // Exported for smoke tests only; not part of the public API.
 export const INSTRUCTOR_TOOL_PROFILE: ResolvedProfile = {
   profile_id: "chalk-instructor",
@@ -22,7 +22,7 @@ export const INSTRUCTOR_TOOL_PROFILE: ResolvedProfile = {
   welcome: { greeting_md: "", example_prompts: [] },
   publishing: { enabled: false, strategy: "none" },
   preview: { type: "iframe", auto_start: false },
-  sdk_tools: { read: true, write: true },
+  sdk_tools: { read: true, write: true, browser: true },
   ux: {
     coach: {
       naming_mode: "fixed",
@@ -46,6 +46,8 @@ export async function runInstructorTurn(args: {
   userText: string;
   brief: string | undefined;
   chalkCtx: ChalkToolContext | undefined;
+  /** live_preview_start + browser_open handlers from chatPanelProvider. */
+  browserTools?: BrowserToolsForLocal;
   signal: AbortSignal;
   onDelta: (text: string) => void;
   onActivity?: (a: SdkActivity) => void;
@@ -64,6 +66,7 @@ export async function runInstructorTurn(args: {
     userText: args.userText,
     systemPrompt: args.brief,
     chalkCtx: args.chalkCtx,
+    browserTools: args.browserTools,
     signal: args.signal,
     onDelta: args.onDelta,
     onActivity: args.onActivity,

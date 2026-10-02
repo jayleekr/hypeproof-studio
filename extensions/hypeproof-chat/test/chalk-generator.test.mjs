@@ -22,7 +22,7 @@ const {
   workingCopyPath,
 } = await import('../src/chalk/tools.ts');
 
-const { mergeChalkTools } = await import('../src/localRuntime/index.ts');
+const { mergeChalkTools, mergeBrowserTools } = await import('../src/localRuntime/index.ts');
 
 let passed = 0;
 const check = async (name, fn) => { await fn(); passed++; console.log(`PASS ${name}`); };
@@ -377,6 +377,54 @@ await check('T-G15 set_inputs raises revision; subsequent save_plan uses latest 
     assert.equal(savedRevisionInSavePlan, 2,
       `save_plan expected_revision must be 2 (post-set_inputs revision), got: ${savedRevisionInSavePlan}`);
   });
+});
+
+// ─── T-G16: 강사 모드 mergeBrowserTools → browser 도구 2개 포함, 연속 두 턴 ──
+await check('T-G16 instructor mode: live_preview_start + browser_open in merged defs (two consecutive turns)', () => {
+  const BROWSER_DEFS = [
+    { name: 'live_preview_start', description: '라이브 서버 시작', inputSchema: { type: 'object' } },
+    { name: 'browser_open', description: '브라우저 열기', inputSchema: { type: 'object' } },
+  ];
+  const browserTools = { definitions: BROWSER_DEFS, call: async () => 'ok' };
+
+  const mockWork = { definitions: [{ name: 'Read', description: '', inputSchema: {} }], call: async () => 'ok' };
+
+  // Simulate two consecutive instructor turns by merging twice from the same base.
+  for (const turn of [1, 2]) {
+    const merged = mergeBrowserTools(mockWork, browserTools);
+    const names = merged.definitions.map(d => d.name);
+    assert.ok(names.includes('live_preview_start'), `턴 ${turn}: live_preview_start 없음`);
+    assert.ok(names.includes('browser_open'), `턴 ${turn}: browser_open 없음`);
+  }
+});
+
+// ─── T-G17: 학생 모드(browserTools=undefined) → browser 도구 없음 ──────────
+await check('T-G17 student mode (no browserTools): live_preview_start + browser_open NOT in defs', () => {
+  const mockWork = { definitions: [{ name: 'Read', description: '', inputSchema: {} }], call: async () => 'ok' };
+  const merged = mergeBrowserTools(mockWork, undefined);
+  const names = merged.definitions.map(d => d.name);
+  assert.ok(!names.includes('live_preview_start'), 'live_preview_start must not appear without browserTools');
+  assert.ok(!names.includes('browser_open'), 'browser_open must not appear without browserTools');
+  // Base tools preserved.
+  assert.ok(names.includes('Read'), 'Read must still be present');
+});
+
+// ─── T-G18: browser_open 라우팅 — browserTools.call 위임 ─────────────────
+await check('T-G18 mergeBrowserTools routes browser_open to browserTools.call', async () => {
+  let calledWith = null;
+  const BROWSER_DEFS = [
+    { name: 'live_preview_start', description: '', inputSchema: {} },
+    { name: 'browser_open', description: '', inputSchema: {} },
+  ];
+  const browserTools = {
+    definitions: BROWSER_DEFS,
+    call: async (name, input) => { calledWith = { name, input }; return 'opened'; },
+  };
+  const mockWork = { definitions: [], call: async () => { throw new Error('base call must not be reached'); } };
+  const merged = mergeBrowserTools(mockWork, browserTools);
+  const result = await merged.call('browser_open', { url: 'http://127.0.0.1:3000/' });
+  assert.equal(calledWith?.name, 'browser_open', 'browser_open이 browserTools.call로 위임되지 않았다');
+  assert.equal(result, 'opened', '결과가 browserTools.call 반환값과 다르다');
 });
 
 console.log(`\n${passed} tests passed`);
