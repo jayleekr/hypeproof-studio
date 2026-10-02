@@ -443,10 +443,10 @@ export type WebviewMessage = (
   | { type: "artifactApprove" }
   | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
-  | { type: "helpCancel"; key: string }
+  | { type: "helpCancel"; key: string; requestId: string }
   | { type: "helpSend"; key: string; requestId: string; consent: boolean }
   | { type: "helpRetry"; key: string }
-  | { type: "helpDiscard"; key: string }
+  | { type: "helpDiscard"; key: string; requestId: string }
   | { type: "helpConfirm"; key: string; id: string; revision: number }
   | { type: "helpWithdraw"; key: string; id: string }
   | { type: "traceTrialStart"; taskLabel?: string }

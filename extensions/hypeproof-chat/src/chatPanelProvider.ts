@@ -3072,10 +3072,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
-      case "helpCancel": await this.helpSource?.cancel(msg.key); return;
+      case "helpCancel": await this.helpSource?.cancel(msg.key, msg.requestId); return;
       case "helpSend": await this.helpSource?.send(msg.key, msg.requestId, msg.consent === true); return;
       case "helpRetry": await this.helpSource?.retry(msg.key); return;
-      case "helpDiscard": await this.helpSource?.discard(msg.key); return;
+      case "helpDiscard": await this.helpSource?.discard(msg.key, msg.requestId); return;
       case "helpConfirm": await this.helpSource?.confirm(msg.key, msg.id, msg.revision); return;
       case "helpWithdraw": await this.helpSource?.withdraw(msg.key, msg.id); return;
       case "ready":
