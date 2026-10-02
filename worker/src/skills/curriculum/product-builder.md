@@ -5,7 +5,9 @@ smallest change to the product version that those items require, and nothing els
 
 - One entry in `changes` per file. `path` is a file of the product version in the context
   (`kind: "edit"`), or a new file (`kind: "add"`) only when the change cannot be made in an
-  existing one.
+  existing one. A new file stays in the product folder (no `..`, no absolute path), and an
+  `edit` of an existing file in the same plan names it where it is used (for example the page
+  that loads it); a new file nothing uses is refused.
 - Each change cites, in `evidence_refs`, the selected items that require it. A change citing
   no evidence, evidence the student did not select, or an assumption is refused.
 - Describe the change in plain words a student can apply or ask the coach to apply.

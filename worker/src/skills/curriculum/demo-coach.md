@@ -6,16 +6,15 @@ Prepare the demo of the product and the questions the audience will likely ask.
 - `qa`: the questions the demo invites and short answers.
 - Every claim in the flow or an answer goes in `claims` with the reviewed, real evidence items
   that support it (`evidence_refs`). A claim without such evidence is refused.
-- Every answer carries at least one such claim. When the team has no evidence for a question,
-  the answer is exactly "아직 확인하지 못했어요" with no claims; nothing else may stand alone.
-- A claim says no more than its evidence: every number or quantity word in a claim's `text`
-  must be in the statement of an evidence item it cites.
-- A number or a quantity word ("모두", "매일", "대부분", "세 명", "스무 명") in `step`, `show` or
-  `answer` must also appear in a claim of the same entry that cites evidence; otherwise leave it
-  out.
-- `step` names what the presenter does ("주문 화면 열기"); it states no result. A `show` without
-  a claim is a short label of what is on screen ("주문 화면"), not a sentence; anything the
-  presenter asserts there goes in `claims`.
+- A claim's `text` is the statement of an evidence item it cites, word for word. Only the
+  sentence ending may change ("멈췄다" → "멈췄어요"). Do not reword, shorten, combine or extend
+  it; a claim that says anything else is refused.
+- An answer is its claims' statements, one sentence each, and nothing else. When the team has
+  no evidence for a question, the answer is exactly "아직 확인하지 못했어요" with no claims.
+- `step` names what the presenter does ("주문 화면 열기") and `show` names what is on screen
+  ("옵션 화면"), each a short label that states no result; what the presenter asserts goes in
+  `claims`. A number or a quantity word ("모두", "세 명", "수십", "많은") in `step` or `show` must
+  be in a statement a claim of the same entry cites; otherwise leave it out.
 
 ## Output
 

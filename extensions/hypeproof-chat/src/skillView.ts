@@ -143,6 +143,8 @@ const PROBLEM_LINES: Record<string, string> = {
   evidence_not_selected: "고르지 않은 근거로 바꾸려 했어요.",
   path_not_in_version: "제품에 없는 파일을 바꾸려 했어요.",
   add_of_existing_file: "이미 있는 파일을 새 파일로 만들려 했어요.",
+  add_not_used: "바꾸는 파일 어디에서도 쓰지 않는 새 파일을 만들려 했어요.",
+  path_outside_version: "제품 폴더 밖의 파일을 만들려 했어요.",
   no_product_version: "아직 공개한 제품 버전이 없어요.",
   decision_unresolved: "고른 결정을 찾을 수 없어요.",
   decision_is_ai_suggestion: "AI 제안은 팀의 결정이 아니라서 슬라이드를 바꿀 수 없어요.",
@@ -154,16 +156,17 @@ const PROBLEM_LINES: Record<string, string> = {
   answer_without_notes: "메모가 없는데 인터뷰 대답을 적었어요.",
   not_a_note_field: "메모 정리가 적을 칸 이름을 쓰지 않았어요.",
   not_a_label: "적을 칸 이름이 짧은 이름이 아니에요.",
+  purpose_not_a_label: "질문의 목적에 대답이나 문장이 들어 있어요.",
   unknown_claim: "없는 주장을 가리켰어요.",
   not_listed: "빠뜨린 주장이 있어요.",
   case_missing: "AI가 틀리거나 위험하거나 답하지 못할 때의 검토가 빠졌어요.",
   unhandled_failure_not_named: "제품 파일에 AI 실패 대비가 없는데 있다고 했어요.",
-  product_has_no_ai: "AI를 쓰지 않는 제품에 AI 실패 검토를 적었어요.",
   sources_not_read: "제품 파일을 다 읽지 못해서 검토를 받을 수 없어요.",
   answer_without_claim: "근거 없는 대답이 있어요.",
   unsupported_quantity: "근거 없는 숫자나 '모두' 같은 말이 있어요.",
-  claim_quantity_not_in_evidence: "주장의 숫자나 '모두' 같은 말이 근거에 없어요.",
-  show_without_claim: "근거 없이 결과를 말하는 데모 장면이 있어요.",
+  claim_not_cited_statement: "주장이 근거에 적힌 말과 달라요.",
+  answer_not_claims: "대답에 근거에 적힌 말이 아닌 내용이 있어요.",
+  show_asserts: "데모 장면 설명에 결과를 말하는 문장이 있어요.",
   step_asserts: "데모 순서 이름에 확인하지 않은 결과가 들어 있어요.",
   missing: "꼭 있어야 할 칸이 빠졌어요.",
   not_allowed: "정해지지 않은 칸이 들어 있어요.",
@@ -258,7 +261,7 @@ export function resultSections(skill: string, out: Record<string, any>): Array<{
       ].filter((s) => s.lines.length);
     case "demo-coach":
       return [
-        { heading: "데모 순서", lines: list(out.flow).map((f, i) => `${i + 1}. ${f.step} — ${f.show}`) },
+        { heading: "데모 순서", lines: list(out.flow).flatMap((f, i) => [`${i + 1}. ${f.step} — ${f.show}`, ...list(f.claims).map((c) => `   주장: ${c.text}${refs(c.evidence_refs)}`)]) },
         { heading: "예상 질문", lines: list(out.qa).map((q) => `Q. ${q.question} / A. ${q.answer}`) },
       ];
     default:

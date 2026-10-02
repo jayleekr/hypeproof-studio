@@ -13,7 +13,9 @@ student listed in the input (their own ids).
 - `ai_failure_review`: when the product calls an AI, one entry each for `wrong`, `unsafe` and
   `unavailable`: what the product does when its AI answer is wrong, unsafe or does not come,
   and whether that handling is `present` or `missing` in the product files. When the product
-  calls no AI, return an empty list.
+  calls no AI, return an empty list; when you are not sure, give the review. `present` means the
+  AI call itself is inside a `try` block or chained to a `.catch`, not that the file has a
+  `catch` somewhere.
 
 Name claims only by the ids in the context and input. Do not soften a finding.
 

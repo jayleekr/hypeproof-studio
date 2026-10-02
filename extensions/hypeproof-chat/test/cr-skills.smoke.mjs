@@ -249,7 +249,14 @@ const session = (svc, over = {}) => {
   assert.deepEqual(critic[0].lines, ["슬라이드 3: 가정뿐"]);
   assert.deepEqual(resultSections("critic", { weak_claims: [], missing_tests: [{ claim_id: "c2", test: "다섯 명 시험" }], safety: [], ai_failure_review: [] })[0].lines, ["주장 2: 다섯 명 시험"]);
   assert.deepEqual(writtenLines([{ target: "something_new", id: "x" }]), ["프로젝트에 저장했어요."]);
-  assert.equal(problemLine("demo_claims_supported $.qa[0].claims[0]: claim_quantity_not_in_evidence:100"), "주장의 숫자나 '모두' 같은 말이 근거에 없어요.");
+  // Review round 3: every code the rules now emit reads as its own Korean line; the retired ones are gone.
+  for (const code of ["claim_not_cited_statement", "answer_not_claims", "show_asserts", "add_not_used", "path_outside_version:../x.js", "purpose_not_a_label"])
+    assert.notEqual(problemLine(`r $.x: ${code}`), "AI의 답에 규칙에 맞지 않는 곳이 있어요.", code);
+  assert.equal(problemLine("demo_claims_supported $.qa[0].claims[0]: claim_not_cited_statement"), "주장이 근거에 적힌 말과 달라요.");
+  for (const gone of ["product_has_no_ai", "claim_quantity_not_in_evidence", "show_without_claim"]) assert.equal(problemLine(`r $.x: ${gone}`), "AI의 답에 규칙에 맞지 않는 곳이 있어요.", gone);
+  // The demo flow shows each claim under its step, so the presenter reads what the evidence says.
+  const demoFlow = resultSections("demo-coach", { flow: [{ step: "옵션 화면 열기", show: "옵션 화면", claims: [{ text: "세 명 중 두 명이 옵션에서 멈췄다", evidence_refs: ["ev:1"] }] }], qa: [] })[0].lines;
+  assert.deepEqual(demoFlow, ["1. 옵션 화면 열기 — 옵션 화면", "   주장: 세 명 중 두 명이 옵션에서 멈췄다 (근거 1개)"]);
   ok("helpers: the answer parser takes plain, fenced and embedded JSON and refuses the rest; inputs and result sections");
 }
 

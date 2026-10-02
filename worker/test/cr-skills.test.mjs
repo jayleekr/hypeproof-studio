@@ -420,6 +420,11 @@ await test("CR-T43 negative: planted out-of-scope file changes and unaffected-sl
   caught(gate("product-builder", { evidence_refs: [EV("a1")] }, { summary: "s", changes: [{ path: "app.js", kind: "edit", change: "가정으로 바꾼다", evidence_refs: [EV("a1")] }] }), "evidence_not_usable");
   caught(gate("product-builder", { evidence_refs: [EV("x1")] }, { summary: "s", changes: [{ path: "app.js", kind: "edit", change: "검토 안 된 AI 해석으로", evidence_refs: [EV("x1")] }] }), "evidence_not_usable");
   caught(gate("product-builder", sel, plan({ path: "index.html", kind: "add", change: "덮어쓰기", evidence_refs: [EV("o1")] })), "add_of_existing_file");
+  // Review round 3: a new file nothing in the plan wires in, or a path outside the version's folder.
+  caught(gate("product-builder", sel, plan({ path: "admin.js", kind: "add", change: "관리자 대시보드와 결제 추적 스크립트 추가", evidence_refs: [EV("o1")] })), "add_not_used:admin.js");
+  for (const path of ["../../worker/src/index.ts", "/etc/hosts", "js/../../x.js", "https://evil.test/x.js"]) caught(gate("product-builder", sel, plan({ path, kind: "add", change: "새 파일", evidence_refs: [EV("o1")] })), `path_outside_version:${path}`);
+  const wired = { summary: "옵션을 한 화면에", changes: [{ path: "index.html", kind: "edit", change: "옵션 단계를 하나로 합치고 options.js 를 불러온다", evidence_refs: [EV("o1")] }, { path: "js/options.js", kind: "add", change: "한 화면 옵션 선택", evidence_refs: [EV("o1")] }] };
+  assert.deepEqual(problemsOf(gate("product-builder", sel, wired)), [], "control: a new file an in-version edit wires in");
   caught(gate("deck-builder", { decision_id: "dec-1" }, { patches: [...DECK_OK.patches, { slide: 5, title: "고객", body: "바꿈", evidence_refs: [EV("o1")] }] }), "slide_not_affected:5");
   caught(gate("deck-builder", { decision_id: "dec-1" }, { patches: [DECK_OK.patches[0], { ...DECK_OK.patches[0] }] }), "duplicate_slide:2");
   caught(gate("deck-builder", { decision_id: "dec-1" }, { patches: [{ slide: 2, title: "문제", body: "근거 없음", evidence_refs: [] }] }), "no_evidence");
@@ -449,7 +454,7 @@ const NOTES = "학생 메모: 손님이 '옵션이 너무 많아서 뭘 눌러�
 await test("CR-T44 positive: Interview output has only open questions and quotes the notes word for word; the Critic lists exactly what the fixture plants; Demo Coach returns a flow and Q&A on reviewed evidence", () => {
   assert.deepEqual(problemsOf(gate("interview", { goal: "주문이 어려운 이유", notes: NOTES }, INTERVIEW_OK)), []);
   // Instrument controls (too strict?): ordinary open questions pass, in several forms.
-  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?", "옵션을 고를 때 무엇이 가장 어려웠나요?", "What would you like to change?", "주문하면서 어떤 기분이 들었는지 이야기해 주세요.", "어떤 점이 불편했는지 이야기해 주세요.", "어떤 점이 안 좋았는지 말씀해 주세요.", "무엇을 바꾸고 싶은지 알려 주세요."]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
+  for (const q of ["왜 그 버튼을 먼저 눌렀나요?", "언제 이 매점을 쓰세요?", "어떤 점이 헷갈렸는지 설명해 주세요.", "어디에서 주로 주문하나요?", "How did you pay?", "옵션을 고를 때 무엇이 가장 어려웠나요?", "What would you like to change?", "주문하면서 어떤 기분이 들었는지 이야기해 주세요.", "어떤 점이 불편했는지 이야기해 주세요.", "어떤 점이 안 좋았는지 말씀해 주세요.", "무엇을 바꾸고 싶은지 알려 주세요.", "어떤 점이 더 불편했나요?", "What do you do when you get stuck?", "도움이 필요할 때 누구에게 물어보나요?"]) assert.equal(rulesMod.isOpenQuestion(q), true, q);
   for (const l of ["막힌 단계", "한 말 그대로", "다시 쓸 이유"]) assert.equal(rulesMod.isNoteLabel(l), true, l);
   const critic = {
     weak_claims: [{ claim_id: "slide:3", reason: "가정만 근거로 쓴다" }, { claim_id: "slide:4", reason: "근거가 없다" }, { claim_id: "c1", reason: "근거가 없다" }],
@@ -471,9 +476,13 @@ await test("CR-T44 positive: Interview output has only open questions and quotes
   const noAi = { ...CTX, version: { ...CTX.version, files: [{ path: "index.html", text: PAGE("v1") }] } };
   assert.deepEqual(problemsOf(gate("critic", {}, { ...critic, weak_claims: critic.weak_claims.filter((w) => w.claim_id !== "c1"), missing_tests: critic.missing_tests.filter((m) => m.claim_id !== "c1"), ai_failure_review: [] }, noAi)), []);
   const demo = {
-    // A quantity in the free text is fine when a supported claim of the same entry carries it.
-    flow: [{ step: "주문 화면 열기", show: "세 명 중 두 명이 멈췄던 옵션 화면을 한 단계로 바꾼 것", claims: [{ text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] }] }],
-    qa: [{ question: "왜 옵션을 줄였나요?", answer: "테스트에서 옵션 단계에서 멈췄기 때문이에요", claims: [{ text: "옵션 단계가 많았어요", evidence_refs: [EV("i1")] }] }, { question: "어르신도 쓸 수 있나요?", answer: "아직 확인하지 못했어요", claims: [] }],
+    // A claim is its cited item's statement (only the sentence ending may differ); an answer is its
+    // claims' statements; a quantity in `show` is fine when a cited statement of the same entry carries it.
+    flow: [{ step: "주문 화면 열기", show: "세 명 중 두 명이 멈추던 옵션 화면", claims: [{ text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] }] }],
+    qa: [
+      { question: "왜 옵션을 줄였나요?", answer: "옵션 단계가 많아요. 세 명 중 두 명이 옵션에서 멈췄습니다.", claims: [{ text: "옵션 단계가 많아요", evidence_refs: [EV("i1")] }, { text: "세 명 중 두 명이 옵션에서 멈췄다", evidence_refs: [EV("o1"), EV("i1")] }] },
+      { question: "어르신도 쓸 수 있나요?", answer: "아직 확인하지 못했어요", claims: [] },
+    ],
   };
   assert.deepEqual(problemsOf(gate("demo-coach", {}, demo)), []);
 });
@@ -481,7 +490,9 @@ await test("CR-T44 positive: Interview output has only open questions and quotes
 await test("CR-T44 negative: planted leading questions, fabricated answers, weak claims, an unchecked claim, an unhandled AI failure and an unsupported demo or Q&A claim are each caught", () => {
   const LEADING = ["옵션이 너무 많지 않나요?", "이 키오스크 편리하죠?", "한 단계면 더 좋지 않아요?", "얼마나 만족하셨나요?", "Don't you think this is easier?", "이 기능이 필요하다는 데 동의하시나요?", "어떤 점이 좋았나요?", "무엇이든 괜찮으세요?", "어떤 것이든 좋으신가요?", "어느 화면이 마음에 드셨나요?", "How much do you love this feature?", "Do you like the new screen?",
     // Review round 2: the same verdict embedded in a request, presupposing English forms, a praising question.
-    "어떤 점이 가장 좋았는지 이야기해 주세요.", "어떤 점이 마음에 들었는지 알려 주세요.", "왜 이 앱이 더 편리하다고 느끼셨어요?", "왜 이 앱이 좋다고 생각하세요?", "What did you love about it?", "Why is it better than the old kiosk?", "How great was it?", "어떻게 하면 이 훌륭한 앱을 더 많이 쓰실까요?"];
+    "어떤 점이 가장 좋았는지 이야기해 주세요.", "어떤 점이 마음에 들었는지 알려 주세요.", "왜 이 앱이 더 편리하다고 느끼셨어요?", "왜 이 앱이 좋다고 생각하세요?", "What did you love about it?", "Why is it better than the old kiosk?", "How great was it?", "어떻게 하면 이 훌륭한 앱을 더 많이 쓰실까요?",
+    // Review round 3: each planted form beside its counterpart in the other language.
+    "왜 이 앱이 기존 키오스크보다 나은가요?", "What do you like most about it?", "이 앱에서 무엇이 가장 마음에 드세요?", "How much would you pay for this amazing app?", "이 놀라운 앱에 얼마를 내시겠어요?", "Why would you recommend it to a friend?", "왜 이 앱을 친구에게 추천하시겠어요?", "이 앱 덕분에 무엇이 빨라졌나요?", "What got faster thanks to this app?", "What made it so easy?", "왜 이 앱이 더 편한가요?", "Why is it easier?", "어떻게 이 앱이 시간을 절약해 주었나요?", "How did this app save you time?", "이 앱 덕분에 무엇이 쉬워졌나요?", "이 앱을 친구에게 추천하고 싶은 이유는 무엇인가요?", "Why do you prefer our app over the old kiosk?", "What makes this app so much better?"];
   for (const q of LEADING) {
     const out = { ...INTERVIEW_OK, questions: [...INTERVIEW_OK.questions.slice(0, 3), { text: q, purpose: "planted" }] };
     caught(gate("interview", { goal: "g", notes: NOTES }, out), "leading_question");
@@ -494,6 +505,11 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "손님은 '너무 비싸요'라고 답함"] }), "note_fields[1]: not_a_label");
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "매일 쓰고 싶어함"] }), "note_fields[1]: not_a_label");
   caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", "가격이 비싸서 안 쓴다는 의견"] }), "note_fields[1]: not_a_label");
+  // Review round 3: an answer in the nominal style, a past-tense result or a verdict word in a label; a made-up answer in a question's purpose.
+  for (const f of ["가격 비쌈", "다시 안 씀", "버튼 찾기 힘듦", "결제 어려웠던 점", "혼자 주문 불가"]) caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, note_fields: ["막힌 단계", f] }), "note_fields[1]: not_a_label");
+  for (const l of ["불편한 점", "첫 느낌", "이름", "실제 경험"]) assert.equal(rulesMod.isNoteLabel(l), true, `control: ${l}`);
+  for (const purpose of ["손님은 가격이 비싸서 안 쓴다고 함", "가격 비쌈", "'너무 비싸요'", "손님이 다시 안 쓴다."])
+    caught(gate("interview", { goal: "g", notes: NOTES }, { ...INTERVIEW_OK, questions: [{ ...INTERVIEW_OK.questions[0], purpose }, ...INTERVIEW_OK.questions.slice(1)] }), "questions[0].purpose: purpose_not_a_label");
   // A quote cut out of a longer clause can reverse it: "좋았어요" out of "결제는 안 좋았어요".
   const reversed = { goal: "g", notes: "손님: 결제는 안 좋았어요. 옵션은 많았어요." };
   caught(gate("interview", reversed, { ...INTERVIEW_OK, structured_notes: [{ topic: "막힌 단계", quote: "좋았어요" }] }), "answer_not_in_notes");
@@ -534,6 +550,29 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   assert.deepEqual(rulesMod.aiFailureHandling([{ path: "d.js", text: "fetch('/menu.json').then((r) => r.json())" }]), { uses_ai: false, unhandled: [] }, "control: a plain fetch is no AI call");
   const aliased = { ...CTX, version: { ...CTX.version, files: [{ path: "app.js", text: "const ai = window.hypeproof.ai; document.querySelector('#order').onclick = async () => (document.title = (await ai.generate({ capability: 'text.fast' })).text);" }] } };
   assert.deepEqual(problemsOf(gate("critic", input, base, aliased)), [], "an aliased AI product takes the AI failure review (not product_has_no_ai)");
+  // Review round 3: the detector is a floor. Destructured, optional-chained and bracket SDK access,
+  // provider SDK imports and more provider hosts are AI calls; page prose naming "hypeproof.ai" is not.
+  for (const text of ["const { ai } = window.hypeproof; ai.chat({ prompt }).then(show);", "await window.hypeproof?.ai.chat(p)", "window['hypeproof']['ai'].chat(p).then(show)", "window.hypeproof['ai'].chat(p)", "fetch('https://api.cohere.ai/v1/chat', {})", "import OpenAI from 'openai'; new OpenAI().chat.completions.create({})", "import { GoogleGenerativeAI } from '@google/generative-ai'; new GoogleGenerativeAI(k).getGenerativeModel({}).generateContent(p)"])
+    assert.deepEqual(rulesMod.aiFailureHandling([{ path: "app.js", text }]), { uses_ai: true, unhandled: ["app.js"] }, text);
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "index.html", text: "<p>Powered by hypeproof.ai</p>" }]), { uses_ai: false, unhandled: [] }, "page prose is not a call");
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "index.html", text: "<script>hypeproof.ai.chat(p).catch(() => show('잠시 뒤'))</script>" }]), { uses_ai: true, unhandled: [] }, "control: an inline script call with its handler");
+  // Handling is per call: an unrelated try/catch in the same file does not handle the AI call.
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "app.js", text: "try { JSON.parse(x) } catch {}; hypeproof.ai.chat(p).then(show)" }]).unhandled, ["app.js"]);
+  assert.deepEqual(rulesMod.aiFailureHandling([{ path: "app.js", text: "const { ai } = window.hypeproof; try { show(await ai.chat({ prompt })) } catch (e) { show('잠시 뒤') }" }]).unhandled, [], "control: the call inside try");
+  const destructured = { ...CTX, version: { ...CTX.version, files: [{ path: "app.js", text: "const { ai } = window.hypeproof; document.querySelector('#order').onclick = () => ai.chat({ prompt: '추천' }).then(show);" }] } };
+  assert.deepEqual(problemsOf(gate("critic", input, base, destructured)), [], "a destructured AI product takes the review (not refused)");
+  caught(gate("critic", input, { ...base, ai_failure_review: [] }, destructured), "case_missing:wrong");
+  caught(gate("critic", input, { ...base, ai_failure_review: base.ai_failure_review.map((r) => (r.case === "unavailable" ? { ...r, handling: "present" } : r)) }, destructured), "unhandled_failure_not_named:app.js");
+  const unrelatedCatch = { ...CTX, version: { ...CTX.version, files: [{ path: "app.js", text: "try { JSON.parse(x) } catch {}; hypeproof.ai.chat(p).then(show)" }] } };
+  caught(gate("critic", input, { ...base, ai_failure_review: base.ai_failure_review.map((r) => (r.case === "unavailable" ? { ...r, handling: "present" } : r)) }, unrelatedCatch), "unhandled_failure_not_named:app.js");
+  // When no call is found, a review the Critic gives is accepted and must be complete; leaving it out is accepted too.
+  const noCall = { ...CTX, version: { ...CTX.version, files: [{ path: "index.html", text: PAGE("v1") }] } };
+  assert.deepEqual(problemsOf(gate("critic", input, base, noCall)), [], "a review of a product with no detected call is not refused");
+  assert.deepEqual(problemsOf(gate("critic", input, { ...base, ai_failure_review: [] }, noCall)), [], "control: no review for no detected call");
+  caught(gate("critic", input, { ...base, ai_failure_review: base.ai_failure_review.filter((r) => r.case !== "wrong") }, noCall), "case_missing:wrong");
+  const unread = { ...CTX, version: { ...noCall.version, unread: ["late.js"] } };
+  caught(gate("critic", input, { ...base, ai_failure_review: [] }, unread), "sources_not_read:late.js");
+  assert.deepEqual(problemsOf(gate("critic", input, base, unread)), [], "control: a complete review with an unread source");
 
   const demo = (claim) => ({ flow: [{ step: "s", show: "w", claims: [] }], qa: [{ question: "q", answer: "a", claims: [claim] }] });
   caught(gate("demo-coach", {}, demo({ text: "어르신도 혼자 주문해요", evidence_refs: [EV("a1")] })), "qa[0].claims[0]: evidence_not_usable");
@@ -554,22 +593,43 @@ await test("CR-T44 negative: planted leading questions, fabricated answers, weak
   const o1 = { text: "세 명 중 두 명이 옵션에서 멈췄어요", evidence_refs: [EV("o1")] };
   caught(free(quiet, { question: "몇 명이 멈췄나요?", answer: "100명이 멈췄어요", claims: [o1] }), "qa[0].answer: unsupported_quantity:100");
   caught(free(quiet, { question: "몇 명이 썼나요?", answer: "100명이 썼어요", claims: [{ text: "100명이 썼어요", evidence_refs: [EV("x1")] }] }), "qa[0].answer: unsupported_quantity:100");
-  assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "세 명 중 두 명이 멈췄어요", claims: [o1] })), [], "control: the same quantity with its supported claim passes");
-  assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "3명 중 2명이 멈췄어요", claims: [o1] })), [], "control: digits and Korean number words are one quantity");
+  assert.deepEqual(problemsOf(free(quiet, { question: "몇 명이 멈췄나요?", answer: "세 명 중 두 명이 옵션에서 멈췄어요", claims: [o1] })), [], "control: the cited statement as the answer passes");
+  assert.deepEqual(problemsOf(free({ step: "열기", show: "3명 중 2명이 멈추던 화면", claims: [o1] }, unconfirmed)), [], "control: digits and Korean number words are one quantity");
   // Review round 2. D1: a made-up number moved into the claim's own text, citing a reviewed item that says otherwise.
-  caught(free(quiet, { question: "몇 명이 써요?", answer: "100명이 매일 써요", claims: [{ text: "100명이 매일 써요", evidence_refs: [EV("o1")] }] }), "qa[0].claims[0]: claim_quantity_not_in_evidence:100");
+  caught(free(quiet, { question: "몇 명이 써요?", answer: "100명이 매일 써요", claims: [{ text: "100명이 매일 써요", evidence_refs: [EV("o1")] }] }), "qa[0].claims[0]: claim_not_cited_statement");
   caught(free(quiet, { question: "몇 명이 써요?", answer: "100명이 매일 써요", claims: [{ text: "100명이 매일 써요", evidence_refs: [EV("o1")] }] }), "qa[0].answer: unsupported_quantity:100");
-  caught(free({ step: "열기", show: "첫 화면", claims: [{ text: "10명 중 9명이 혼자 주문했다", evidence_refs: [EV("o1")] }] }, unconfirmed), "flow[0].claims[0]: claim_quantity_not_in_evidence:10");
-  caught(free(quiet, { question: "다 혼자 했나요?", answer: "네, 모두 혼자 했어요", claims: [{ text: "모두 혼자 했다", evidence_refs: [EV("o1")] }] }), "claim_quantity_not_in_evidence:모두");
+  caught(free({ step: "열기", show: "첫 화면", claims: [{ text: "10명 중 9명이 혼자 주문했다", evidence_refs: [EV("o1")] }] }, unconfirmed), "flow[0].claims[0]: claim_not_cited_statement");
+  caught(free(quiet, { question: "다 혼자 했나요?", answer: "네, 모두 혼자 했어요", claims: [{ text: "모두 혼자 했다", evidence_refs: [EV("o1")] }] }), "claim_not_cited_statement");
   assert.deepEqual(problemsOf(free(quiet, { question: "결제는요?", answer: "결제 화면은 모두 통과했어요", claims: [{ text: "결제 화면은 모두 통과했다", evidence_refs: [EV("o2")] }] })), [], "control: a share word the cited statement carries");
-  // D3: a flow step's `show` asserting a result with no claim; a `step` asserting one.
-  caught(free({ step: "성적 보여주기", show: "이 앱으로 학생들의 성적이 올랐다는 것을 보여준다", claims: [] }, unconfirmed), "flow[0].show: show_without_claim");
-  caught(free({ step: "성적 보여주기", show: "학생들 성적이 좋아져요", claims: [] }, unconfirmed), "flow[0].show: show_without_claim");
+  // D3: a flow step's `show` asserting a result (with or without a claim); a `step` asserting one.
+  caught(free({ step: "성적 보여주기", show: "이 앱으로 학생들의 성적이 올랐다는 것을 보여준다", claims: [] }, unconfirmed), "flow[0].show: show_asserts");
+  caught(free({ step: "성적 보여주기", show: "학생들 성적이 좋아져요", claims: [] }, unconfirmed), "flow[0].show: show_asserts");
+  caught(free({ step: "옵션 화면", show: "어르신도 혼자 주문할 수 있다", claims: [o1] }, unconfirmed), "flow[0].show: show_asserts");
   caught(free({ step: "100명이 매일 쓰는 키오스크 앱", show: "첫 화면", claims: [] }, unconfirmed), "flow[0].step: unsupported_quantity:100");
   caught(free({ step: "학생 성적이 올랐던 앱 소개", show: "첫 화면", claims: [] }, unconfirmed), "flow[0].step: step_asserts");
   // D4 / D6: Korean number words outside 한..열, Sino-Korean, English, full-width digits, share words.
   for (const [answer, q] of [["스무 명이 썼어요", "20"], ["백 명이 썼어요", "100"], ["스물세 명이 썼어요", "23"], ["five users came back", "5"], ["９명이 썼어요", "9"], ["대다수가 혼자 했어요", "대다수"], ["아무도 못 찾았어요", "아무도"]])
     caught(free(quiet, { question: "몇 명?", answer, claims: [o1] }), `qa[0].answer: unsupported_quantity:${q}`);
+  // Review round 3. A claim is its cited item's statement: one with no number that says something else,
+  // one that contradicts it and an overclaim reusing its numbers are caught; each beside the same-statement control.
+  const claimed = (text, ref) => free(quiet, { question: "q", answer: text, claims: [{ text, evidence_refs: [EV(ref)] }] });
+  for (const [text, ref] of [["이 앱으로 학생들 성적이 올랐다", "o1"], ["어르신도 혼자 주문할 수 있다", "o2"], ["옵션에서 멈춘 사람은 없었다", "o1"], ["3명 중 3명이 옵션에서 멈췄다", "o1"], ["2명 중 2명이 옵션에서 멈췄다", "o1"], ["세 명 중 세 명이 옵션에서 멈췄다", "o1"], ["수백 명이 옵션에서 멈췄다", "o1"]])
+    caught(claimed(text, ref), "qa[0].claims[0]: claim_not_cited_statement");
+  for (const [text, ref] of [["세 명 중 두 명이 옵션에서 멈췄어요", "o1"], ["결제 화면은 모두 통과했습니다.", "o2"], ["옵션 단계가 많다", "i1"]]) assert.deepEqual(problemsOf(claimed(text, ref)), [], `control: ${text}`);
+  // An answer that adds a result beside a supported claim, or rewords it, is not its claims' statements.
+  const i1 = { text: "옵션 단계가 많아요", evidence_refs: [EV("i1")] };
+  caught(free(quiet, { question: "왜 바꿨나요?", answer: "옵션 단계가 많았고, 바꾼 뒤로 매출이 크게 늘었어요", claims: [i1] }), "qa[0].answer: answer_not_claims");
+  caught(free(quiet, { question: "왜 바꿨나요?", answer: "옵션 단계가 많아요. 바꾼 뒤로 매출이 크게 늘었어요.", claims: [i1] }), "qa[0].answer: answer_not_claims");
+  const many = free(quiet, { question: "몇 명?", answer: "수백 명이 혼자 주문할 수 있어요. 세 명 중 두 명이 옵션에서 멈췄어요", claims: [o1] });
+  caught(many, "qa[0].answer: answer_not_claims");
+  caught(many, "qa[0].answer: unsupported_quantity:수백");
+  assert.deepEqual(problemsOf(free(quiet, { question: "왜 바꿨나요?", answer: "옵션 단계가 많아요.", claims: [i1] })), [], "control: the claim's statement alone");
+  // Ratios, magnitudes and approximate amounts in `step` / `show` are quantities a cited statement must carry.
+  caught(free({ step: "열기", show: "3명 중 3명이 멈추던 화면", claims: [o1] }, unconfirmed), "flow[0].show: unsupported_quantity:3/3");
+  for (const [show, q] of [["수백 명이 쓰는 화면", "수백"], ["수십 명의 학생 화면", "수십"], ["백여 명이 쓰는 화면", "100+"], ["열에 아홉이 쓰는 화면", "9/10"], ["많은 학생이 쓰는 화면", "많"], ["Hundreds of students", "hundreds"], ["Dozens of users", "dozens"], ["Thousands of users", "thousands"], ["삼분의 이가 쓰는 화면", "2/3"]])
+    caught(free({ step: "열기", show, claims: [{ text: "결제 화면은 모두 통과했다", evidence_refs: [EV("o2")] }] }, unconfirmed), `flow[0].show: unsupported_quantity:${q}`);
+  assert.deepEqual(problemsOf(free({ step: "열기", show: "삼분의 이가 멈추던 화면", claims: [o1] }, unconfirmed)), [], "control: a fraction equal to the cited ratio");
+  for (const [text, q] of [["수십 명이 썼어요", "수십"], ["전원이 통과", "전원"], ["dozens of users", "dozens"], ["삼분의 이", "2/3"], ["많은 학생이", "많"]]) assert.ok(rulesMod.quantitiesIn(text).includes(q), `${text} -> ${q}`);
 });
 
 await test("CR-T40/CR-T44 schema validator: minLength, enum and inherited key names are checked, never thrown on", () => {
