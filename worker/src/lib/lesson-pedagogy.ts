@@ -350,16 +350,14 @@ export function checkDurationConsistency(
 
 /** G3-4: 정리 단계(마지막 단계) 시간이 10분 이상인지. */
 export function checkClosingDuration(steps: ParsedStep[]): PedagogyFinding[] {
-  if (steps.length === 0) {
-    return [{
-      check: 'g3_4_closing_duration',
-      severity: 'warn', skipped: true,
-      message: '단계 없음 — 정리 단계 확인 불가',
-      remedy: '단계를 추가하세요.',
-      source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
-    }];
-  }
-  const last = steps[steps.length - 1];
+  const last = steps.at(-1);
+  if (!last) return [{
+    check: 'g3_4_closing_duration',
+    severity: 'warn', skipped: true,
+    message: '단계 없음 — 정리 단계 확인 불가',
+    remedy: '단계를 추가하세요.',
+    source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+  }];
   if (last.durationMin == null) {
     return [{
       check: 'g3_4_closing_duration',
@@ -439,7 +437,7 @@ function collectStepTexts(content: SessionDesign): string {
   for (const step of content.steps ?? []) {
     if (step.title) parts.push(step.title);
     if (step.instructions) parts.push(step.instructions);
-    if ((step as Record<string, unknown>).hint) parts.push((step as Record<string, unknown>).hint as string);
+    if (step.hint) parts.push(step.hint);
     if (step.acceptance) parts.push(step.acceptance);
   }
   return parts.join('\n');
