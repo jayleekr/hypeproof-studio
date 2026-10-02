@@ -14,17 +14,6 @@ function normalize(raw: string): string {
   return raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// Extract data-chalk-* attribute values from a tag string as "key=value" pairs sorted.
-function chalkAttrs(tagStr: string): string {
-  const out: string[] = [];
-  const re = /data-chalk-([\w-]+)="([^"]*)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tagStr)) !== null) {
-    out.push(`${m[1]}=${m[2]}`);
-  }
-  return out.sort().join(',');
-}
-
 // Extract the inner HTML of a section identified by data-chalk-section.
 function sectionInner(html: string, sectionKey: string): string | null {
   const re = new RegExp(
@@ -32,7 +21,7 @@ function sectionInner(html: string, sectionKey: string): string | null {
     'i',
   );
   const m = re.exec(html);
-  return m ? m[1] : null;
+  return m ? (m[1] ?? null) : null;
 }
 
 // Extract all <tr data-chalk-step> elements from the flow section.
@@ -41,13 +30,14 @@ function flowSteps(flowHtml: string): Array<{ stepKey: string; fields: Record<st
   const rowRe = /<tr[^>]*data-chalk-step="([^"]*)"[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowM: RegExpExecArray | null;
   while ((rowM = rowRe.exec(flowHtml)) !== null) {
-    const stepKey = rowM[1];
-    const rowHtml = rowM[2];
+    const stepKey = rowM[1] ?? '';
+    const rowHtml = rowM[2] ?? '';
     const fields: Record<string, string> = {};
     const fieldRe = /<td[^>]*data-chalk-field="([^"]*)"[^>]*>([\s\S]*?)<\/td>/gi;
     let fieldM: RegExpExecArray | null;
     while ((fieldM = fieldRe.exec(rowHtml)) !== null) {
-      fields[fieldM[1]] = normalize(fieldM[2]);
+      const fKey = fieldM[1] ?? '';
+      fields[fKey] = normalize(fieldM[2] ?? '');
     }
     results.push({ stepKey, fields });
   }
@@ -60,13 +50,14 @@ function supportItems(supportHtml: string): Array<{ stuckKey: string; fields: Re
   const liRe = /<li[^>]*data-chalk-stuck="([^"]*)"[^>]*>([\s\S]*?)<\/li>/gi;
   let m: RegExpExecArray | null;
   while ((m = liRe.exec(supportHtml)) !== null) {
-    const stuckKey = m[1];
-    const liHtml = m[2];
+    const stuckKey = m[1] ?? '';
+    const liHtml = m[2] ?? '';
     const fields: Record<string, string> = {};
     const fieldRe = /<[^>]*data-chalk-field="([^"]*)"[^>]*>([\s\S]*?)<\/(?:td|div|span|p)>/gi;
     let fieldM: RegExpExecArray | null;
     while ((fieldM = fieldRe.exec(liHtml)) !== null) {
-      fields[fieldM[1]] = normalize(fieldM[2]);
+      const fKey = fieldM[1] ?? '';
+      fields[fKey] = normalize(fieldM[2] ?? '');
     }
     results.push({ stuckKey, fields });
   }
@@ -93,7 +84,7 @@ export function planUnits(html: string, _file: string): PlanUnit[] {
   const metaRe = /<meta\s[^>]*name="(chalk:[^"]*)"[^>]*content="([^"]*)"[^>]*/gi;
   let metaM: RegExpExecArray | null;
   while ((metaM = metaRe.exec(html)) !== null) {
-    units.push({ key: `meta:${metaM[1]}`, text: metaM[2].trim() });
+    units.push({ key: `meta:${metaM[1] ?? ''}`, text: (metaM[2] ?? '').trim() });
   }
 
   // 2. flow steps
@@ -129,7 +120,7 @@ export function planUnits(html: string, _file: string): PlanUnit[] {
     let i = 1;
     let liM: RegExpExecArray | null;
     while ((liM = liRe.exec(objHtml)) !== null) {
-      units.push({ key: `objectives/obj-${i}`, text: normalize(liM[1]) });
+      units.push({ key: `objectives/obj-${i}`, text: normalize(liM[1] ?? '') });
       i++;
     }
   }
@@ -141,7 +132,7 @@ export function planUnits(html: string, _file: string): PlanUnit[] {
     let i = 1;
     let liM: RegExpExecArray | null;
     while ((liM = liRe.exec(evHtml)) !== null) {
-      units.push({ key: `evidence/ev-${i}`, text: normalize(liM[1]) });
+      units.push({ key: `evidence/ev-${i}`, text: normalize(liM[1] ?? '') });
       i++;
     }
   }
@@ -152,14 +143,14 @@ export function planUnits(html: string, _file: string): PlanUnit[] {
     const groupRe = /<[^>]*data-chalk-prohibited="([^"]*)"[^>]*>([\s\S]*?)<\/(?:ul|ol|div)>/gi;
     let gM: RegExpExecArray | null;
     while ((gM = groupRe.exec(pmHtml)) !== null) {
-      const pKey = gM[1];
-      const groupHtml = gM[2];
+      const pKey = gM[1] ?? '';
+      const groupHtml = gM[2] ?? '';
       const liRe = /<li[^>]*data-chalk-step="([^"]*)"[^>]*>([\s\S]*?)<\/li>/gi;
       let liM: RegExpExecArray | null;
       while ((liM = liRe.exec(groupHtml)) !== null) {
         units.push({
-          key: `prohibited-moves/${pKey}/${liM[1]}`,
-          text: normalize(liM[2]),
+          key: `prohibited-moves/${pKey}/${liM[1] ?? ''}`,
+          text: normalize(liM[2] ?? ''),
         });
       }
     }
@@ -169,9 +160,9 @@ export function planUnits(html: string, _file: string): PlanUnit[] {
   const sectionRe = /<section[^>]*data-chalk-section="([^"]*)"[^>]*>([\s\S]*?)<\/section>/gi;
   let sM: RegExpExecArray | null;
   while ((sM = sectionRe.exec(html)) !== null) {
-    const sKey = sM[1];
+    const sKey = sM[1] ?? '';
     if (!LESSON_NAMED_SECTIONS.has(sKey)) {
-      units.push({ key: sKey, text: normalize(sM[2]) });
+      units.push({ key: sKey, text: normalize(sM[2] ?? '') });
     }
   }
 
