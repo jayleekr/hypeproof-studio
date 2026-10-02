@@ -270,20 +270,46 @@ const BIOPHARM_SAMPLE = `<!DOCTYPE html>
   console.log('T-P17 PASS: 없는 단계 참조 → spec.step_ref_unknown');
 }
 
-// ─── T-P18: ops 종류는 필수 절 검사 안 함 ───────────────────────────────────
+// ─── T-P18: ops schedule·risks 필수 절 검사 (E3-1) ─────────────────────────
+// T-P18a: schedule·risks 없는 ops → section_missing 2건(schedule, risks), blocks 없음
+//         lesson 전용 절(flow 등)은 ops에 요구되지 않는다
 {
-  const opsHtml = `<html data-chalk-plan="1" data-chalk-kind="ops">
+  const opsNoSections = `<html data-chalk-plan="1" data-chalk-kind="ops">
 <head>
   <meta name="chalk:course" content="sk-biopharm-kids-s1">
 </head>
 <body><p>운영 계획안</p></body>
 </html>`;
-  const r = parsePlan(opsHtml, 'ops');
-  const sectionViol = r.violations.filter(v =>
-    v.item === 'spec.section_missing' || v.item === 'spec.support_missing'
+  const r = parsePlan(opsNoSections, 'ops');
+  const sectionViol = r.violations.filter(v => v.item === 'spec.section_missing');
+  assert.equal(sectionViol.length, 2, `T-P18a: ops schedule·risks 없음 → section_missing 2건. got: ${JSON.stringify(sectionViol)}`);
+  assert.ok(sectionViol.some(v => v.at.section === 'schedule'), `T-P18a: at.section=schedule 없음`);
+  assert.ok(sectionViol.some(v => v.at.section === 'risks'), `T-P18a: at.section=risks 없음`);
+  assert.equal((r.blocks ?? []).length, 0, `T-P18a: schedule 없으면 blocks 없음(blocks_confirm false)`);
+  const lessonOnlyViol = r.violations.filter(v =>
+    v.item === 'spec.section_missing' && v.at.section !== 'schedule' && v.at.section !== 'risks'
   );
-  assert.equal(sectionViol.length, 0, `T-P18: ops 절 검사 없음. violations: ${JSON.stringify(sectionViol)}`);
-  console.log('T-P18 PASS: ops 종류 필수 절 검사 안 함');
+  assert.equal(lessonOnlyViol.length, 0, `T-P18a: lesson 전용 절은 ops에 요구 안 됨. got: ${JSON.stringify(lessonOnlyViol)}`);
+  console.log('T-P18a PASS: ops schedule·risks 없음 → section_missing 2건, blocks 없음, lesson 절 불요');
+}
+// T-P18b: 5절 완비 ops → section_missing 0건
+{
+  const opsAllSections = `<html data-chalk-plan="1" data-chalk-kind="ops">
+<head>
+  <meta name="chalk:course" content="sk-biopharm-kids-s1">
+</head>
+<body>
+  <section data-chalk-section="schedule"></section>
+  <section data-chalk-section="materials"></section>
+  <section data-chalk-section="risks"></section>
+  <section data-chalk-section="consent"></section>
+  <section data-chalk-section="post-deliverables"></section>
+</body>
+</html>`;
+  const r = parsePlan(opsAllSections, 'ops');
+  const sectionViol = r.violations.filter(v => v.item === 'spec.section_missing');
+  assert.equal(sectionViol.length, 0, `T-P18b: ops 5절 완비 → section_missing 없음. got: ${JSON.stringify(sectionViol)}`);
+  console.log('T-P18b PASS: ops 5절 완비 → section_missing 0건');
 }
 
 // ─── T-E1~T-E5: 잘못된 수치 참조 / 크기 초과 ──────────────────────────────
