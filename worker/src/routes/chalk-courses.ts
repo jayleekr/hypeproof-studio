@@ -1,9 +1,11 @@
 // #1295 — Chalk course generation routes (server side).
-// PUT  /chalk/cohorts/:cohort/courses/:course/inputs  — save 5 inputs + optional vocab
-// PUT  /chalk/cohorts/:cohort/courses/:course/plan    — save plan file + auto-check
-// GET  /chalk/cohorts/:cohort/courses/:course/brief   — generation brief bundle
-// GET  /chalk/cohorts/:cohort/courses/:course/plan    — read plan file (issuer only)
-// POST /chalk/cohorts/:cohort/courses/:course/check   — pedagogy + parser check (#1294)
+// PUT  /chalk/cohorts/:cohort/courses/:course/inputs       — save 5 inputs + optional vocab
+// PUT  /chalk/cohorts/:cohort/courses/:course/plan         — save plan file + auto-check
+// GET  /chalk/cohorts/:cohort/courses/:course/brief        — generation brief bundle
+// GET  /chalk/cohorts/:cohort/courses/:course/plan         — read plan file (issuer only)
+// POST /chalk/cohorts/:cohort/courses/:course/check        — pedagogy + parser check (#1294)
+// GET  /chalk/cohorts/:cohort/courses/:course/judge-brief  — prompt+excerpt bundle for 5 model items (#1465)
+// POST /chalk/cohorts/:cohort/courses/:course/judgements   — store model judgement (#1465)
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -15,6 +17,10 @@ import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFi
 import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
 import { parsePlan, type Violation } from "../lib/chalk-plan";
 import type { SessionDesign } from "../lib/session-design";
+import {
+  getJudgePrompt, MODEL_JUDGED_KEYS as JUDGE_CHECK_NAMES, VALID_VERDICTS,
+  HUMAN_ONLY_KEYS, isKnownPromptVersion,
+} from "../lib/chalk-judge-prompts";
 
 type Vars = { Variables: { author: IssuerAuthz } };
 
@@ -47,6 +53,12 @@ interface InputsWithOptionsRow extends InputsRow {
   duration_min: number | null;
 }
 interface VocabInput { goals: string[]; conditions: string[]; learner_level?: string; has_guidance?: boolean }
+interface JudgementRow {
+  judgement_id: string; item: string | null; check_name: string | null;
+  at_section: string | null; at_step: string | null; at_key: string | null;
+  plan_sha256: string; revision: number; verdict: string; rationale: string;
+}
+interface PlanRefRow { sha256: string; revision: number }
 
 // ── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -423,6 +435,43 @@ chalkCourses.put(
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent') {
       const findings = runPlanCheck(wr.draft, b.html as string);
+      // Merge stored judgements for this sha
+      const judgeRows = await c.env.HPS_DB.prepare(
+        `SELECT judgement_id, item, check_name, at_section, at_step, at_key, plan_sha256, revision, verdict, rationale
+         FROM chalk_judgements
+         WHERE cohort_id=? AND course_id=? AND plan_sha256=?
+         ORDER BY created_at DESC`
+      ).bind(cohort, course, sha256).all<JudgementRow>();
+      const seen = new Set<string>();
+      for (const row of (judgeRows.results ?? [])) {
+        const key = `${row.item ?? ''}|${row.check_name ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const checkKey = row.check_name ?? row.item ?? '';
+        const prompt = getJudgePrompt(checkKey);
+        findings.push({
+          item: row.item,
+          check: row.check_name ?? undefined,
+          severity: row.verdict === 'violation' ? 'warn' : 'info',
+          judge: 'model',
+          at: { file: 'lesson', section: row.at_section, step: row.at_step, field: row.at_key },
+          message: row.rationale,
+          source: `chalk-judge/${prompt?.prompt_id ?? checkKey}@v${prompt?.version ?? 1}`,
+          blocks_confirm: false,
+        });
+      }
+      for (const humanCheck of HUMAN_ONLY_KEYS) {
+        findings.push({
+          item: humanCheck,
+          check: humanCheck,
+          severity: 'info',
+          judge: 'human',
+          at: { file: 'lesson', section: null, step: null, field: null },
+          message: '사람 확인 필요',
+          source: 'chalk-judge/human-only',
+          blocks_confirm: false,
+        });
+      }
       return c.json({ revision: wr.draft.revision, sha256, findings });
     }
     if (wr.kind === 'request_id_reused')
@@ -616,6 +665,149 @@ chalkCourses.get(
   },
 );
 
+// ── GET /judge-brief ─────────────────────────────────────────────────────────
+
+chalkCourses.get(
+  '/chalk/cohorts/:cohort/courses/:course/judge-brief',
+  async (c) => {
+    const cohort = c.req.param('cohort')!;
+    const course = c.req.param('course')!;
+    const { err } = await authAndOwn(c, cohort, course) as any;
+    if (err) return err;
+
+    c.header('cache-control', 'no-store');
+
+    const planRow = await c.env.HPS_DB.prepare(
+      `SELECT html, sha256, knowledge_version, ref_kind, ref
+       FROM chalk_plan_files
+       WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='lesson'
+       ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+    ).bind(cohort, course).first<PlanFileRow>();
+    if (!planRow) return c.json({ error: 'plan file not found' }, 404);
+
+    // Validate items query param before parsing plan
+    const rawItems = c.req.queries('items') ?? [];
+    for (const it of rawItems) {
+      if (HUMAN_ONLY_KEYS.has(it)) return c.json({ code: 'human_only', error: `${it} is human-only` }, 400);
+      if (!JUDGE_CHECK_NAMES.has(it)) return c.json({ code: 'not_model_judged', error: `${it} is not model-judged` }, 400);
+    }
+    const wantedKeys = rawItems.length > 0 ? rawItems : [...JUDGE_CHECK_NAMES];
+
+    const parsed = parsePlan(planRow.html, 'lesson');
+
+    // Build step map for hint_gives_answer excerpt (needs learner cell per step)
+    const stepMap = new Map(parsed.steps.map((s) => [s.id, s]));
+
+    const excerpts: Record<string, string> = {
+      'G2-2': parsed.objectives.map((o) => o.text).join('\n'),
+      'G2-3': parsed.essentialQuestion ?? '',
+      'G3-2': parsed.keyQuestions.map((q) => q.text).join('\n'),
+      'G1-3': parsed.steps
+        .map((s) => [s.cells.teacher, s.cells.assistant, s.cells.learner].filter(Boolean).join(' | '))
+        .join('\n'),
+      'hint_gives_answer': parsed.stucks
+        .map((st) => {
+          const learner = stepMap.get(st.stepId)?.cells.learner ?? '';
+          return [
+            st.expectedStuck ? `expected-stuck: ${st.expectedStuck}` : '',
+            st.minSupport ? `min-support: ${st.minSupport}` : '',
+            learner ? `learner: ${learner}` : '',
+          ].filter(Boolean).join('\n');
+        })
+        .filter(Boolean)
+        .join('\n---\n'),
+    };
+
+    const items = wantedKeys.map((key) => {
+      const p = getJudgePrompt(key)!;
+      return {
+        check: key,
+        prompt_id: p.prompt_id,
+        prompt_version: p.version,
+        prompt_text: p.text,
+        excerpt: excerpts[key] ?? '',
+      };
+    });
+
+    return c.json({ plan_sha256: planRow.sha256, items });
+  },
+);
+
+// ── POST /judgements ─────────────────────────────────────────────────────────
+
+chalkCourses.post(
+  '/chalk/cohorts/:cohort/courses/:course/judgements',
+  bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }),
+  async (c) => {
+    const cohort = c.req.param('cohort')!;
+    const course = c.req.param('course')!;
+    const { err, auth } = await authAndOwn(c, cohort, course) as any;
+    if (err) return err;
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid JSON' }, 400);
+    }
+
+    const check_name_raw = typeof body.check_name === 'string' ? body.check_name : null;
+    const plan_sha256 = typeof body.plan_sha256 === 'string' ? body.plan_sha256 : null;
+    const revision = typeof body.revision === 'number' ? body.revision : null;
+    const prompt_id = typeof body.prompt_id === 'string' ? body.prompt_id : null;
+    const prompt_version = typeof body.prompt_version === 'number' ? body.prompt_version : null;
+    const model = typeof body.model === 'string' ? body.model : null;
+    const verdict = typeof body.verdict === 'string' ? body.verdict : null;
+    const rationale = typeof body.rationale === 'string' ? body.rationale : null;
+    const at_section = typeof body.at_section === 'string' ? body.at_section : null;
+    const at_step = typeof body.at_step === 'string' ? body.at_step : null;
+    const at_key = typeof body.at_key === 'string' ? body.at_key : null;
+
+    if (!check_name_raw || !JUDGE_CHECK_NAMES.has(check_name_raw))
+      return c.json({ code: 'invalid_check', error: 'check_name must be a model-judged item' }, 400);
+    if (!plan_sha256 || revision === null)
+      return c.json({ code: 'missing_fields', error: 'plan_sha256 and revision required' }, 400);
+    if (!prompt_id || prompt_version === null)
+      return c.json({ code: 'missing_fields', error: 'prompt_id and prompt_version required' }, 400);
+    if (!model)
+      return c.json({ code: 'missing_fields', error: 'model required' }, 400);
+    if (!verdict || !VALID_VERDICTS.has(verdict))
+      return c.json({ code: 'invalid_verdict', error: `verdict must be one of: ${[...VALID_VERDICTS].join(', ')}` }, 400);
+    if (!rationale)
+      return c.json({ code: 'missing_fields', error: 'rationale required' }, 400);
+    if (new TextEncoder().encode(rationale).length > 2048)
+      return c.json({ code: 'rationale_too_long', error: 'rationale exceeds 2 KB' }, 400);
+    if (!isKnownPromptVersion(prompt_id, prompt_version))
+      return c.json({ code: 'unknown_prompt', error: 'unknown prompt_id or prompt_version' }, 400);
+
+    // Validate plan_sha256 + revision against chalk_plan_files
+    const planRef = await c.env.HPS_DB.prepare(
+      `SELECT sha256, CAST(ref AS INTEGER) AS revision FROM chalk_plan_files
+       WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND sha256=? AND CAST(ref AS INTEGER)=?
+       LIMIT 1`
+    ).bind(cohort, course, plan_sha256, revision).first<PlanRefRow>();
+    if (!planRef) return c.json({ code: 'unknown_plan', error: 'plan_sha256 + revision not found' }, 400);
+
+    const actor: string = (auth as IssuerAuthz).payload.u;
+    const now = Date.now();
+    const judgement_id = `j_${now}_${Math.random().toString(36).slice(2, 10)}`;
+    // For hint_gives_answer: item=null; for all others: item = check_name
+    const item: string | null = check_name_raw === 'hint_gives_answer' ? null : check_name_raw;
+
+    await c.env.HPS_DB.prepare(
+      `INSERT INTO chalk_judgements
+         (judgement_id, cohort_id, course_id, revision, file, plan_sha256,
+          item, check_name, at_section, at_step, at_key,
+          prompt_id, prompt_version, model, verdict, rationale, actor, created_at)
+       VALUES (?, ?, ?, ?, 'lesson', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(judgement_id, cohort, course, revision, plan_sha256,
+           item, check_name_raw, at_section, at_step, at_key,
+           prompt_id, prompt_version, model, verdict, rationale, actor, now).run();
+
+    return c.json({ judgement_id }, 201);
+  },
+);
+
 // ── Shared check logic ───────────────────────────────────────────────────────
 
 function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
@@ -684,6 +876,64 @@ chalkCourses.post(
     const html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
 
     const results = runPlanCheck(draft, html);
+
+    // Compute current sha to filter stored judgements
+    let currentSha: string | null = null;
+    if (html !== undefined) {
+      currentSha = await sha256Hex(html);
+    } else {
+      const planRow = await c.env.HPS_DB.prepare(
+        `SELECT sha256 FROM chalk_plan_files
+         WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='lesson'
+         ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+      ).bind(cohort, course).first<{ sha256: string }>();
+      currentSha = planRow?.sha256 ?? null;
+    }
+
+    if (currentSha) {
+      // Merge latest stored judgements for this sha only
+      const judgeRows = await c.env.HPS_DB.prepare(
+        `SELECT judgement_id, item, check_name, at_section, at_step, at_key, plan_sha256, revision, verdict, rationale
+         FROM chalk_judgements
+         WHERE cohort_id=? AND course_id=? AND plan_sha256=?
+         ORDER BY created_at DESC`
+      ).bind(cohort, course, currentSha).all<JudgementRow>();
+
+      // Keep most-recent row per (item, check_name) combination
+      const seen = new Set<string>();
+      for (const row of (judgeRows.results ?? [])) {
+        const key = `${row.item ?? ''}|${row.check_name ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const checkKey = row.check_name ?? row.item ?? '';
+        const prompt = getJudgePrompt(checkKey);
+        results.push({
+          item: row.item,
+          check: row.check_name ?? undefined,
+          severity: row.verdict === 'violation' ? 'warn' : 'info',
+          judge: 'model',
+          at: { file: 'lesson', section: row.at_section, step: row.at_step, field: row.at_key },
+          message: row.rationale,
+          source: `chalk-judge/${prompt?.prompt_id ?? checkKey}@v${prompt?.version ?? 1}`,
+          blocks_confirm: false,
+        });
+      }
+    }
+
+    // Always include human-only items G2-12 and G3-6
+    for (const humanCheck of HUMAN_ONLY_KEYS) {
+      results.push({
+        item: humanCheck,
+        check: humanCheck,
+        severity: 'info',
+        judge: 'human',
+        at: { file: 'lesson', section: null, step: null, field: null },
+        message: '사람 확인 필요',
+        source: 'chalk-judge/human-only',
+        blocks_confirm: false,
+      });
+    }
+
     return c.json({ results });
   },
 );

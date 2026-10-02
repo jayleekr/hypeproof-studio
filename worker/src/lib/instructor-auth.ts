@@ -109,6 +109,9 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (/^\/admin\/cohorts\/[^/]+\/classroom\/runs\/[^/]+(?:\/(?:status|pairings|control|grants\/[^/]+|evidence\/[^/]+|contents(?:\/[^/]+\/(?:retire|revisions\/[^/]+))?|setting-options|distributions(?:\/[^/]+(?:\/revoke)?)?|report-batches(?:\/[^/]+(?:\/(?:reconcile|advance|jobs|runner-grants|reports(?:\/[^/]+(?:\/review)?)?|recipients|approve|deliver|deliveries(?:\/[^/]+\/(?:resolve|link))?))?)?|commands(?:\/[^/]+)?))?$/.test(path) && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) return true;
   // #1294 — chalk draft check. Handler re-verifies issuer identity and course ownership.
   if (method === 'POST' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/check$/.test(path)) return true;
+  // #1465 — context judgement brief and record. Handler re-verifies issuer + course ownership.
+  if (method === 'GET' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/judge-brief$/.test(path)) return true;
+  if (method === 'POST' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/judgements$/.test(path)) return true;
   if (path === "/admin/tokens/issue" && method === "POST") return true;
   // #167 — issuer-role tokens with can_start_session scope may start/end
   // their scoped cohort's session without admin Basic auth.
@@ -139,6 +142,9 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (path === "/admin/chalk/instructor-brief" && method === "GET") return true;
   // #1288 — Chalk knowledge read-only endpoints. No cohort scope needed.
   if (method === 'GET' && /^\/admin\/chalk\/knowledge\/(?:versions|[0-9]+\/docs(?:\/[^/]+)?)$/.test(path)) return true;
+  // #1465 — model judgement bundle (read) and judgement store (write). Handler re-verifies owner.
+  if (method === 'GET' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/judge-brief$/.test(path)) return true;
+  if (method === 'POST' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/judgements$/.test(path)) return true;
   return false;
 }
 
