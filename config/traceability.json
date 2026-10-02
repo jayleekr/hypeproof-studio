@@ -3942,7 +3942,8 @@
         "ST-IMP-CHALK-JUDGEMENTS"
       ],
       "sources": [
-        {"path": "worker/test/chalk-judgements.test.mjs"}
+        {"path": "worker/test/chalk-judgements.test.mjs"},
+        {"path": "extensions/hypeproof-chat/test/chalk-judge.test.mjs"}
       ]
     }
   ]
