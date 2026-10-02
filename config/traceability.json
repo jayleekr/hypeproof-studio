@@ -3776,6 +3776,9 @@
         },
         {
           "path": "worker/test/chalk-ops-plan.test.mjs"
+        },
+        {
+          "path": "worker/test/chalk-ops.test.mjs"
         }
       ]
     },
@@ -3857,6 +3860,9 @@
         },
         {
           "path": "worker/migrations/0031-chalk-plan-files.sql"
+        },
+        {
+          "path": "worker/src/lib/chalk-ops.ts"
         }
       ]
     },
