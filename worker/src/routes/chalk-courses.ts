@@ -899,30 +899,22 @@ chalkCourses.post(
 
     const results = runPlanCheck(draft, html);
 
-    // Compute current sha to filter stored judgements; skip if tables not yet migrated
+    // Compute current sha to filter stored judgements
     let currentSha: string | null = null;
     if (html !== undefined) {
       currentSha = await sha256Hex(html);
     } else {
-      try {
-        const planRow = await c.env.HPS_DB.prepare(
-          `SELECT sha256 FROM chalk_plan_files
-           WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='lesson'
-           ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
-        ).bind(cohort, course).first<{ sha256: string }>();
-        currentSha = planRow?.sha256 ?? null;
-      } catch {
-        // chalk_plan_files table not yet applied — skip judgement merge
-      }
+      const planRow = await c.env.HPS_DB.prepare(
+        `SELECT sha256 FROM chalk_plan_files
+         WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='lesson'
+         ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+      ).bind(cohort, course).first<{ sha256: string }>();
+      currentSha = planRow?.sha256 ?? null;
     }
 
     if (currentSha) {
-      try {
-        const judged = await mergeStoredJudgements(c.env.HPS_DB, cohort, course, currentSha);
-        results.push(...judged);
-      } catch {
-        // chalk_judgements table not yet applied — skip gracefully
-      }
+      const judged = await mergeStoredJudgements(c.env.HPS_DB, cohort, course, currentSha);
+      results.push(...judged);
     }
     appendHumanOnly(results);
 

@@ -15,8 +15,13 @@ assert.ok(profileId, 'harness sanity: profileId found');
 
 const db = new DatabaseSync(':memory:');
 db.exec('PRAGMA foreign_keys=ON');
-const migration = readFileSync(new URL('../migrations/0002-chalk-authoring.sql', import.meta.url), 'utf8');
-db.exec(migration);
+for (const f of [
+  '0002-chalk-authoring.sql',
+  '0031-chalk-plan-files.sql',
+  '0037-chalk-judgements.sql',
+]) {
+  db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+}
 
 const env = createMockEnv();
 env.HPS_DB = { prepare(sql) {
@@ -101,15 +106,19 @@ await check('T-C3 normal check returns results array with at fields', async () =
   assert.equal(r.status, 200, r.raw);
   assert.ok(Array.isArray(r.json.results), 'results is array');
 
+  const HUMAN_ONLY = ['G2-12', 'G3-6'];
+  let humanCount = 0;
   for (const item of r.json.results) {
     assert.ok('severity' in item, 'item has severity');
     assert.ok('at' in item, 'item has at');
     assert.ok('message' in item, 'item has message');
     assert.ok('source' in item, 'item has source');
     assert.ok('blocks_confirm' in item, 'item has blocks_confirm');
-    // judge may be 'machine' or 'human' (human-only items are included from #1465)
-    assert.ok(['machine', 'human'].includes(item.judge), `unexpected judge: ${item.judge}`);
+    const expectedJudge = HUMAN_ONLY.includes(item.item) ? 'human' : 'machine';
+    assert.equal(item.judge, expectedJudge, `item ${item.item}: expected judge=${expectedJudge}, got ${item.judge}`);
+    if (item.judge === 'human') humanCount++;
   }
+  assert.equal(humanCount, HUMAN_ONLY.length, `expected exactly ${HUMAN_ONLY.length} human-only items`);
 });
 
 // ─── T-C4: HTML 본문 첨부 — 규격 위반이 results에 포함된다 ───────────────────
