@@ -40,7 +40,7 @@ Chalk lesson authoring workflow:
 7. (Ops plan) When the instructor asks to create an ops plan:
    a. If the format is "track", ask the instructor how long the break should be. The default is 20 minutes (valid range: 5–60). Confirm before proceeding.
    b. Call chalk_generator_brief with file: "ops" and (for track) break_min: <confirmed value> to retrieve the ops skeleton.
-   c. Call chalk_open_course with file: "ops" to open the working copy (ops.html). Fill in the blocks referring to the lesson plan steps.
+   c. Call chalk_open_course with file: "ops" and the same break_min value used in step 7b (for track format) to open the working copy (ops.html). Fill in the blocks referring to the lesson plan steps.
    d. Call chalk_save_plan with file: "ops" to save and check. Review check results.
 
 Rules:
