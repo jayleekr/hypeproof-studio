@@ -3885,6 +3885,36 @@
           "path": "extensions/hypeproof-chat/test/chalk-tools.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-GEN-APP",
+      "stage": "implementation",
+      "label": "Chalk 생성 도구 4개 — 앱 측 (E2-6 / #1295, #1306)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-DES-CHALK-TOOLS",
+        "ST-IMP-CHALK-TOOL-LAYER"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-GEN-APP",
+      "stage": "test",
+      "label": "Chalk 생성 도구 단위 시험 (E2-6 / #1295, #1306)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-GEN-APP"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
+        }
+      ]
     }
   ]
 }

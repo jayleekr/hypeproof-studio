@@ -1,7 +1,8 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import type { BrowserToolsForLocal } from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
 import { chalkToolsEnabled } from './chalk/tools';
-import { runInstructorTurn } from './chalk/instructorTurn';
+import { runInstructorTurn, INSTRUCTOR_TOOL_PROFILE } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -50,6 +51,7 @@ import {
   pickRevealTabIndex,
   browserTabCoverage,
   toProxyToolResult,
+  isLoopbackUrl,
 } from "./browserControlHelpers";
 import { isCurriculumRuntimeEnabled, isCrVerifyTool, CR_CONTEXT_KEY } from "./curriculumRuntime";
 import { VerifySession, recordChecked, refusalText, verifyContext, verifyToolResult, type VerifyRecorderPort } from "./verifySession";
@@ -83,7 +85,13 @@ import {
 import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
 import { LocalRecord } from "../../../worker/src/lib/measurement-core/local-record";
 import { isMinorTier } from "./sdkCoachHelpers";
-import { toMcpToolResult } from "./browserMcp";
+import {
+  toMcpToolResult,
+  BROWSER_OPEN_TOOL_DEF,
+  LIVE_PREVIEW_START_TOOL_DEF,
+  runBrowserOpen,
+  runLivePreviewStart,
+} from "./browserMcp";
 
 // #525 — a plain editor command registered in the core. The browser-only API cannot
 // bring a tab to the front (BrowserTab has no show()/reveal()), so this path is used
@@ -96,6 +104,10 @@ const observationKey = (b: {format?: string; scope: string; program: string}) =>
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
+
+// Instructor-mode browser tool definitions — use the canonical defs from browserMcp.ts
+// so the description and inputSchema stay in sync with the student SDK path.
+const INSTRUCTOR_LOCAL_BROWSER_DEFS = [LIVE_PREVIEW_START_TOOL_DEF, BROWSER_OPEN_TOOL_DEF] as const;
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
 import {
   matchWorldRef,
@@ -2573,7 +2585,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return null;
     try {
-      const url = await this.liveServer.ensure(root);
+      const base = await this.liveServer.ensure(root);
       // Avoid stacking preview tabs on the right. The live server binds a fresh
       // random port on each (re)start (app relaunch, root change), so the URL
       // can differ from a previously-opened tab — an exact-URL match alone then
@@ -2584,7 +2596,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const tabs = vscode.window.browserTabs ?? [];
       const isPreviewTab = (u?: string): boolean =>
         !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
-      const current = tabs.find((t) => t.url?.startsWith(url));
+      const current = tabs.find((t) => t.url?.startsWith(base));
       // #519 — below, the preview tab is pinned as the coach's drive target. Leaving
       // it as `?.` means that when live_preview_start is the first tool call (no
       // instance yet) the pin is silently lost and the screenshot that follows falls
@@ -2616,13 +2628,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // would open the preview next to that empty group, leaving a blank pane
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
-        const opened = await vscode.window.openBrowserTab(url, {
+        const opened = await vscode.window.openBrowserTab(base, {
           viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
       }
-      return url;
+      return base;
     } catch {
       return null;
     }
@@ -2884,6 +2896,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // implementing the same behaviour twice produces the bug where only one of the
       // two gets fixed. The instance is made lazily here and the panel cleanup path
       // owns its dispose.
+      fetchHead: async (url: string) => {
+        try {
+          const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+          return { ok: res.ok, status: res.status };
+        } catch {
+          return { ok: false, status: 0 };
+        }
+      },
       inspect: async (name, input) => {
         try {
           this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
@@ -3859,11 +3879,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
               // before MultiEdit existed) stacks five "미리보기를 열었어요" lines and
               // reopens the live server just as many times. Open once, after the last
               // save (debounce).
-              if (this.revealTimer) clearTimeout(this.revealTimer);
-              this.revealTimer = setTimeout(() => {
-                this.revealTimer = undefined;
-                void this.revealWrittenHtml(fp, streamId);
-              }, 900);
+              // Instructor mode uses live_preview_start + browser_open; skip
+              // the student auto-preview when the instructor writes an HTML file.
+              if (!this._instructorMode.isInstructor) {
+                if (this.revealTimer) clearTimeout(this.revealTimer);
+                this.revealTimer = setTimeout(() => {
+                  this.revealTimer = undefined;
+                  void this.revealWrittenHtml(fp, streamId);
+                }, 900);
+              }
             }
             break;
         }
@@ -3969,18 +3993,61 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (local) {
         if (this._instructorMode.isInstructor === true) {
           // Instructor path — bypasses student token, ensureProfile, lesson gates, spool
-          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write only).
+          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write + browser).
           const cwd=this.resolveCoachCwd();
           if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
           // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+          // #1295 (E2-6): cwd and requestConfirmation added for file I/O and overwrite confirm.
           const chalkCtx = (await chalkToolsEnabled(this.context.secrets))
-            ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+            ? {
+                serverUrl: proxyUrl,
+                secrets: this.context.secrets,
+                cwd,
+                requestConfirmation: async (message: string): Promise<boolean> => {
+                  const answer = await vscode.window.showWarningMessage(
+                    message, { modal: true }, "계속", "취소",
+                  );
+                  return answer === "계속";
+                },
+              }
             : undefined;
+          // Browser tools for the local runtime: live_preview_start + browser_open.
+          // Reuses INSTRUCTOR_TOOL_PROFILE.sdk_tools.browser to stay in sync with the policy.
+          // Delegates to runBrowserOpen / runLivePreviewStart via the same BrowserMcpHost the
+          // student SDK path uses (buildBrowserMcpHost). That gives the instructor the full
+          // #507 port correction (livePreviewUrl), #415 duplicate suppression (openPages /
+          // currentPage), and #526 slot-displaced notice. The host's crEnabled / crScope
+          // are fine for the instructor: with CR off they are no-ops; with CR on the
+          // instructor is subject to the same scope rules as a student.
+          const browserTools: BrowserToolsForLocal | undefined =
+            INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser
+              ? (() => {
+                  const host = this.buildBrowserMcpHost();
+                  return {
+                    definitions: [...INSTRUCTOR_LOCAL_BROWSER_DEFS],
+                    call: async (name: string, input: unknown) => {
+                      const r =
+                        name === "live_preview_start"
+                          ? await runLivePreviewStart(host)
+                          : name === "browser_open"
+                            ? await runBrowserOpen(host, typeof (input as Record<string, unknown>)?.url === "string" ? (input as Record<string, unknown>).url as string : "")
+                            : null;
+                      if (!r) throw new Error(`알 수 없는 브라우저 도구: ${name}`);
+                      // isError mirrors the workspace/chalk tool convention: throw so the
+                      // local runtime marks the tool result as a failure.
+                      const text = r.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+                      if (r.isError) throw new Error(text);
+                      return text;
+                    },
+                  };
+                })()
+              : undefined;
           const result=await runInstructorTurn({
             local,cwd,
             history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
             brief:this._instructorMode.brief,
             chalkCtx,
+            browserTools,
             signal:ctrl.signal,onDelta,onActivity,
             requestApproval:async action=>{
               let prompted=false;

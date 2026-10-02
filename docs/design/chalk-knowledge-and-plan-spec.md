@@ -116,6 +116,7 @@ CREATE TABLE chalk_knowledge_docs (
   <meta name="chalk:audience-tier" content="lv1">             <!-- lv1 | lv2 | adult -->
   <meta name="chalk:family-session" content="true">           <!-- 결정 9: 부모 칸 필수 여부 -->
   <meta name="chalk:duration-min" content="240">
+  <meta name="chalk:prerequisites" content="">                <!-- 선택. 메타 표의 "선행 조건" 행과 같은 값 -->
   <meta name="chalk:methods" content="m-002 m-007">           <!-- 고른 모형 -->
 ```
 
@@ -126,6 +127,9 @@ CREATE TABLE chalk_knowledge_docs (
 | 표시 번호 | `data-chalk-section` | 필수 | 기계 표식 |
 |---|---|---|---|
 | 1 | `meta` | 필수 | 머리 `<meta>` 와 같은 값의 표 |
+
+`chalk:prerequisites` 메타(선택)는 1절 "선행 조건" 행과 같은 값이다.
+
 | 2 | `objectives` | 필수 | 항목마다 `<li data-chalk-objective="obj-1">` |
 | 3 | `essential-question` | 필수 | 한 개(`data-chalk-question`) |
 | 4 | `evidence` | 필수 | 항목마다 `<li data-chalk-evidence="ev-1">` — 제3자가 볼 수 있는 물건 |

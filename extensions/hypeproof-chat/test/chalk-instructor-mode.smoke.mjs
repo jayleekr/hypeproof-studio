@@ -252,13 +252,13 @@ t("runInstructorTurn: missing brief → throws '강사 지시문'", async () => 
   assert.ok(threw, "must throw with '강사 지시문' when brief is absent");
 });
 
-t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, shell/browser false", async () => {
+t("INSTRUCTOR_TOOL_PROFILE: sdk_tools.read and write are true, browser true, shell false", async () => {
   const { INSTRUCTOR_TOOL_PROFILE } = await import("../src/chalk/instructorTurn.ts");
   assert.ok(INSTRUCTOR_TOOL_PROFILE, "INSTRUCTOR_TOOL_PROFILE must be exported");
   assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.read, true, "read must be true");
   assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.write, true, "write must be true");
   assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.shell, undefined, "shell must be off (undefined)");
-  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser, undefined, "browser must be off (undefined)");
+  assert.strictEqual(INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser, true, "browser must be on (true) — instructor uses live_preview_start + browser_open (#1295)");
 });
 
 // --- webview render guard (ChatPanel.tsx:553-554) ---

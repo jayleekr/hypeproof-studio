@@ -1,13 +1,16 @@
-// Chalk 도구 층 (E4-2 / #1297).
+// Chalk 도구 층 (E4-2 / #1297, E2-6 / #1295).
 //
 // 도구는 한 벌이다(SUB-07): 버튼·Claude MCP·Codex dynamicTools 셋 다
 // 여기 정의된 실행 함수를 부른다. 판단 로직은 없다 — 서버가 판정한다.
 // 인증은 저장된 issuer 토큰. 토큰은 서버로만 가고 모델 입력·결과에 섞이지 않는다.
 //
-// 이번 PR 에 넣는 도구: chalk_check_plan · chalk_get_knowledge · chalk_recommend_methods.
-// 나머지(set_inputs·save_plan·generator_brief)는 E2-6 에서 추가한다.
+// E4-2 (#1297): chalk_check_plan · chalk_get_knowledge · chalk_recommend_methods
+// E2-6 (#1295): chalk_set_inputs · chalk_generator_brief · chalk_open_course · chalk_save_plan
 
 import type * as vscode from "vscode";
+import * as nodePath from "node:path";
+import * as nodeFs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 
 // ─── 공통 타입 ─────────────────────────────────────────────────────────────
 
@@ -18,6 +21,16 @@ export interface ChalkToolContext {
   secrets: vscode.SecretStorage;
   /** AbortSignal: 사용자가 중단하면 in-flight 요청도 끊는다. */
   signal?: AbortSignal;
+  /**
+   * 강사 작업 폴더 (cwd). 작업 사본 파일(chalk/<course>/지도안.html)을 여기에 쓴다.
+   * chalk_open_course · chalk_generator_brief · chalk_save_plan 이 사용한다.
+   */
+  cwd?: string;
+  /**
+   * 덮어쓰기 전에 강사에게 물을 때 호출하는 콜백 (extension.ts 쪽이 VS Code modal로 구현).
+   * `true` 반환 → 진행, `false` → 취소.
+   */
+  requestConfirmation?: (message: string) => Promise<boolean>;
 }
 
 export interface ChalkToolDefinition {
@@ -53,7 +66,11 @@ export class IssuerHttpError extends Error {
   readonly status: number;
   readonly body: unknown;
   constructor(status: number, body: unknown) {
-    super(`서버 오류 ${status}`);
+    const b = body as Record<string, unknown> | null;
+    const code = typeof b?.code === "string" ? b.code : "";
+    const errMsg = typeof b?.error === "string" ? b.error : "";
+    const detail = [code, errMsg].filter(Boolean).join(": ");
+    super(`서버 오류 ${status}` + (detail ? ` (${detail})` : ""));
     this.name = "IssuerHttpError";
     this.status = status;
     this.body = body;
@@ -262,16 +279,360 @@ export async function execRecommendMethods(
     );
   } catch (e) {
     if (e instanceof IssuerHttpError) {
-      if (e.status === 409) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      if (e.status === 409 && (code === "knowledge_missing" || code === "knowledge_incomplete")) {
         throw new Error("지식이 적재되지 않았습니다. 먼저 지식을 적재하세요.");
       }
-      if (e.status === 400) {
-        const b = e.body as Record<string, unknown> | null;
-        const field = b?.field;
-        const unknown_values = b?.unknown_values;
+      if (e.status === 409 && code === "knowledge_incompatible") {
+        const unranked = (b as Record<string, unknown>)?.unranked;
         throw new Error(
-          `입력 오류: field=${JSON.stringify(field)}, unknown_values=${JSON.stringify(unknown_values)}`,
+          `제품 지식과 앱 버전이 맞지 않습니다. unranked=${JSON.stringify(unranked)}`,
         );
+      }
+      if (e.status === 400 && code === "vocab_unknown") {
+        throw new Error(
+          `입력 오류: field=${JSON.stringify(b?.field)}, unknown_values=${JSON.stringify(b?.unknown_values)}`,
+        );
+      }
+    }
+    throw e;
+  }
+}
+
+// ─── GEN-APP 내부 유틸 ────────────────────────────────────────────────────
+
+/**
+ * 로컬 작업 사본 경로. cohort를 포함하지 않는다 — 같은 강의는 코호트 무관하게 한 사본.
+ * file 별로 다른 파일(lesson.html, ops.html)을 쓴다. 기본은 lesson.html.
+ */
+export function workingCopyPath(cwd: string, course: string, file?: string): string {
+  const fname = file ? `${file}.html` : "lesson.html";
+  return nodePath.join(cwd, "chalk", course, fname);
+}
+
+/**
+ * expected_revision 획득. GET /admin/cohorts/:cohort/authoring/:course 응답의 revision.
+ * 초안이 없으면(404) "먼저 초안을 만들어야 합니다" 오류를 던진다.
+ */
+async function fetchExpectedRevision(
+  ctx: ChalkToolContext,
+  cohort: string,
+  course: string,
+): Promise<number> {
+  try {
+    const resp = await issuerFetch(
+      ctx,
+      `/admin/cohorts/${encodeURIComponent(cohort)}/authoring/${encodeURIComponent(course)}`,
+    ) as Record<string, unknown>;
+    const revision = Number(resp.revision);
+    if (Number.isFinite(revision) && revision >= 1) return revision;
+    throw new Error("서버 응답에 유효한 revision이 없습니다.");
+  } catch (e) {
+    if (e instanceof IssuerHttpError && e.status === 404) {
+      throw new Error("먼저 초안을 만들어야 합니다.");
+    }
+    throw e;
+  }
+}
+
+/**
+ * knowledge_version 자동 결정. 우선순위:
+ * 1. HTML meta 태그 `<meta name="chalk:knowledge-version" content="N">`
+ * 2. GET /admin/chalk/knowledge/versions 최신 버전
+ */
+async function resolveKnowledgeVersion(ctx: ChalkToolContext, html: string): Promise<number> {
+  const metaMatch = html.match(/<meta\s+name="chalk:knowledge-version"\s+content="(\d+)"/i);
+  if (metaMatch) {
+    const v = Number(metaMatch[1]);
+    if (Number.isInteger(v) && v >= 1) return v;
+  }
+  const resp = await issuerFetch(ctx, `/admin/chalk/knowledge/versions`) as { versions?: Array<{ version: number }> };
+  const latest = resp?.versions?.[0]?.version;
+  if (typeof latest === "number" && Number.isInteger(latest) && latest >= 1) return latest;
+  throw new Error("knowledge_version을 결정할 수 없습니다. 지식이 적재되지 않았을 수 있습니다.");
+}
+
+async function hasLocalChanges(filePath: string): Promise<boolean> {
+  try {
+    const stat = await nodeFs.stat(filePath);
+    return stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ─── GEN-APP 도구 정의 ────────────────────────────────────────────────────
+
+// chalk_set_inputs — PUT /admin/chalk/cohorts/:cohort/courses/:course/inputs
+export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
+  name: "chalk_set_inputs",
+  description:
+    "강의 생성기 입력값(학습 조건·목표·교수 모형 등)을 설정합니다. vocab.goals·vocab.conditions는 제품 지식의 어휘 키로 지정합니다 — 키 목록은 chalk_get_knowledge(vocab 문서)로 먼저 확인하세요. 이후 chalk_generator_brief로 지식 기반 브리프를 생성합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      audience: { ...str, description: "수강 대상 설명 (예: 초등 3~4학년 20명)" },
+      assets: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["TASTE", "INTENT", "CONTEXT", "VERIFY", "DELEGATE", "ITERATE", "OWNERSHIP"],
+        },
+        description: "7대 AI Native Asset 중 이 강의에서 다룰 항목",
+      },
+      teaching_style: { ...str, description: "교수 스타일 또는 방법론 (예: 탐구 학습)" },
+      requirements: { type: "string", description: "기타 요구사항 또는 제약 (빈 문자열 허용)" },
+      format: { type: "string", enum: ["workshop", "track"], description: "강의 형식" },
+      family_session: { type: "boolean", description: "가족 세션 여부 (선택)" },
+      audience_tier: {
+        type: "string",
+        enum: ["lv1", "lv2", "adult"],
+        description: "학습자 연령 층 (선택). 반드시 강사에게 묻는다 — 대상 연령으로 추측하지 않는다. lv1/lv2/adult 중 강사가 직접 선택.",
+      },
+      duration_min: {
+        type: "integer",
+        description: "수업 길이 (분, 선택). 양의 정수.",
+      },
+      vocab: {
+        type: "object",
+        properties: {
+          goals: {
+            type: "array",
+            items: { type: "string" },
+            description: "목표 어휘 키 목록 — chalk_get_knowledge로 확인한 키만 사용",
+          },
+          conditions: {
+            type: "array",
+            items: { type: "string" },
+            description: "조건 어휘 키 목록 — chalk_get_knowledge로 확인한 키만 사용",
+          },
+        },
+        required: ["goals", "conditions"],
+        additionalProperties: false,
+        description: "어휘 필터 (필수) — 목표와 조건은 제품 지식의 어휘 키로 지정합니다",
+      },
+    },
+    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format", "vocab"],
+  ),
+};
+
+export async function execSetInputs(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, ...rest } = input as {
+    cohort: string;
+    course: string;
+    [k: string]: unknown;
+  };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
+  const request_id = randomUUID().replace(/-/g, "");
+  const body = { ...rest, expected_revision, request_id };
+  try {
+    const result = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
+      { method: "PUT", body },
+    ) as Record<string, unknown>;
+    return result;
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      if (e.status === 409) {
+        if (code === "revision_conflict") return { error: "revision_conflict", message: "버전 충돌이 발생했습니다. chalk_open_course로 최신 버전을 불러온 뒤 다시 시도하세요." };
+        if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
+        if (code === "inputs_missing") return { error: "inputs_missing", message: "필수 입력값이 없습니다. 입력값을 확인하세요." };
+      }
+    }
+    throw e;
+  }
+}
+
+// chalk_generator_brief — GET /admin/chalk/cohorts/:cohort/courses/:course/brief?file=<file>
+export const CHALK_GENERATOR_BRIEF_DEF: ChalkToolDefinition = {
+  name: "chalk_generator_brief",
+  description:
+    "설정된 입력값과 지식 저장소를 기반으로 강의 생성 브리프를 가져옵니다. chalk_set_inputs 완료 후 호출합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { ...str, description: "파일 키 (예: lesson). 서버가 스켈레톤을 선택하는 데 사용합니다." },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execGeneratorBrief(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  const qs = file ? `?file=${encodeURIComponent(file)}` : "";
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief${qs}`,
+    );
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      if (e.status === 409) {
+        if (code === "inputs_missing") {
+          const serverMsg = typeof b?.error === "string" ? b.error : "";
+          const hint = "chalk_set_inputs로 먼저 입력값을 설정하세요.";
+          const message = serverMsg ? `${serverMsg} — ${hint}` : `입력값이 없습니다. ${hint}`;
+          return { error: "inputs_missing", message };
+        }
+        if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
+        if (code === "knowledge_incomplete") return { error: "knowledge_incomplete", message: "지식이 불완전합니다. 지식 버전을 확인하세요." };
+        if (code === "knowledge_incompatible") return { error: "knowledge_incompatible", message: "지식이 호환되지 않습니다. 다른 지식 버전을 선택하세요.", field: (b as Record<string, unknown>)?.field, unranked: (b as Record<string, unknown>)?.unranked };
+      }
+    }
+    throw e;
+  }
+}
+
+// chalk_open_course — GET /admin/chalk/cohorts/:cohort/courses/:course/plan?file=<file>
+// 서버에서 HTML 계획서를 받아 로컬 작업 사본(cwd/chalk/<course>/지도안.html)에 쓴다.
+export const CHALK_OPEN_COURSE_DEF: ChalkToolDefinition = {
+  name: "chalk_open_course",
+  description:
+    "저장된 강의 계획서(HTML)를 서버에서 불러와 로컬 작업 사본으로 엽니다. 기존 파일이 있으면 덮어쓰기 전 확인을 요청합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { ...str, description: "파일 키 (예: lesson). 서버에서 가져올 파일을 지정합니다." },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execOpenCourse(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+
+  const qs = file ? `?file=${encodeURIComponent(file)}` : "";
+
+  let planResult: { html?: string; [k: string]: unknown } | null = null;
+  let fromSkeleton = false;
+
+  try {
+    planResult = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan${qs}`,
+    ) as { html?: string; [k: string]: unknown };
+  } catch (e) {
+    if (e instanceof IssuerHttpError && e.status === 404) {
+      // Plan not saved yet — fetch skeleton from brief endpoint.
+      const briefQs = file ? `?file=${encodeURIComponent(file)}` : "";
+      const brief = await issuerFetch(
+        ctx,
+        `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief${briefQs}`,
+      ) as { skeleton_html?: string; [k: string]: unknown };
+      const skeletonHtml = typeof brief?.skeleton_html === "string" ? brief.skeleton_html : null;
+      if (!skeletonHtml || !ctx.cwd) {
+        return { error: "plan_not_found", message: "계획서가 없고 스켈레톤 HTML도 없습니다. chalk_generator_brief를 먼저 호출하세요." };
+      }
+      planResult = { html: skeletonHtml };
+      fromSkeleton = true;
+    } else {
+      throw e;
+    }
+  }
+
+  const html = planResult?.html;
+  // cwd 없거나 html 없으면 원격 응답만 반환
+  if (typeof html !== "string" || !ctx.cwd) return planResult;
+
+  const dest = workingCopyPath(ctx.cwd, course, file);
+  const webPath = nodePath.relative(ctx.cwd, dest);
+
+  if (await hasLocalChanges(dest)) {
+    const confirmed = await ctx.requestConfirmation?.(
+      `기존 작업 사본(${dest})을 덮어씁니다. 계속하시겠습니까?`,
+    );
+    if (confirmed === false) return { overwrite_skipped: true };
+  }
+
+  await nodeFs.mkdir(nodePath.dirname(dest), { recursive: true });
+  await nodeFs.writeFile(dest, html, "utf8");
+
+  if (fromSkeleton) {
+    return { created_from: "skeleton", localPath: dest, webPath };
+  }
+  return { ...planResult, localPath: dest, webPath };
+}
+
+// chalk_save_plan — PUT /admin/chalk/cohorts/:cohort/courses/:course/plan
+// 로컬 작업 사본을 읽어 서버에 저장한다.
+export const CHALK_SAVE_PLAN_DEF: ChalkToolDefinition = {
+  name: "chalk_save_plan",
+  description:
+    "로컬 작업 사본(<file>.html)을 서버에 저장합니다. 저장 전 로컬 파일을 읽습니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { ...str, description: "파일 키 (lesson 또는 ops). 기본값: lesson" },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execSavePlan(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file } = input as { cohort: string; course: string; file?: string };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  if (!ctx.cwd) throw new Error("작업 폴더(cwd)가 설정되지 않았습니다.");
+
+  const src = workingCopyPath(ctx.cwd, course, file);
+  let html: string;
+  try {
+    html = await nodeFs.readFile(src, "utf8");
+  } catch {
+    throw new Error(`로컬 작업 사본(${src})을 읽을 수 없습니다. chalk_open_course로 먼저 열어보세요.`);
+  }
+
+  // knowledge_version: if explicitly provided (e.g. from a test or the HTML meta tag),
+  // use it; otherwise resolve from HTML meta → GET /versions latest.
+  const kv = input.knowledge_version;
+  const knowledge_version =
+    typeof kv === "number" && Number.isInteger(kv) && kv >= 1
+      ? kv
+      : await resolveKnowledgeVersion(ctx, html);
+  const expected_revision = await fetchExpectedRevision(ctx, cohort, course);
+  const request_id = randomUUID().replace(/-/g, "");
+  try {
+    const result = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
+      { method: "PUT", body: { html, file: file ?? "lesson", knowledge_version, expected_revision, request_id } },
+    ) as Record<string, unknown>;
+    return result;
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      const errMsg = typeof b?.error === "string" ? b.error : null;
+      if (e.status === 409) {
+        if (code === "revision_conflict") return { error: "revision_conflict", message: "버전 충돌이 발생했습니다. chalk_open_course로 최신 버전을 불러온 뒤 다시 시도하세요." };
+        if (code === "knowledge_missing") return { error: "knowledge_missing", message: "지식이 적재되지 않았습니다. 먼저 지식을 적재하세요." };
+      }
+      if (e.status === 400) {
+        return { error: code ?? "invalid_request", message: errMsg ?? "잘못된 요청입니다. (HTTP 400)" };
       }
     }
     throw e;
@@ -284,6 +645,10 @@ export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_CHECK_PLAN_DEF,
   CHALK_GET_KNOWLEDGE_DEF,
   CHALK_RECOMMEND_METHODS_DEF,
+  CHALK_SET_INPUTS_DEF,
+  CHALK_GENERATOR_BRIEF_DEF,
+  CHALK_OPEN_COURSE_DEF,
+  CHALK_SAVE_PLAN_DEF,
 ];
 
 type ExecutorMap = Record<
@@ -295,6 +660,10 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_check_plan: execCheckPlan,
   chalk_get_knowledge: execGetKnowledge,
   chalk_recommend_methods: execRecommendMethods,
+  chalk_set_inputs: execSetInputs,
+  chalk_generator_brief: execGeneratorBrief,
+  chalk_open_course: execOpenCourse,
+  chalk_save_plan: execSavePlan,
 };
 
 /**

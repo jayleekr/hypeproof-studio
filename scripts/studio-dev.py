@@ -177,7 +177,45 @@ def prepare(repo, base, state, service):
     return app
 
 
-def launch(app, state, local_runtime=None):
+def _clear_stale_ipc_socket(user_data: Path) -> None:
+    """Remove VS Code single-instance IPC sockets left by a dead process.
+
+    VS Code uses a UNIX socket named after the product version (e.g. "0.1.-main")
+    in the user-data directory for single-instance coordination.  If a previous
+    run exited abnormally the socket file is left behind.  On the next launch VS
+    Code finds it, tries to hand focus to the old instance, fails, and exits.
+
+    Safe-guard: if code.lock names a living PID the old instance is still running
+    — do NOT remove the socket and abort instead of silently stealing focus.
+    """
+    lock_file = user_data / 'code.lock'
+    if lock_file.exists():
+        try:
+            locked_pid = int(lock_file.read_text().strip())
+        except (ValueError, OSError):
+            locked_pid = None
+        if locked_pid:
+            try:
+                os.kill(locked_pid, 0)
+                # PID is alive — another Dev instance is running
+                raise RuntimeError(
+                    f'Another Dev instance (PID {locked_pid}) is already running '
+                    f'with this state dir. Stop it before launching a new one.')
+            except ProcessLookupError:
+                pass  # PID is dead — stale lock, continue
+
+    # Remove every file whose name ends with "-main" (VS Code IPC socket pattern).
+    removed = []
+    for p in user_data.glob('*-main'):
+        if p.is_socket():
+            p.unlink()
+            removed.append(p.name)
+    if removed:
+        print(f'Warning: removed stale IPC socket(s) from user-data: {removed}',
+              file=sys.stderr, flush=True)
+
+
+def launch(app, state, local_runtime=None, cdp_port=None):
     executable = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleExecutable']
     env = dict(os.environ)
     # The launcher already has the developer shell environment. VS Code's
@@ -192,10 +230,15 @@ def launch(app, state, local_runtime=None):
     env['HPS_DEV_TOKEN_FILE'] = str(state / 'local-participant-token.txt')
     # HPS_DEV_ISSUER_TOKEN_FILE: forwarded from the caller when set (review-pr.sh writes it).
     # dict(os.environ) above already carries it; no explicit override needed.
+    _clear_stale_ipc_socket(state / 'user-data')
+    cmd = [str(app / 'Contents/MacOS' / executable),
+           '--user-data-dir=' + str(state / 'user-data'), '--extensions-dir=' + str(state / 'extensions'),
+           '--new-window', '--skip-welcome', '--skip-release-notes', str(state / 'workspace')]
+    if cdp_port is not None:
+        # Chromium binds --remote-debugging-port to 127.0.0.1 by default; no address flag needed.
+        cmd += [f'--remote-debugging-port={cdp_port}']
     with (state / 'app.log').open('a') as log:
-        process = subprocess.Popen([str(app / 'Contents/MacOS' / executable),
-            '--user-data-dir=' + str(state / 'user-data'), '--extensions-dir=' + str(state / 'extensions'),
-            '--new-window', '--skip-welcome', '--skip-release-notes', str(state / 'workspace')],
+        process = subprocess.Popen(cmd,
             env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     time.sleep(3)
     if process.poll() is not None:
@@ -216,6 +259,8 @@ def main():
     parser.add_argument('--base-app', type=Path, default=Path('/Applications/HypeProof Studio.app'))
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--service', choices=['local', 'live'], default='local')
+    parser.add_argument('--cdp-port', type=int, default=None,
+                        help='Open CDP remote debugging port on 127.0.0.1 only. Default: off.')
     parser.add_argument('--provider', choices=['claude', 'codex', 'service'], default='claude',
                         help='Development funding: local Claude Code subscription (default), Codex subscription, or Service API.')
     args = parser.parse_args()
@@ -259,7 +304,7 @@ def main():
         with locked(state):
             app = prepare(REPO, args.base_app.resolve(), state, args.service)
             if args.action == 'run':
-                launch(app, state, local_runtime)
+                launch(app, state, local_runtime, cdp_port=args.cdp_port)
 
 
 if __name__ == '__main__':

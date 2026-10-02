@@ -286,7 +286,7 @@ await check('T-L15 execRecommendMethods → POST /admin/chalk/cohorts/:cohort/co
 await check('T-L16 409 from recommend → 지식이 적재되지 않았습니다 message', async () => {
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'knowledge_incomplete' }));
+    res.end(JSON.stringify({ code: 'knowledge_missing', error: '지식이 없습니다.' }));
   }, async (port) => {
     let threw = null;
     try {
@@ -321,7 +321,7 @@ await check('T-L17 409 from check passes through as IssuerHttpError, not 지식 
 await check('T-L18 400 VocabError from recommend → field and unknown_values in message', async () => {
   await withMockServer((req, res) => {
     res.writeHead(400, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'unknown vocabulary values', field: 'conditions', unknown_values: ['bad-key'] }));
+    res.end(JSON.stringify({ code: 'vocab_unknown', error: 'unknown vocabulary values', field: 'conditions', unknown_values: ['bad-key'] }));
   }, async (port) => {
     let threw = null;
     try {
@@ -333,6 +333,41 @@ await check('T-L18 400 VocabError from recommend → field and unknown_values in
     assert.ok(threw, '400 should throw');
     assert.ok(threw.message.includes('conditions'), `field not in message: ${threw.message}`);
     assert.ok(threw.message.includes('bad-key'), `unknown_values not in message: ${threw.message}`);
+  });
+});
+
+await check('T-L19 409 knowledge_incomplete from recommend → 지식이 적재되지 않았습니다 message', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'knowledge_incomplete', error: '지식이 불완전합니다.' }));
+  }, async (port) => {
+    let threw = null;
+    try {
+      await execRecommendMethods(fakeCtx(port), {
+        cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
+        conditions: ['short-session'], goals: ['conceptual-understanding'],
+      });
+    } catch (e) { threw = e; }
+    assert.ok(threw, '409 should throw');
+    assert.ok(threw.message.includes('지식이 적재되지 않았습니다'), `knowledge_incomplete message mismatch: ${threw.message}`);
+  });
+});
+
+await check('T-L20 409 knowledge_incompatible from recommend → 앱 버전 message + unranked', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'knowledge_incompatible', error: 'incompatible', unranked: ['no_prior'] }));
+  }, async (port) => {
+    let threw = null;
+    try {
+      await execRecommendMethods(fakeCtx(port), {
+        cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
+        conditions: ['no_prior'], goals: ['conceptual-understanding'],
+      });
+    } catch (e) { threw = e; }
+    assert.ok(threw, '409 should throw');
+    assert.ok(threw.message.includes('앱 버전'), `incompatible message missing 앱 버전: ${threw.message}`);
+    assert.ok(threw.message.includes('no_prior'), `unranked not in message: ${threw.message}`);
   });
 });
 
