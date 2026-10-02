@@ -4,6 +4,7 @@
 // GET  /chalk/cohorts/:cohort/courses/:course/brief   — generation brief bundle
 // GET  /chalk/cohorts/:cohort/courses/:course/plan    — read plan file (issuer only)
 // POST /chalk/cohorts/:cohort/courses/:course/check   — pedagogy + parser check (#1294)
+// POST /chalk/cohorts/:cohort/courses/:course/derive  — derive runbook/handout from ops (#1469)
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -14,6 +15,7 @@ import { readDraft, owns, writeDraft, type Draft } from "../lib/authoring-draft-
 import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFields } from "../lib/chalk-recommend";
 import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
 import { parsePlan, type Violation } from "../lib/chalk-plan";
+import { deriveRunbook, deriveHandout } from "../lib/chalk-derive";
 import type { SessionDesign } from "../lib/session-design";
 
 type Vars = { Variables: { author: IssuerAuthz } };
@@ -47,6 +49,13 @@ interface InputsWithOptionsRow extends InputsRow {
   duration_min: number | null;
 }
 interface VocabInput { goals: string[]; conditions: string[]; learner_level?: string; has_guidance?: boolean }
+
+// ── Derive helper ────────────────────────────────────────────────────────────
+
+function extractDerivedFrom(html: string): string | null {
+  const m = /data-chalk-derived-from=["']([^"']+)["']/.exec(html);
+  return m ? (m[1] ?? null) : null;
+}
 
 // ── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -741,6 +750,8 @@ chalkCourses.get(
 
 // ── GET /plan ────────────────────────────────────────────────────────────────
 
+const VALID_GET_FILES = ["lesson", "ops", "runbook", "handout"] as const;
+
 chalkCourses.get(
   "/chalk/cohorts/:cohort/courses/:course/plan",
   async (c) => {
@@ -752,8 +763,8 @@ chalkCourses.get(
     c.header("cache-control", "no-store");
 
     const file = c.req.query("file") ?? "lesson";
-    if (!VALID_FILES.includes(file as any))
-      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
+    if (!VALID_GET_FILES.includes(file as any))
+      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_GET_FILES.join(", ")}` }, 400);
 
     // Read latest draft plan file
     const planRow = await c.env.HPS_DB.prepare(
@@ -764,13 +775,81 @@ chalkCourses.get(
     ).bind(cohort, course, file).first<PlanFileRow>();
     if (!planRow) return c.json({ error: "plan file not found" }, 404);
 
-    return c.json({
+    const response: Record<string, unknown> = {
       html: planRow.html,
       sha256: planRow.sha256,
       knowledge_version: planRow.knowledge_version,
       ref_kind: planRow.ref_kind,
       ref: planRow.ref,
-    });
+    };
+
+    // For derived files (runbook/handout), add derived_from and stale flag.
+    if (file === 'runbook' || file === 'handout') {
+      const derivedFrom = extractDerivedFrom(planRow.html);
+      response.derived_from = derivedFrom;
+      // Stale if no ops or ops sha differs from derivedFrom.
+      const opsRow = await c.env.HPS_DB.prepare(
+        `SELECT sha256 FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='ops' ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+      ).bind(cohort, course).first<{ sha256: string }>();
+      response.stale = !opsRow || opsRow.sha256 !== derivedFrom;
+    }
+
+    return c.json(response);
+  },
+);
+
+// ── POST /derive ──────────────────────────────────────────────────────────────
+
+const VALID_DERIVE_FILES = ["runbook", "handout"] as const;
+
+chalkCourses.post(
+  "/chalk/cohorts/:cohort/courses/:course/derive",
+  async (c) => {
+    const cohort = c.req.param("cohort")!;
+    const course = c.req.param("course")!;
+    const { err } = await authAndOwn(c, cohort, course) as any;
+    if (err) return err;
+
+    const rawBody = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+    const file = typeof rawBody?.file === 'string' ? rawBody.file : '';
+    if (!VALID_DERIVE_FILES.includes(file as any))
+      return c.json({ code: "invalid_file", error: `file must be one of: ${VALID_DERIVE_FILES.join(", ")}` }, 400);
+
+    // Read latest ops plan.
+    const opsRow = await c.env.HPS_DB.prepare(
+      `SELECT html, sha256 FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='ops' ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+    ).bind(cohort, course).first<{ html: string; sha256: string }>();
+    if (!opsRow) return c.json({ code: "missing_ops", error: "ops plan not yet saved" }, 400);
+
+    const opsSha256 = opsRow.sha256;
+
+    // Check idempotency: if derived file with same ops sha already exists, return 200.
+    const existing = await c.env.HPS_DB.prepare(
+      `SELECT html, sha256 FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file=? ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+    ).bind(cohort, course, file).first<{ html: string; sha256: string }>();
+    if (existing && extractDerivedFrom(existing.html) === opsSha256) {
+      return c.json({ html: existing.html, sha256: existing.sha256, file, status: "unchanged" }, 200);
+    }
+
+    // Derive the HTML.
+    const html = file === 'runbook'
+      ? deriveRunbook(opsRow.html, opsSha256)
+      : deriveHandout(opsRow.html, opsSha256);
+
+    const derivedSha256 = await sha256Hex(html);
+    const nowMs = Date.now();
+
+    // Read the latest ops ref to use as ref for derived file.
+    const opsRefRow = await c.env.HPS_DB.prepare(
+      `SELECT ref FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file='ops' ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+    ).bind(cohort, course).first<{ ref: string }>();
+    const ref = opsRefRow?.ref ?? '0';
+
+    await c.env.HPS_DB.prepare(
+      `INSERT INTO chalk_plan_files (cohort_id,course_id,ref_kind,ref,file,html,sha256,knowledge_version,created_at) VALUES (?,?,?,?,?,?,?,0,?)`
+    ).bind(cohort, course, 'draft', ref, file, html, derivedSha256, nowMs).run();
+
+    return c.json({ html, sha256: derivedSha256, file, status: "created" }, 201);
   },
 );
 

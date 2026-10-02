@@ -3943,6 +3943,47 @@
           "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-DERIVE",
+      "stage": "implementation",
+      "label": "Chalk 런북·안내문 뽑기 — 서버·앱 측 (E3-3 / #1469)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-GEN-SERVER",
+        "ST-IMP-CHALK-GEN-APP"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/chalk-derive.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-courses.ts"
+        },
+        {
+          "path": "worker/src/lib/instructor-auth.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-instructor.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-DERIVE",
+      "stage": "test",
+      "label": "Chalk 런북·안내문 뽑기 시험 (E3-3 / #1469)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-DERIVE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-derive.test.mjs"
+        }
+      ]
     }
   ]
 }

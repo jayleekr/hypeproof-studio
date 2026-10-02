@@ -639,6 +639,58 @@ export async function execSavePlan(
   }
 }
 
+// chalk_derive — POST /admin/chalk/cohorts/:cohort/courses/:course/derive (#1469 E3-3)
+export const CHALK_DERIVE_DEF: ChalkToolDefinition = {
+  name: "chalk_derive",
+  description:
+    "운영 계획안(ops.html)에서 진행자 런북(runbook.html) 또는 참가자 안내문(handout.html)을 뽑습니다. 서버가 HTML을 생성해 작업 사본으로 저장합니다. 미리보기는 live_preview_start + browser_open으로 엽니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { ...str, description: '"runbook" 또는 "handout"' },
+    },
+    ["cohort", "course", "file"],
+  ),
+};
+
+export async function execDerive(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file } = input as { cohort: string; course: string; file: string };
+  if (!cohort || !course || !file) throw new Error("cohort, course, file은 필수입니다.");
+
+  const enc = encodeURIComponent;
+  let result: Record<string, unknown>;
+  try {
+    result = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${enc(cohort)}/courses/${enc(course)}/derive`,
+      { method: "POST", body: { file } },
+    ) as Record<string, unknown>;
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      const errMsg = typeof b?.error === "string" ? b.error : null;
+      return { error: code ?? "server_error", message: errMsg ?? `서버 오류 ${e.status}` };
+    }
+    throw e;
+  }
+
+  const html = typeof result.html === "string" ? result.html : null;
+  const webPath = `chalk/${course}/${file}.html`;
+
+  if (ctx.cwd && html) {
+    const dest = nodePath.join(ctx.cwd, webPath);
+    await nodeFs.mkdir(nodePath.dirname(dest), { recursive: true });
+    await nodeFs.writeFile(dest, html, "utf8");
+  }
+
+  return { ...result, webPath };
+}
+
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
 
 export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
@@ -649,6 +701,7 @@ export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_GENERATOR_BRIEF_DEF,
   CHALK_OPEN_COURSE_DEF,
   CHALK_SAVE_PLAN_DEF,
+  CHALK_DERIVE_DEF,
 ];
 
 type ExecutorMap = Record<
@@ -664,6 +717,7 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_generator_brief: execGeneratorBrief,
   chalk_open_course: execOpenCourse,
   chalk_save_plan: execSavePlan,
+  chalk_derive: execDerive,
 };
 
 /**
