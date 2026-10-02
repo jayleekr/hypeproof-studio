@@ -67,7 +67,7 @@ Two consequences worth stating, because a session got both wrong on 2026-09-20:
 ## Hard rules
 
 - **YOU MUST NOT** run `bash build.sh` without explicit user approval. A full build is 1–2 hours and consumes 10–20 GB. Confirm disk + intent first.
-- **YOU MUST NOT** run Windows-specific commands locally. Win builds happen in GitHub Actions only (Phase 6). Mac arm64 is the only local target.
+- **YOU MUST NOT** run a full Windows shell/installer build locally; those builds happen in GitHub Actions. Full local shell builds target macOS arm64. Windows extension/webview development and tests may use the isolated installed-shell copy via `scripts/studio-dev.py` / `scripts/Studio Dev.ps1`; see [Studio development](docs/dev/studio-dev.md). This exception does not authorize release builds or production changes.
 - **YOU MUST NOT** edit files under `vscodium-base/vscode/` or `vscodium-base/VSCode-*/` directly — these are upstream/build artifacts. All changes go through `vscodium-base/patches/*.patch` or the `prepare_vscode.sh` jq edits.
 - **YOU MUST NOT** put secrets (Workshop tokens, Apple Developer ID, signing certs) in any tracked file. `.env` only, gitignored.
 
