@@ -23,7 +23,7 @@ import browserControlContractSdkMd from "../prompts/_browser-control-contract-sd
 import curriculumRuntimeBrowserContractMd from "../prompts/_curriculum-runtime-browser-contract.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import runtimeDegradedNoticeMd from "../prompts/_runtime-degraded-notice.md";
-import { BROWSER_TOOLS, CR_BROWSER_TOOLS } from "./browser-tools.ts";
+import { BROWSER_TOOLS, CR_BROWSER_TOOLS, CR_VERIFY_TOOLS } from "./browser-tools.ts";
 import { curriculumRuntimeAllowed, isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
 
@@ -610,7 +610,8 @@ export function translate(
   if (profile.browser_control?.enabled === true) {
     // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
     // Never for minors: the SDK grant checks the tier, and so does this one.
-    const crTools = curriculumRuntimeAllowed(profile) ? CR_BROWSER_TOOLS : [];
+    // cr-verify — the AI Verify tools ride the same switch (CR-12–CR-16).
+    const crTools = curriculumRuntimeAllowed(profile) ? [...CR_BROWSER_TOOLS, ...CR_VERIFY_TOOLS] : [];
     for (const t of [...BROWSER_TOOLS, ...crTools]) {
       tools.push({ name: t.name, description: t.description, input_schema: t.input_schema });
     }

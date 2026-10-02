@@ -180,6 +180,14 @@ export function buildProxyHeaders(args: BuildHeadersArgs): Record<string, string
   return headers;
 }
 
+/**
+ * #751 U3 — the lesson binding a request runs under (`x-hps-lesson-binding`), or nothing when the
+ * key is absent or not a binding key. The same check the coach proxy path applies (proxyClient.ts).
+ */
+export function lessonBindingHeader(key: string | undefined): Record<string, string> {
+  return key && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(key) ? { "x-hps-lesson-binding": key } : {};
+}
+
 // ── #580 — 스트림 청크의 토큰 usage 파싱 ────────────────────────────────────
 
 /** 요청 1건의 토큰 4종 — 스풀 usage 레코드로 가는 캐논 형태. */

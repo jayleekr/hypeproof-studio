@@ -1,7 +1,9 @@
 // CR-T03 (cr-browser #1391): the browser-tool modules import no provider SDK and exchange
 // plain data, and the same tool calls give identical results through the SDK coach's
 // adapter (`toMcpToolResult`) and the proxy coach's (`toProxyToolResult`).
-// cr-verify adds its runner module to BROWSER_TOOL_MODULES and re-runs this.
+// cr-verify (#1392) adds its runner, session and view modules to BROWSER_TOOL_MODULES (the
+// scan follows them into measurement-core verification.ts) and re-runs this; the planted
+// import below is planted in the verify runner too.
 //
 // Run: node --experimental-strip-types test/cr-provider-neutral.smoke.mjs
 
@@ -12,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { makeFakePage, fakePort, FAKE_VERSION } from "./fixtures/fake-cdp-page.mjs";
 
 const src = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
-/** The browser-tool modules (CR-03). The verify runner joins in cr-verify. */
+/** The browser-tool and verify-runner modules (CR-03). */
 export const BROWSER_TOOL_MODULES = [
   "browserControl.ts",
   "browserControlHelpers.ts",
@@ -23,6 +25,9 @@ export const BROWSER_TOOL_MODULES = [
   "browserResult.ts",
   "browserMcp.ts",
   "crHostWiring.ts",
+  "verifyRunner.ts",
+  "verifySession.ts",
+  "verifyView.ts",
 ];
 const PROVIDER_SDK = /^(?:@anthropic-ai\/|openai(?:\/|$)|@google\/(?:genai|generative-ai)|@ai-sdk\/|ai$|@mistralai\/|cohere-ai|groq-sdk|zhipuai)/;
 const IMPORT_RE = /(?:^|[\s;])(?:import\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?|export\s+[^'"]*?\s+from\s+|require\(\s*|import\(\s*)["']([^"']+)["']/g;
@@ -68,6 +73,9 @@ ok(`CR-T03 positive: ${graph.size} modules in the browser-tool graph import no p
 // Negative control: a planted SDK import in the runner module is reported (and so is a
 // require, a dynamic import and a type-only import — the instrument must see each form).
 const runner = readFileSync(resolve(src, "experimentBrowser.ts"), "utf8");
+const verifyRunner = readFileSync(resolve(src, "verifyRunner.ts"), "utf8");
+assert.equal(providerImports(`import Anthropic from "@anthropic-ai/sdk";\n${verifyRunner}`).length, 1, "planted in the verify runner");
+assert.ok([...graph.keys()].some((f) => f.endsWith("measurement-core/verification.ts")), "the scan reached the verify core");
 for (const planted of [
   `import Anthropic from "@anthropic-ai/sdk";`,
   `import type { Message } from "@anthropic-ai/sdk/resources";`,

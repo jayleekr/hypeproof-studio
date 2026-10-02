@@ -115,6 +115,9 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
 
   let tagDepth = 0; // overall element depth (for section tracking)
 
+  let currentMetaRowHeader: string | null = null;
+  let metaTablePrerequisites: string | null = null;
+
   let inFlowTable = false;
   let flowTableDepth = 0;
   let inFlowRow = false;
@@ -136,7 +139,9 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
     | { kind: 'key_question'; stepId: string | null }
     | { kind: 'prohibited_move'; family: string; stepId: string | null }
     | { kind: 'bridging_opener' }
-    | { kind: 'safety_value' };
+    | { kind: 'safety_value' }
+    | { kind: 'meta_row_header' }
+    | { kind: 'meta_row_value'; header: string };
 
   let collectTarget: CollectTarget | null = null;
   let collectDepth = 0;
@@ -182,6 +187,12 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
       if (!bridgingOpener) bridgingOpener = text;
     } else if (ct.kind === 'safety_value') {
       if (!safety) safety = text;
+    } else if (ct.kind === 'meta_row_header') {
+      currentMetaRowHeader = text;
+    } else if (ct.kind === 'meta_row_value') {
+      if (ct.header === '선행 조건' && text) {
+        metaTablePrerequisites = text;
+      }
     }
   };
 
@@ -297,6 +308,22 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
       if (meta.kind !== 'ops') {
         const sec = currentSection();
 
+        if (sec === 'meta') {
+          if (tag === 'tr') {
+            currentMetaRowHeader = null;
+          }
+          if (tag === 'th' && !collectTarget) {
+            collectTarget = { kind: 'meta_row_header' };
+            collectDepth = tagDepth + 1;
+            collectedText = '';
+          }
+          if (tag === 'td' && currentMetaRowHeader && !collectTarget) {
+            collectTarget = { kind: 'meta_row_value', header: currentMetaRowHeader };
+            collectDepth = tagDepth + 1;
+            collectedText = '';
+          }
+        }
+
         if (sec === 'objectives' && 'data-chalk-objective' in attrs && !collectTarget) {
           collectTarget = { kind: 'objective', id: attrs['data-chalk-objective'] || null };
           collectDepth = tagDepth + 1;
@@ -404,6 +431,21 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   while (stack.length > 0) {
     const unclosed = stack.pop()!;
     violations.push(violation('markup.malformed', ['HTML-02'], `<${unclosed}> 가 끝까지 닫히지 않았다`, file, null, null));
+  }
+
+  // Reconcile head meta prerequisites with meta table row value (KPS 1절).
+  // Head meta wins if both are present; mismatch is a warning.
+  if (meta.kind !== 'ops' && metaTablePrerequisites) {
+    if (!meta.prerequisites) {
+      meta.prerequisites = metaTablePrerequisites;
+    } else if (meta.prerequisites !== metaTablePrerequisites) {
+      violations.push(violation(
+        'spec.meta_prerequisites_mismatch',
+        ['KPS-1절'],
+        `머리 chalk:prerequisites 와 표 "선행 조건" 행 값이 다릅니다`,
+        file, 'meta', null,
+      ));
+    }
   }
 
   // Required meta keys (lesson only)

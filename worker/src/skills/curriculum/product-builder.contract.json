@@ -1,0 +1,111 @@
+{
+  "skill": "product-builder",
+  "version": "1.0.0",
+  "title": "제품 수정 계획",
+  "intent": "Plan the smallest change to the product version that the evidence the student selected requires, file by file, each change citing that evidence; nothing else is touched.",
+  "required_context": [
+    "version_files",
+    "version_sources",
+    "evidence_items",
+    "decisions"
+  ],
+  "allowed_tools": [
+    "memory_read",
+    "evidence_read",
+    "version_read"
+  ],
+  "preferred_capability": "coding",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "evidence_refs": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "maxItems": 10,
+        "minItems": 1
+      },
+      "version_id": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "request": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "evidence_refs"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string",
+        "maxLength": 600,
+        "minLength": 1
+      },
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1
+            },
+            "kind": {
+              "type": "string",
+              "maxLength": 10,
+              "enum": [
+                "edit",
+                "add"
+              ]
+            },
+            "change": {
+              "type": "string",
+              "maxLength": 1000,
+              "minLength": 1
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "maxItems": 10
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "change",
+            "evidence_refs"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 10,
+        "minItems": 1
+      },
+      "not_changed": {
+        "type": "string",
+        "maxLength": 600
+      }
+    },
+    "required": [
+      "summary",
+      "changes"
+    ],
+    "additionalProperties": false
+  },
+  "validation_rules": [
+    "product_changes_cite_selected_evidence",
+    "product_paths_in_version"
+  ],
+  "write_back_targets": []
+}

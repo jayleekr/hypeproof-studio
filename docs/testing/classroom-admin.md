@@ -1432,3 +1432,30 @@ The latest instructor request supersedes the seven-column overview and green/lim
 These are local synthetic fixtures, not live students, production activation, real model evaluation or human visual acceptance of the original concept. The original concept is a design reference, not runtime evidence.
 
 Follow-up browser coverage for this revision: `test:classroom`, roster (7), selection (8), distribution (7), lesson settings (5), help, results (18), G1 wrap (8), authoring mission (7) and report rendering (4) passed locally. Tests open disclosures with real summary clicks and use the single refresh action. Additional findings fixed: connection-input contrast; old apps without step observation remain unknown; lesson binding/version is preserved in selected learner details; shared-outage guidance stays visible; mobile refresh remains reachable and disconnect appears with connection settings. Opening selection tools also reveals the composer without requiring a target, while sending still requires explicit selected-target confirmation.
+
+## Classroom stack regression corrections — 2026-10-02 (#1409)
+
+The nine reproduced defects are corrected against `8d2138e`. These are local
+synthetic-account results on macOS arm64 / Node 25.9, not production or classroom
+acceptance. Existing ADM/AT-47/AT-48 contracts govern the corrections.
+
+| Issue item | Regression evidence | Observed result |
+|---|---|---|
+| 1 stale cancel/discard | `classroom-help-host.smoke.mjs`, `e2e/classroom/help-request.mjs` | Replacement request survives; actual React buttons carry the displayed ID; matching actions still work |
+| 2 missing approved page | `collection-integrity.smoke.mjs`, `classroom-ops-collect-kinds.test.mjs` | Page bytes copied at approval, including restart; missing bytes give gaps instead of complete; withdrawn approval does not require the page |
+| 3 damaged record line | `classroom-ops-collect-kinds.test.mjs` | Matching malformed index/hash yields damaged; forged metadata and changed bytes remain rejected |
+| 4 committed store mutation replay | `classroom-help-store.smoke.mjs` | Draft and envelope linked-hook races apply once; pre-link stale writer, killed process, and expired receipt controls pass |
+| 5 Korean body budget | `classroom-help.test.mjs`, `classroom-help-host.smoke.mjs` | Full Korean and JSON-escaped fields accepted; overlong fields/body refused; 413 names the cause and keeps the draft |
+| 6 undated out-of-window fragment | `collection-integrity.smoke.mjs` | Leading/boundary fragments excluded; in-window damage and all-undated legacy behavior preserved |
+| 7 unlisted uploaded objects | `classroom-ops-collect-kinds.test.mjs` | Manifest extras quarantined/deleted; failed cleanup retry/reconcile, seal/PUT races, distinct and same-name concurrent PUT controls pass |
+| 8 legacy scope | `classroom-ops-reports.test.mjs` | Early review-required draft uses verified scope; legacy string input deletes runner-supplied scope |
+| 9 single-session copy | `classroom-ops-collect-kinds.test.mjs` | Report and guardian HTML describe one session without claiming a restart; multiple sessions are not assumed to mean a restart |
+
+Validation: Worker, extension and Chalk `npm test` passed. Worker/extension
+typechecks, extension/webview builds and docs checker (100/100) passed. Chromium
+help UI, instructor help queue, and guardian report desktop/mobile/200% rendering
+plus PDF passed. R2 conditional-write race tests model atomic preconditions in the
+local fixture; hosted R2/D1, a released App, Windows, school networks, real learners
+and production deployment are NOT RUN. The change adds no retention duration,
+consent grant or migration. Unrequested bytes are rejected under the existing
+collection contract.

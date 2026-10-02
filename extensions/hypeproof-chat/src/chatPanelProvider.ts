@@ -17,13 +17,13 @@ import * as fs from "fs";
 import {createHash} from 'node:crypto';
 import { APPROVAL_PLACEHOLDER, approvalChoices, approvalMessage, approveArtifact } from "./artifactApproval.ts";
 import {NativeObservationRecorder} from './nativeObservationRecorder';
-import {OBSERVATION_FORMATS, validateFindings, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
+import {OBSERVATION_FORMATS, validateFindings, validateObservation, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
 import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
+import { TOKEN_MISSING_FRIENDLY, buildProxyHeaders, lessonBindingHeader, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { acceptFocus, acceptWork, rehearsalReport, turnLesson, workContext, type LessonFocus, type StepWork } from "./lessonFocus";
 import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
@@ -35,7 +35,12 @@ import {
   withCoachSeatLock,
 } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { PublishSession } from "./publishSession";
+import { EvidenceSession } from "./evidenceSession";
+import { MemorySession } from "./memorySession";
+import { SkillSession, completeSkillRequest, type SkillCompletion } from "./skillSession";
+import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
   originOfUrl,
@@ -48,7 +53,8 @@ import {
   toProxyToolResult,
   isLoopbackUrl,
 } from "./browserControlHelpers";
-import { isCurriculumRuntimeEnabled, CR_CONTEXT_KEY } from "./curriculumRuntime";
+import { isCurriculumRuntimeEnabled, isCrVerifyTool, CR_CONTEXT_KEY } from "./curriculumRuntime";
+import { VerifySession, recordChecked, refusalText, verifyContext, verifyToolResult, type VerifyRecorderPort } from "./verifySession";
 import { artifactVersionFor } from "./artifactVersion";
 import type { ElementContext } from "./elementPick";
 import { checkAgentOrigin } from "./experimentBrowser";
@@ -69,6 +75,9 @@ import {
   clearStoredResults,
   CR_BYTES_CONTEXT_KEY,
   CR_BYTES_OWNERS_STATE,
+  CR_PROJECTS_STATE,
+  CrProjectMemory,
+  crAllowedOrigins,
   crBytesOwner,
   crBytesOwnersAfter,
   type BlobSink,
@@ -286,6 +295,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
     await this.observationWrites;
+    // A re-test runs outside any turn and writes and persists its recorder for seconds. A new
+    // recorder built from the saved batch now would be persisted over by the re-test, or
+    // persist over it: whole snapshots, last write wins. Every writer shares the re-test's
+    // recorder until it ends.
+    if (this.verifyRunRecorder && this.verifySession.retestActive) return (this.nativeObservation = this.verifyRunRecorder);
     this.nativeObservation = null;
     // P1 — both `/1` and `/2` are accepted. Which one is used is the profile's call
     // (design §관측 이벤트와 필드: "the profile's observation.format decides which one is used").
@@ -552,6 +566,389 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
   /** CR-09 — the element the student picked for the NEXT turn, until sent or removed. */
   private readonly elementQueue = new ElementQueue();
+
+  // ── AI Verify (cr-verify, #1392) ──────────────────────────────────────────
+  /** "Test my product": the session over the record, the preview and the CR executor. */
+  private readonly verifySession = new VerifySession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    recorder: () => this.verifyRecorder(),
+    startUrl: () => this.liveServer.currentUrl() ?? null,
+    allowedOrigins: () => this.crBrowserOptions().allowedOrigins(),
+    executor: () => {
+      this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
+      return this.mcpBrowser.crExecutor();
+    },
+    currentVersion: async () => {
+      const root = this.liveServer.currentRoot();
+      const base = this.liveServer.currentUrl();
+      if (!root || !base) return null;
+      return (await artifactVersionFor(root, new URL(base).pathname || "/")).id;
+    },
+    storeScreenshot: async (base64, mimeType) => {
+      const sink = this.crBlobSinkFor(crBytesOwner(await this.context.secrets.get(TOKEN_KEY)));
+      if (!sink) return null;
+      const [digest] = await sink([{ media_type: mimeType === "image/png" ? "image/png" : "image/jpeg", base64 }]);
+      return digest ?? null;
+    },
+    // CR-68, chat-panel half: the panel shows the run while it acts on the page.
+    onRun: () => void this.postVerifyState(),
+    release: () => { this.verifyRunRecorder = null; },
+  });
+
+  /**
+   * The recorder of the turn now streaming, captured by `handleSend` and cleared when the
+   * turn ends. Other webview handlers may replace `this.nativeObservation` mid-turn
+   * (`prepareObservation`), and the turn later persists its own recorder over the same key,
+   * so verdicts written anywhere else during the turn would be overwritten.
+   */
+  private verifyTurnRecorder: NativeObservationRecorder | null = null;
+  /**
+   * The recorder a re-test writes to, held from its first recorder call until it ends
+   * (`release`). Meanwhile `prepareObservation` hands this one out instead of building
+   * another, so a drawer write during a re-test lands on the same record.
+   */
+  private verifyRunRecorder: NativeObservationRecorder | null = null;
+
+  /**
+   * The record a verify action writes to. Inside a turn this is the turn's own recorder
+   * (`verifyTurnRecorder`), so the turn's later writes never overwrite the verdicts;
+   * outside a turn it is prepared from the saved batch. Learning events need `/2`.
+   */
+  private async verifyRecorder(): Promise<VerifyRecorderPort | null> {
+    // During a re-test every verify action (the panel's view included) uses the re-test's
+    // recorder; outside one, nothing is held.
+    const retest = this.verifySession.retestActive;
+    if (!retest) this.verifyRunRecorder = null;
+    const recorder = (retest ? this.verifyRunRecorder : null) ?? this.verifyTurnRecorder ?? (this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder());
+    if (!recorder) return null;
+    if (retest) this.verifyRunRecorder = recorder;
+    const profile = await this.ensureProfile();
+    const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
+    const context = verifyContext({
+      week: profile?.lesson?.content?.learning?.week,
+      stepId: profile?.lesson?.content?.steps?.[0]?.id,
+      task,
+      moduleVersion: profile?.lesson?.version,
+    });
+    return {
+      events: () => recorder.batch.events,
+      record: (kind, text, extra) => recordChecked(recorder.batch, validateObservation, () => recorder.record(task, kind, text, extra)),
+      recordLearning: (draft) => recordChecked(recorder.batch, validateObservation, () => recorder.recordLearningEvent({ ...draft, context })),
+      persist: () => this.persistObservation(recorder),
+    };
+  }
+
+  /** Post the panel state; `sendText` is the student's sentence the panel sends next. */
+  private async postVerifyState(extra: { sendText?: string; requestId?: string; error?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "verifyState", view: null });
+      return;
+    }
+    await this.post({ type: "verifyState", view: await this.verifySession.view(), ...extra });
+  }
+
+  /** CR-12 — the "Test my product" command: re-checks the served switch, then opens the panel. */
+  async testMyProduct(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice(refusalText("switch_off"));
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postVerifyState();
+  }
+
+  /** One verify action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handleVerifyMessage(msg: { type: "verifyOpen" } | { type: "verifyStart"; requestId: string; criteria: unknown } | { type: "verifyRetest" } | { type: "verifyFix"; requestId: string; criterionId: string; text: string }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "verifyState", view: null, error: refusalText("switch_off") });
+      return;
+    }
+    if (msg.type === "verifyOpen") return this.postVerifyState();
+    // A run or re-test while the coach is answering would share the tab and the record with that turn.
+    if (this.pendingSends > 0 || this.activeStreams.size > 0) return this.postVerifyState({ error: refusalText("turn_running") });
+    if (msg.type === "verifyStart") {
+      const r = await this.verifySession.start(msg.criteria);
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
+    }
+    if (msg.type === "verifyFix") {
+      const r = await this.verifySession.fix(msg.criterionId, msg.text);
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
+    }
+    const pending = this.verifySession.retest();
+    await this.postVerifyState();
+    const r = await pending;
+    await this.postVerifyState(r.ok ? {} : { error: refusalText(r.code) });
+  }
+
+  // ── Publish for User Test (cr-publish, #1393) ─────────────────────────────
+  /** The signed-in person's Project id and test origin, keyed by crBytesOwner (a digest, never the identity). */
+  private readonly crProjectMemory = new CrProjectMemory(
+    {
+      get: () => this.context.workspaceState.get<unknown>(CR_PROJECTS_STATE),
+      update: (value) => this.context.workspaceState.update(CR_PROJECTS_STATE, value),
+    },
+    async () => (await this.context.secrets.get(TOKEN_KEY)) ?? null,
+  );
+  /** "사용자 테스트용으로 공개": the session over the preview's files, the record and the Service. */
+  private readonly publishSession = new PublishSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    root: () => this.liveServer.currentRoot() ?? null,
+    entry: () => {
+      const base = this.liveServer.currentUrl();
+      return base ? new URL(base).pathname || "/" : null;
+    },
+    events: async () => (await this.verifyRecorder())?.events() ?? [],
+    projectId: () => this.crProjectMemory.projectId(),
+    setProjectId: (id) => this.crProjectMemory.set(id ? { id } : { id: undefined, origin: null }),
+    rememberedOrigin: () => this.crProjectMemory.origin(),
+    rememberOrigin: (origin) => this.crProjectMemory.set({ origin }),
+    week: () => {
+      const w = this.cachedProfile?.lesson?.content?.learning?.week;
+      return typeof w === "number" ? w : null;
+    },
+    defaultTitle: () => vscode.workspace.workspaceFolders?.[0]?.name ?? "내 제품",
+    qr: qrDataUrl,
+  });
+
+  /** Post the publish panel state (null hides it with the switch off). */
+  private async postPublishState(extra: { error?: string; errorLines?: string[]; shareUrl?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "publishState", view: await this.publishSession.view(), ...extra });
+  }
+
+  /** CR-17 — the "Publish for user test" command: re-checks the served switch, then opens the panel. */
+  async publishTestVersion(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 사용자 테스트 공개를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postPublishState();
+  }
+
+  /** One publish action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handlePublishMessage(msg: { type: "publishOpen"; manifest?: string[] } | { type: "publishSubmit"; form: import("./publishView").PublishForm } | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number } | { type: "publishRevoke"; linkId: string }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, error: "이 수업에서는 사용자 테스트 공개를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "publishOpen") {
+      if (msg.manifest !== undefined) this.publishSession.setManifest(msg.manifest);
+      return this.postPublishState();
+    }
+    if (msg.type === "publishSubmit") {
+      const r = await this.publishSession.submit(msg.form ?? ({} as import("./publishView").PublishForm));
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message, ...(r.lines ? { errorLines: r.lines } : {}) });
+    }
+    if (msg.type === "publishLink") {
+      const r = await this.publishSession.link(String(msg.experimentId ?? ""), { channel: msg.channel, expires_in_days: msg.expiresInDays });
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message });
+    }
+    const r = await this.publishSession.revoke(String(msg.linkId ?? ""));
+    return this.postPublishState(r.ok ? {} : { error: r.message });
+  }
+
+  // ── Experiment evidence (cr-evidence, #1394) ──────────────────────────────
+  /** The evidence panel over the same Project the publish panel remembers; reads and writes go to the Service. */
+  private readonly evidenceSession = new EvidenceSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the evidence panel state (null hides it with the switch off). */
+  private async postEvidenceState(extra: { error?: string; done?: string } = {}, select?: string): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "evidenceState", view: await this.evidenceSession.view(select), ...extra });
+  }
+
+  /** CR-24–CR-27 — the "실험 증거 보기" command: re-checks the served switch, then opens the panel. */
+  async experimentEvidence(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 실험 증거를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postEvidenceState();
+  }
+
+  /** One evidence action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handleEvidenceMessage(
+    msg:
+      | { type: "evidenceOpen"; experimentId?: string }
+      | { type: "evidenceNote"; experimentId: string; note: import("./evidenceView").NoteForm }
+      | { type: "evidenceDraft"; experimentId: string }
+      | { type: "evidenceReview"; experimentId: string; draftId: string; revision: number; actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }> }
+      | { type: "evidenceDelete"; experimentId: string; sessionId?: string },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, error: "이 수업에서는 실험 증거를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "evidenceOpen") return this.postEvidenceState({}, msg.experimentId);
+    const exp = String(msg.experimentId ?? "");
+    if (msg.type === "evidenceNote") {
+      const r = await this.evidenceSession.addNote(exp, msg.note ?? ({} as import("./evidenceView").NoteForm));
+      return this.postEvidenceState(r.ok ? { done: "기록을 남겼어요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceDraft") {
+      const r = await this.evidenceSession.makeDraft(exp);
+      return this.postEvidenceState(r.ok ? { done: "기록에서 초안을 만들었어요. 읽어 보고 받아들이거나 고쳐 주세요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceReview") {
+      const r = await this.evidenceSession.review(exp, String(msg.draftId ?? ""), Number(msg.revision), Array.isArray(msg.actions) ? msg.actions : []);
+      return this.postEvidenceState(r.ok ? {} : { error: r.message });
+    }
+    // CR-69 — deleting participant records is the person's explicit act, behind a modal.
+    const what = msg.sessionId ? "이 참가 세션의 기록" : "이 실험의 참가 기록 · 메모 · 초안 전부";
+    const pick = await vscode.window.showWarningMessage(`${what}을 지울까요? 지운 기록은 되돌릴 수 없고, 그 기록을 근거로 쓴 초안도 함께 지워져요.`, { modal: true }, "지우기");
+    if (pick !== "지우기") return this.postEvidenceState();
+    const r = await this.evidenceSession.delete(exp, msg.sessionId ? String(msg.sessionId) : undefined);
+    return this.postEvidenceState(r.ok ? { done: "지웠어요. 지운 기록의 영수증이 남았어요." } : { error: r.message });
+  }
+
+  // ── Venture Memory (cr-memory, #1395) ──────────────────────────────────────
+  /** The memory panel over the same Project the publish panel remembers; it reads the Service only, never chat history (CR-36). */
+  private readonly memorySession = new MemorySession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the memory panel state (null hides it with the switch off). */
+  private async postMemoryState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "memoryState", view: await this.memorySession.view(), ...extra });
+  }
+
+  /** CR-35/CR-36 — the "프로젝트 기억 보기" command: re-checks the served switch, then opens the panel. */
+  async ventureMemory(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 프로젝트 기억을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postMemoryState();
+  }
+
+  // ── Curriculum skills (cr-skills, #1396) ────────────────────────────────────
+  /**
+   * The skills panel over the same Project the publish panel remembers. The skill list and every
+   * contract come from the Service; the model call goes through the existing coach route with the
+   * run's skill tag and capability (CR-45), never a model id; the Service gates the answer (CR-44).
+   */
+  private readonly skillSession = new SkillSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(this.proxyUrl()),
+    projectId: () => this.crProjectMemory.projectId(),
+    complete: (prompt, headers) => this.completeSkill(prompt, headers),
+  });
+
+  private proxyUrl(): string {
+    return vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+  }
+
+  /**
+   * One non-streaming request on the coach route, carrying only the run's metadata headers and no
+   * model. On a lesson seat it names the lesson binding the profile serves, as a coach turn does
+   * (#751 U3), so a switched lesson version admits the request instead of refusing it.
+   */
+  private async completeSkill(prompt: string, headers: Record<string, string>): Promise<SkillCompletion> {
+    const token = await this.crProjectMemory.refresh();
+    if (!token) return { ok: false };
+    const profile = await this.ensureProfile().catch(() => null);
+    const binding = lessonBindingHeader(profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined);
+    return completeSkillRequest(fetch, { proxyUrl: this.proxyUrl(), baseHeaders: buildProxyHeaders({ token }), binding, prompt, headers });
+  }
+
+  /** Post the skills panel state (null hides it with the switch off). */
+  private async postSkillsState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "skillsState", view: await this.skillSession.view(), running: this.skillSession.isRunning(), ...extra });
+  }
+
+  /** CR-43 — the "커리큘럼 스킬" command: re-checks the served switch, then opens the panel. */
+  async curriculumSkills(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 커리큘럼 스킬을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postSkillsState();
+  }
+
+  /** One skills action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleSkillsMessage(msg: { type: "skillsOpen" } | { type: "skillRun"; skill: string; form: import("./skillView").SkillForm }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, error: "이 수업에서는 커리큘럼 스킬을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "skillsOpen") return this.postSkillsState();
+    const f = msg.form ?? {};
+    const form: import("./skillView").SkillForm = {
+      ...(typeof f.experiment_id === "string" ? { experiment_id: f.experiment_id } : {}),
+      ...(typeof f.decision_id === "string" ? { decision_id: f.decision_id } : {}),
+      ...(Array.isArray(f.evidence_refs) ? { evidence_refs: f.evidence_refs.map(String) } : {}),
+      ...(typeof f.text === "string" ? { text: f.text } : {}),
+      ...(typeof f.notes === "string" ? { notes: f.notes } : {}),
+    };
+    void this.post({ type: "skillsState", view: await this.skillSession.view(), running: true });
+    const r = await this.skillSession.run(String(msg.skill ?? ""), form);
+    return this.postSkillsState(r.ok ? { done: "AI의 답이 규칙을 지켰어요." } : { error: r.message });
+  }
+
+  /** One memory action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleMemoryMessage(
+    msg: { type: "memoryOpen" } | { type: "memoryDiff"; from: string; to: string } | { type: "memoryDecision"; form: import("./memoryView").DecisionForm },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, error: "이 수업에서는 프로젝트 기억을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "memoryOpen") return this.postMemoryState();
+    if (msg.type === "memoryDiff") {
+      const r = await this.memorySession.compare(String(msg.from ?? ""), String(msg.to ?? ""));
+      return this.postMemoryState(r.ok ? {} : { error: r.message });
+    }
+    const f = msg.form ?? ({} as import("./memoryView").DecisionForm);
+    const r = await this.memorySession.decide({
+      statement: String(f.statement ?? ""),
+      evidence_refs: Array.isArray(f.evidence_refs) ? f.evidence_refs.map(String) : [],
+      assumption_refs: Array.isArray(f.assumption_refs) ? f.assumption_refs.map(String) : [],
+      affected_deck_slides: Array.isArray(f.affected_deck_slides) ? f.affected_deck_slides.map(Number) : [],
+      resulting_version_id: typeof f.resulting_version_id === "string" && f.resulting_version_id ? f.resulting_version_id : null,
+    });
+    return this.postMemoryState(r.ok ? { done: "결정을 기록했어요." } : { error: r.message });
+  }
+
+  /** A coach call of a verify tool (both runtimes): the same session, the same answer (CR-03). */
+  private async runVerifyTool(name: string, input: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError: boolean; observation?: undefined }> {
+    const short = name.replace(/^mcp__hypeproof__/, "");
+    const answer = !this.isCurriculumRuntimeEnabled()
+      ? { isError: true, text: `알 수 없는 도구: ${short}` }
+      : short === "verify_criterion"
+        ? await this.verifySession.runTool(input ?? {})
+        : await this.verifySession.propose(input ?? {});
+    void this.postVerifyState();
+    return verifyToolResult(answer);
+  }
   /** CR-09 — a pick is waiting for the student's click; a second one is refused, not stacked. */
   private pickInProgress = false;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
@@ -574,7 +971,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly liveServer: LiveServer,
     /** #580 — the local session-log spool. Optional: tests and older callers run without recording. */
     private readonly spool?: SessionSpool,
-  ) {}
+  ) {
+    // cr-publish (CR-11 after a restart): know the signed-in person's published origin from
+    // activation on, and follow every change of the stored token.
+    void this.crProjectMemory.refresh().catch(() => undefined);
+    const sub = context.secrets.onDidChange?.((e) => {
+      if (e.key === TOKEN_KEY) void this.crProjectMemory.refresh().catch(() => undefined);
+    });
+    if (sub) context.subscriptions.push(sub);
+  }
 
   /**
    * Public accessor for the #64 report-problem flow. Returns the most recent
@@ -757,15 +1162,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private crBrowserOptions(): CrBrowserOptions {
     return {
       enabled: () => this.isCurriculumRuntimeEnabled(),
-      allowedOrigins: () => {
-        const base = this.liveServer.currentUrl();
-        try {
-          return base ? [new URL(base).origin] : [];
-        } catch {
-          return [];
-        }
-      },
+      // CR-11 — the live preview, plus the published test origin of the student's own Project (cr-publish).
+      allowedOrigins: () => crAllowedOrigins(this.liveServer.currentUrl(), this.publishSession.publishedOrigins()),
       artifactVersion: async (url: string) => {
+        // cr-publish — a page on the Project's published test origin is the version its link pins.
+        const published = this.publishSession.publishedArtifactVersion(url);
+        if (published) return published;
         const root = this.liveServer.currentRoot();
         if (!root) throw new Error("미리보기 서버가 꺼져 있어요");
         const u = new URL(url);
@@ -2441,6 +2843,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       startLivePreview: () => this.startLivePreview(),
       // CR-02/CR-11 — the served switch and the agent scope, read per call.
       crEnabled: () => this.isCurriculumRuntimeEnabled(),
+      // cr-verify — the same session the proxy path runs (CR-03).
+      verify: async (name: string, input: Record<string, unknown>) => toMcpToolResult(await this.runVerifyTool(name, input)),
       crScope: (url: string) => checkAgentOrigin(url, this.crBrowserOptions().allowedOrigins()),
       // #507 — the address of the live server currently up. It does not start one
       // (giving a lookup a side effect would mean "what is the address?" turns the
@@ -2688,10 +3092,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
-      case "helpCancel": await this.helpSource?.cancel(msg.key); return;
+      case "helpCancel": await this.helpSource?.cancel(msg.key, msg.requestId); return;
       case "helpSend": await this.helpSource?.send(msg.key, msg.requestId, msg.consent === true); return;
       case "helpRetry": await this.helpSource?.retry(msg.key); return;
-      case "helpDiscard": await this.helpSource?.discard(msg.key); return;
+      case "helpDiscard": await this.helpSource?.discard(msg.key, msg.requestId); return;
       case "helpConfirm": await this.helpSource?.confirm(msg.key, msg.id, msg.revision); return;
       case "helpWithdraw": await this.helpSource?.withdraw(msg.key, msg.id); return;
       case "ready":
@@ -2841,6 +3245,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // CR-09 — the student removed the picked element; a CR-only message (CR-T02 inventory).
         this.clearElementContext();
         break;
+      case "verifyOpen":
+      case "verifyStart":
+      case "verifyRetest":
+      case "verifyFix":
+        // cr-verify — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleVerifyMessage(msg);
+        break;
+      case "publishOpen":
+      case "publishSubmit":
+      case "publishLink":
+      case "publishRevoke":
+        // cr-publish — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handlePublishMessage(msg);
+        break;
+      case "evidenceOpen":
+      case "evidenceNote":
+      case "evidenceDraft":
+      case "evidenceReview":
+      case "evidenceDelete":
+        // cr-evidence — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleEvidenceMessage(msg);
+        break;
+      case "memoryOpen":
+      case "memoryDiff":
+      case "memoryDecision":
+        // cr-memory — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleMemoryMessage(msg);
+        break;
+      case "skillsOpen":
+      case "skillRun":
+        // cr-skills — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleSkillsMessage(msg);
+        break;
       case "clearHistory":
         void this.clearHistory();
         return;
@@ -2968,6 +3405,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     images?: string[],
     instructorPromptRefs?: Array<{ object_id: string; revision: number }>,
   ): Promise<void> {
+    // cr-verify — a re-test is driving the tab and writing the record: the turn waits for it.
+    if (this.verifySession?.running) {
+      await this.post({type:"inputRejected",text,images});
+      await this.post({type:"streamError",streamId:"activity",error:"제품 테스트가 끝난 뒤에 보내 주세요."});
+      return;
+    }
     this.pendingSends++;
     let releaseActivity: (()=>void) | undefined;
     let preflightComplete=false;
@@ -3085,6 +3528,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // CR-09 — the picked element goes with this turn only, and only while the switch is on.
     const element = this.elementQueue.take(this.isCurriculumRuntimeEnabled());
     let userTextForModel = withElementText(pageContext ? `${pageContext}\n\n${text}` : text, element);
+    // cr-verify — a test run or fix request rides with the student's own sentence, model-only, while the switch is on.
+    const verifyContextText = this.verifySession.takeCoachContext();
+    if (verifyContextText && this.isCurriculumRuntimeEnabled()) userTextForModel = `${verifyContextText}\n\n${userTextForModel}`;
     // #751 G2 — what the learner saved on this step's work surface travels with the turn (their words, labelled).
     if (profile?.lesson && turnFocus.step) {
       const step = profile.lesson.content.steps.find((x) => x.id === turnFocus.step);
@@ -3150,6 +3596,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       void this.postConfig();
     }
     const observation = await this.prepareObservation(proxyUrl, token, profile);
+    // cr-verify — the coach's verify calls in this turn write to this turn's recorder.
+    this.verifyTurnRecorder = observation?.batch.format === 'hps-observation/2' ? observation : null;
     const recordObservation = (kind: import('./nativeObservationContract').ObservationKind, value: string, extra: Partial<import('./nativeObservationContract').ObservationEvent> = {}) => {
       if (!observation) return;
       try { observation.record(streamId,kind,value,extra);this.persistObservation(observation); }
@@ -3854,6 +4302,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
       if (this.effortTurn?.id === streamId) void this.refreshEffortResult().catch(() => { /* panel may have closed */ });
       this.activeStreams.delete(streamId);
+      // cr-verify — the run this turn carried takes no more coach calls once the turn ends.
+      this.verifySession?.endTurn();
+      this.verifyTurnRecorder = null;
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
@@ -4053,7 +4504,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const fixed = this.retargetLoopbackNavigation(call);
           const line = browserToolLogLine(fixed.call.name, fixed.call.input);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
-          const tr = await browser.execute(fixed.call);
+          // cr-verify — the verify tools go to the session (its runner drives the same control), switch on only.
+          const tr = isCrVerifyTool(fixed.call.name) && this.isCurriculumRuntimeEnabled()
+            ? await this.runVerifyTool(fixed.call.name, (fixed.call.input ?? {}) as Record<string, unknown>)
+            : await browser.execute(fixed.call);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: tr.isError ? "error" : "done" });
           // If it was corrected, tell the model too — fix it silently and it guesses
           // again next turn. One mapping shared with the CR-T03 adapter parity check.

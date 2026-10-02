@@ -63,7 +63,7 @@ assert.equal(H.sendable({ ...e, consent_proof: undefined, consent_expires_at: un
 ok("an envelope is sendable only for the same learner, class, connection and recipient, within its time");
 
 // POST outcomes
-for (const [s, r, want] of [[201, undefined, "stored"], [200, undefined, "stored"], [0, undefined, "unknown"], [503, "unknown", "unknown"], [429, undefined, "unknown"], [409, "class_changed", "changed"], [409, "recipient_not_assigned", "changed"], [409, "request_id_conflict", "conflict"], [409, "consent_expired", "expired"], [400, "consent_invalid", "refused"], [403, "instructor_revoked", "changed"], [400, undefined, "refused"]]) assert.equal(H.classifyPost(s, r), want, `${s} ${r}`);
+for (const [s, r, want] of [[413, undefined, "too_large"], [201, undefined, "stored"], [200, undefined, "stored"], [0, undefined, "unknown"], [503, "unknown", "unknown"], [429, undefined, "unknown"], [409, "class_changed", "changed"], [409, "recipient_not_assigned", "changed"], [409, "request_id_conflict", "conflict"], [409, "consent_expired", "expired"], [400, "consent_invalid", "refused"], [403, "instructor_revoked", "changed"], [400, undefined, "refused"]]) assert.equal(H.classifyPost(s, r), want, `${s} ${r}`);
 ok("only 200/201 means stored; a lost or 5xx answer is unknown, never sent");
 
 // cards: answered ≠ resolved; feedback only after an answer; history split by stored class

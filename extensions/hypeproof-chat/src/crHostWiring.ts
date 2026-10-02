@@ -463,3 +463,82 @@ export function proxyTurnBrowser<B extends { dispose(): Promise<void> }>(
   const browser = fresh();
   return { browser, release: () => browser.dispose() };
 }
+
+/** workspaceState: each signed-in person's Project id and its test origin, keyed by crBytesOwner (cr-publish). */
+export const CR_PROJECTS_STATE = "hypeproof-chat.crProjects";
+
+type CrProjectEntry = { id?: string; origin?: string | null };
+
+/**
+ * The signed-in person's remembered Project id and test origin (cr-publish; CR-11 after a
+ * restart). Keyed by `crBytesOwner` of the stored token, which `refresh()` re-reads: the host
+ * calls it at activation and whenever the stored token changes, so a restarted App knows the
+ * student's published origin before the publish panel is opened, and a sign-in as another
+ * student on a shared Mac drops the previous person's origin at once.
+ */
+export class CrProjectMemory {
+  private owner: string | null = null;
+  private readonly store: { get(): unknown; update(value: Record<string, CrProjectEntry>): PromiseLike<void> | void };
+  private readonly readToken: () => PromiseLike<string | null | undefined>;
+  constructor(
+    store: { get(): unknown; update(value: Record<string, CrProjectEntry>): PromiseLike<void> | void },
+    readToken: () => PromiseLike<string | null | undefined>,
+  ) {
+    this.store = store;
+    this.readToken = readToken;
+  }
+
+  /** Re-read who is signed in. Returns the token (the publish session's `token` port). */
+  async refresh(): Promise<string | null> {
+    const token = (await this.readToken()) ?? null;
+    this.owner = token ? crBytesOwner(token) : null;
+    return token;
+  }
+
+  private all(): Record<string, CrProjectEntry> {
+    const v = this.store.get();
+    return v && typeof v === "object" && !Array.isArray(v) ? { ...(v as Record<string, CrProjectEntry>) } : {};
+  }
+
+  projectId(): string | undefined {
+    return this.owner ? this.all()[this.owner]?.id : undefined;
+  }
+
+  origin(): string | null {
+    return this.owner ? this.all()[this.owner]?.origin ?? null : null;
+  }
+
+  async set(patch: CrProjectEntry): Promise<void> {
+    if (!this.owner) return;
+    const all = this.all();
+    const next = { ...(all[this.owner] ?? {}), ...patch };
+    if (!next.id) delete all[this.owner];
+    else all[this.owner] = next;
+    await this.store.update(all);
+  }
+}
+
+// ── CR-11: the origins an agent action or a runner step may act on ──────────
+
+/**
+ * The live preview's origin, plus the published test origin of the student's own Project
+ * (cr-publish #1393). Another project's origin is never in the list, so `checkAgentOrigin`
+ * refuses it with its reason before any CDP call. Anything that is not a plain http(s)
+ * origin is dropped.
+ */
+export function crAllowedOrigins(liveUrl: string | null | undefined, published: readonly string[]): string[] {
+  const out: string[] = [];
+  const add = (v: string, exact: boolean) => {
+    try {
+      const u = new URL(v);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return;
+      if (exact && u.origin !== v.replace(/\/+$/, "")) return;
+      out.push(u.origin);
+    } catch {
+      /* not a URL: not an origin */
+    }
+  };
+  if (liveUrl) add(liveUrl, false);
+  for (const o of published) add(o, true);
+  return [...new Set(out)];
+}

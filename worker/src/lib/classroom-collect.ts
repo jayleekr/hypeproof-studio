@@ -386,7 +386,7 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
     if (ts.some((t) => !(Date.parse(t) >= earliest && Date.parse(t) <= owner.upload_until))) return { problem: 'outside_run_window' };
     indexes.push(idx);
   }
-  const approved = approvedArtifacts(indexes.flat());
+  const approved = approvedArtifacts(indexes.flat()), receivedArtifacts = new Set<string>();
   const received = { ...zero(), instructor_refs: 0, truncated_prompts: 0, truncated_artifacts: 0, basis_markers: 0 }, notSent = zero(), reasons: string[] = [], parts: CollectionExtent['parts'] = [];
   const add = (r: string) => { if (!reasons.includes(r)) reasons.push(r); };
   let coverage: Coverage = 'complete';
@@ -402,6 +402,7 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
       const entry = idx[cursor]!; sent.add(cursor++);
       let e: Record<string, unknown> | null = null; try { e = JSON.parse(line); } catch { e = null; }
       // The index writes an absent field as null (older spool lines have no ts or seq); the line simply lacks it.
+      if ((!e || typeof e !== 'object' || Array.isArray(e)) && entry.malformed === true && entry.type == null && entry.seq == null && entry.ts == null && b.kinds.includes('record')) { received.other++; continue; }
       if (!e || typeof e !== 'object' || Array.isArray(e) || (e.type ?? null) !== (entry.type ?? null) || (e.seq ?? null) !== (entry.seq ?? null) || (e.ts ?? null) !== (entry.ts ?? null)) return { problem: 'index_mismatch' };
       const artifact = e.type === 'artifact_snapshot' ? e.sha256 : e.type === 'artifact_approval' ? e.artifact_sha256 : undefined;
       if (artifact !== undefined && artifact !== entry.artifact_sha256) return { problem: 'index_mismatch' };
@@ -413,6 +414,7 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
       // result" in full: it is received, counted and makes the answer not complete (F2).
       if (e.type === 'artifact_snapshot') {
         const cut = artifactCut(e); if (cut === null) return { problem: 'artifact_content_mismatch' };
+        receivedArtifacts.add(e.sha256 as string);
         if (cut) cutArtifacts++;
         else if ((await sha256Bytes(new TextEncoder().encode(e.content as string).buffer as ArrayBuffer)) !== e.sha256) return { problem: 'artifact_content_mismatch' };
       }
@@ -459,9 +461,11 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
     coverage = worst(coverage, c); partReasons.forEach(add);
     parts.push({ current: p.current, lines: idx.length, included: events.length, from_ts: p.from_ts, to_ts: p.to_ts, ...(p.first_seq !== undefined ? { first_seq: p.first_seq, last_seq: p.last_seq } : {}), start_proven: startProven, end_proven: endProven, torn_tail: p.torn_tail, truncated_prompts: truncated, truncated_artifacts: cutArtifacts, coverage: c });
   }
+  // An approval without the corresponding page bytes is not a collected artifact.
+  if ((b.kinds.includes('record') || b.kinds.includes('artifacts')) && [...approved].some((sha) => !receivedArtifacts.has(sha))) { coverage = worst(coverage, 'gaps'); add('approved_artifact_missing'); }
   const omitted = b.omitted.unreadable + b.omitted.over_limit;
   if (omitted) { coverage = worst(coverage, 'range_unknown'); add('session_not_included'); }
-  const order = ['damaged_line', 'seq_gap', 'tail_missing', 'selected_line_missing', 'artifact_truncated', 'prompt_truncated', 'declared_seq_mismatch', 'sequence_unavailable', 'session_not_included', 'earlier_session_end_unproven', 'extent_not_declared', 'start_not_proven', 'torn_tail_dropped'];
+  const order = ['damaged_line', 'seq_gap', 'tail_missing', 'selected_line_missing', 'approved_artifact_missing', 'artifact_truncated', 'prompt_truncated', 'declared_seq_mismatch', 'sequence_unavailable', 'session_not_included', 'earlier_session_end_unproven', 'extent_not_declared', 'start_not_proven', 'torn_tail_dropped'];
   reasons.sort((x, y) => order.indexOf(x) - order.indexOf(y));
   const froms = b.parts.map((p) => p.from_ts).sort(), tos = b.parts.map((p) => p.to_ts).sort();
   return { coverage, reason: coverage === 'complete' ? '' : reasons.find((r) => r !== 'torn_tail_dropped') ?? reasons[0] ?? '', reasons, extent: { lines: parts.reduce((s, p) => s + p.lines, 0), included: parts.reduce((s, p) => s + p.included, 0), from_ts: froms[0]!, to_ts: tos.at(-1)!, other_sessions_in_window: omitted, kinds: [...b.kinds], sessions: b.parts.length, parts, received, not_sent: notSent, omitted: { ...b.omitted }, reasons } };

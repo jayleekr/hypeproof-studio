@@ -6,7 +6,8 @@
 // resolve only after the value is durable; `submit` still reads every submission back
 // before it issues a receipt, so a port that loses or truncates data cannot fake one.
 import { validateObservation, type ObservationEvent } from "./legacy-observation.ts";
-import { validateInterpretation, type Interpretation } from "./interpretation.ts";
+import { returnItemProblem } from "./participant-evidence.ts";
+import { draftRefusals, validateEvidenceDraftShape, validateInterpretation, type DraftRefusal, type EvidenceDraft, type Interpretation, type RefResolution } from "./interpretation.ts";
 import type { TeacherState } from "./learning-events.ts";
 
 export const LOCAL_RECORD_FORMAT = "hps-local-record/1";
@@ -82,6 +83,7 @@ export const MAX_BLOB_BYTES = 4 * 1024 * 1024;
  */
 export const DEFAULT_BLOB_MAX_BYTES = 64 * 1024 * 1024;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const PSEUDONYM = /^pp-[0-9a-f]{32}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const BLOB_PREFIX = "blobs/";
 /** Age order of stored bytes: `blob-order/<at, zero-padded>-<hex>` → { size }. Listing is enough to find the oldest. */
@@ -211,6 +213,30 @@ export interface TaskCurriculum {
   carry_in?: string;
 }
 
+/**
+ * Where a session's traffic belongs (CR-21, CR-73; cr-publish #1393). An additive key on the
+ * session link (Jay's decision 8): a participant session opened from a published test link
+ * carries its project, experiment, product version, link and channel, and the events that
+ * cr-evidence adds inherit them from the session. Plain ids only, never identity.
+ */
+export interface SessionAttribution {
+  project: string;
+  experiment: string;
+  product_version: string;
+  /** The test link the session was opened from; absent means "unknown channel" (CR-73). */
+  link?: string;
+  channel?: string;
+  variant?: string;
+}
+
+const ATTRIBUTION_KEYS = ["project", "experiment", "product_version", "link", "channel", "variant"] as const;
+function checkAttribution(a: unknown): asserts a is SessionAttribution {
+  check(isObj(a), "invalid_session_attribution");
+  for (const k of Object.keys(a)) check((ATTRIBUTION_KEYS as readonly string[]).includes(k), "invalid_session_attribution");
+  for (const k of ["project", "experiment", "product_version"] as const) check(text(a[k], 200), "invalid_session_attribution");
+  for (const k of ["link", "channel", "variant"] as const) check(a[k] === undefined || text(a[k], 200), "invalid_session_attribution");
+}
+
 export interface Task {
   format: typeof LOCAL_RECORD_FORMAT;
   kind: "task";
@@ -224,7 +250,8 @@ export interface Task {
   /** Every purpose ever set, oldest first: an AI proposal stays visible after Jay edits it. */
   purpose_history: Purpose[];
   status: TaskStatus;
-  sessions: Array<{ host: string; session_id: string; at: number; by: Actor }>;
+  /** `attribution` is absent on every link made before cr-publish (#1393) and on App-side links. */
+  sessions: Array<{ host: string; session_id: string; at: number; by: Actor; attribution?: SessionAttribution }>;
   history: Array<{ at: number; by: Actor; change: string; reason?: string }>;
 }
 
@@ -340,7 +367,7 @@ interface Assignment {
   history: Array<{ from: string | null; to: string | null; by: Actor; reason: string; at: number }>;
 }
 
-interface ObservationRecord {
+export interface ObservationRecord {
   format: typeof LOCAL_RECORD_FORMAT;
   kind: "observation";
   key: string;
@@ -466,6 +493,11 @@ export interface MyRecords {
 const observationBase = (host: string, scope: string, session: string) => `observations/${enc(host)}/${enc(scope)}/${enc(session)}/`;
 const assignmentKey = (observationKey: string) => `assignments/${observationKey.slice("observations/".length)}`;
 const interpretationKey = (task: string, ref: { id: string; revision: number }) => `interpretations/${task}/${enc(ref.id)}@${ref.revision}`;
+const draftKey = (task: string, ref: { id: string; revision: number }) => `drafts/${task}/${enc(ref.id)}@${ref.revision}`;
+/** Where participant sessions and their events are recorded (cr-publish, cr-evidence). */
+export const PARTICIPANT_HOST = "published";
+/** Where the student's manual records of an experiment are recorded: one session per task, its id the task id (cr-evidence). */
+export const NOTES_HOST = "notes";
 const submissionKey = (ref: { id: string; revision: number }) => `submissions/${enc(ref.id)}@${ref.revision}`;
 const receiptKey = (ref: { id: string; revision: number }) => `receipts/${enc(ref.id)}@${ref.revision}`;
 
@@ -584,6 +616,24 @@ export class LocalRecord {
     }
   }
 
+  /** The keys the named tombstones list (a participant batch reads only its session's and its task's). */
+  async #deletedFor(tombstones: readonly string[]): Promise<Set<string>> {
+    const keys = new Set<string>();
+    for (const k of tombstones) for (const e of (await this.#read<{ evidence: string[] }>(k))?.evidence ?? []) keys.add(e);
+    return keys;
+  }
+
+  /**
+   * Write a keys-only deletion tombstone, keeping every key an earlier deletion under the same
+   * tombstone already named (a task deleted twice, or swept again, keeps both deletions' keys).
+   * `quota: "none"`: a tombstone is bounded by the records it names, and a full record must
+   * still be deletable.
+   */
+  async #tombstone(key: string, value: Record<string, unknown> & { evidence: readonly string[] }): Promise<void> {
+    const before = (await this.#read<{ evidence?: string[] }>(key))?.evidence ?? [];
+    await this.#write(key, { ...value, evidence: [...new Set([...before, ...value.evidence])] }, false, "none");
+  }
+
   async #deletedEvidence(): Promise<Set<string>> {
     const keys = new Set<string>();
     for (const k of await this.#keys("deleted/")) for (const e of (await this.#read<{ evidence: string[] }>(k))?.evidence ?? []) keys.add(e);
@@ -591,9 +641,14 @@ export class LocalRecord {
   }
 
   // ── Tasks and sessions (MC-07/08) ───────────────────────────────────────────
-  async createTask(input: Parameters<typeof createTask>[0]): Promise<Task> {
+  /**
+   * `quota: "none"` is for a caller that bounds its own tasks (cr-publish: one fixed-size task
+   * per experiment, experiments capped per project), so creating one costs the same however
+   * many session keys the record holds; the default checks the review quota (MC-35).
+   */
+  async createTask(input: Parameters<typeof createTask>[0], options: { quota?: "review" | "none" } = {}): Promise<Task> {
     const task = createTask(input);
-    check(await this.#write(`tasks/${task.id}`, task, true), "task_exists");
+    check(await this.#write(`tasks/${task.id}`, task, true, options.quota ?? "review"), "task_exists");
     return task;
   }
 
@@ -612,35 +667,152 @@ export class LocalRecord {
   }
 
   /** Attribution is explicit. A shared folder or project never merges two tasks (MC-08). */
-  async linkSession(taskId: string, link: { host: string; session_id: string; by: Actor; at: number }): Promise<Task> {
+  async linkSession(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution?: SessionAttribution }): Promise<Task> {
     check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    if (link.attribution !== undefined) {
+      checkAttribution(link.attribution);
+      // The task is the experiment; a session can only be attributed to the task it links to.
+      check(link.attribution.experiment === taskId, "invalid_session_attribution");
+    }
     const task = await this.getTask(taskId);
+    if (link.attribution) check(task.project === link.attribution.project, "invalid_session_attribution");
     const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
-    if (!(await this.#write(key, { task: taskId }, true))) {
+    const attribution = link.attribution ? { ...link.attribution } : undefined;
+    if (!(await this.#write(key, { task: taskId, ...(attribution ? { attribution } : {}) }, true))) {
       check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
       return task;
     }
     return this.saveTask({
       ...task,
-      sessions: [...task.sessions, { host: link.host, session_id: link.session_id, at: link.at, by: link.by }],
+      sessions: [...task.sessions, { host: link.host, session_id: link.session_id, at: link.at, by: link.by, ...(attribution ? { attribution } : {}) }],
       history: [...task.history, { at: link.at, by: link.by, change: `session_linked:${link.host}/${link.session_id}` }],
     });
+  }
+
+  /**
+   * A session link written as its per-session key only (cr-publish #1393: participant
+   * sessions opened from a published test link). Constant cost per call, whatever the record
+   * holds: the task document is read once and never rewritten (it would otherwise grow by one
+   * entry per open), and the review quota is not scanned, because the caller bounds how many
+   * such keys exist (one fixed-size key per session, capped per link). Every read of a
+   * session (`taskForSession`, `sessionAttribution`, `sessionLinks`) uses this key.
+   * `created` is false when the session was already linked to this task (an idempotent retry).
+   */
+  async linkSessionKey(taskId: string, link: { host: string; session_id: string; by: Actor; at: number; attribution: SessionAttribution; pseudonym?: string }): Promise<{ created: boolean }> {
+    check(isObj(link) && text(link.host, 100) && text(link.session_id, 200) && ["user", "adapter_explicit"].includes(String(link.by)), "invalid_session_link");
+    // cr-evidence (CR-65): the participant's random per-experiment pseudonym, an additive key
+    // (decision 8). Never derived from identity or device data; the page makes it.
+    check(link.pseudonym === undefined || PSEUDONYM.test(String(link.pseudonym)), "invalid_session_link");
+    checkAttribution(link.attribution);
+    check(link.attribution.experiment === taskId, "invalid_session_attribution");
+    const task = await this.getTask(taskId);
+    check(task.project === link.attribution.project, "invalid_session_attribution");
+    const key = `sessions/${enc(link.host)}/${enc(link.session_id)}`;
+    // A session erased by `deleteSession` never comes back through a replayed open (CR-69).
+    check(!(await this.sessionDeleted(link.host, link.session_id)), "session_deleted");
+    // CR-65: one pseudonym belongs to one experiment, and to the one link it was made under (it
+    // ends when that link expires or is revoked). Its index key is written once; a pseudonym
+    // already recorded under another task of this record, or under another link, is refused.
+    if (link.pseudonym) {
+      const pKey = `pseudonyms/${enc(link.host)}/${link.pseudonym}`;
+      const owner = link.attribution.link ? { task: taskId, link: link.attribution.link } : { task: taskId };
+      if (!(await this.#write(pKey, owner, true, "none"))) {
+        const held = await this.#read<{ task: string; link?: string }>(pKey);
+        check(held?.task === taskId, "pseudonym_in_other_experiment");
+        check(!held?.link || !link.attribution.link || held.link === link.attribution.link, "pseudonym_from_other_link");
+      }
+    }
+    if (await this.#write(key, { task: taskId, attribution: { ...link.attribution }, at: link.at, ...(link.pseudonym ? { pseudonym: link.pseudonym } : {}) }, true, "none")) {
+      // CR-69: the task was deleted while this session was being linked (`deleteTask` removes
+      // the task first, then its session keys): the key just written must not outlive it.
+      if ((await this.#read(`tasks/${taskId}`)) === null) {
+        await this.#remove(key);
+        throw new Error("unknown_task");
+      }
+      return { created: true };
+    }
+    check((await this.#read<{ task: string }>(key))?.task === taskId, "session_linked_to_other_task");
+    return { created: false };
+  }
+
+  /** Was this session erased (`deleteSession`'s tombstone)? */
+  async sessionDeleted(host: string, sessionId: string): Promise<boolean> {
+    return (await this.#read(`deleted/sessions/${enc(host)}/${enc(sessionId)}`)) !== null;
+  }
+
+  /** The keys every deletion so far removed, read once so a caller resolving many references does not re-read them per reference. */
+  async deletedEvidenceKeys(): Promise<Set<string>> {
+    return this.#deletedEvidence();
   }
 
   async taskForSession(host: string, sessionId: string): Promise<string | null> {
     return (await this.#read<{ task: string }>(`sessions/${enc(host)}/${enc(sessionId)}`))?.task ?? null;
   }
 
+  /**
+   * A session's attribution, read from its per-session key (written once, atomically), not
+   * from `task.sessions`. null when the session is not linked or was linked without one.
+   */
+  async sessionAttribution(host: string, sessionId: string): Promise<SessionAttribution | null> {
+    return (await this.#read<{ attribution?: SessionAttribution }>(`sessions/${enc(host)}/${enc(sessionId)}`))?.attribution ?? null;
+  }
+
+  /** Every session linked on one host, from the per-session keys (cr-publish CR-73 channel reads). */
+  async sessionLinks(host: string): Promise<Array<{ session_id: string; task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string }>> {
+    check(text(host, 100), "invalid_host");
+    const prefix = `sessions/${enc(host)}/`;
+    const out: Array<{ session_id: string; task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string }> = [];
+    for (const k of await this.#keys(prefix)) {
+      const v = await this.#read<{ task: string; attribution?: SessionAttribution; at?: number; pseudonym?: string }>(k);
+      if (!v) continue;
+      out.push({
+        session_id: decodeURIComponent(k.slice(prefix.length)),
+        task: v.task,
+        attribution: v.attribution ?? null,
+        ...(typeof v.at === "number" ? { at: v.at } : {}),
+        ...(typeof v.pseudonym === "string" ? { pseudonym: v.pseudonym } : {}),
+      });
+    }
+    return out;
+  }
+
+  /** One session's link record (task, attribution, open time, pseudonym), or null. */
+  async sessionLink(host: string, sessionId: string): Promise<{ task: string; attribution: SessionAttribution | null; at?: number; pseudonym?: string } | null> {
+    const v = await this.#read<{ task: string; attribution?: SessionAttribution; at?: number; pseudonym?: string }>(`sessions/${enc(host)}/${enc(sessionId)}`);
+    return v ? { task: v.task, attribution: v.attribution ?? null, ...(typeof v.at === "number" ? { at: v.at } : {}), ...(typeof v.pseudonym === "string" ? { pseudonym: v.pseudonym } : {}) } : null;
+  }
+
   // ── Observations (MC-08/30/34) ──────────────────────────────────────────────
   async appendObservations(
     host: string,
     value: unknown,
-    options: { excludedPaths?: readonly string[] } = {},
+    options: {
+      excludedPaths?: readonly string[];
+      quota?: "review" | "none";
+      gaps?: boolean;
+      /**
+       * Is an event already stored under the same id the same event? Default: byte-identical
+       * canonical JSON. A caller that stamps its own receive time on each event (the participant
+       * events route) passes a comparison of what the client sent, so a redelivered batch is a
+       * duplicate, not a conflict.
+       */
+      sameEvent?: (stored: ObservationEvent, incoming: ObservationEvent) => boolean;
+      /**
+       * A participant session's batch (cr-evidence, CR-69): the session must be linked when the
+       * batch is written (`session_deleted` / `session_not_open` otherwise, nothing written),
+       * only its own and its task's tombstones are read (not every deletion in the record), and
+       * when the session was erased while the batch was being written, what the batch wrote is
+       * removed again and `session_deleted` is thrown.
+       */
+      participant?: boolean;
+    } = {},
   ): Promise<{ task: string | null; stored: number; duplicates: number; refused_deleted: number; exclusions: ExclusionNote[]; missing: number[] }> {
     check(text(host, 100), "invalid_host");
     const { batch, missing } = validateObservation(value);
     const task = await this.taskForSession(host, batch.session);
-    const deleted = await this.#deletedEvidence();
+    if (options.participant && task === null) throw new Error((await this.sessionDeleted(host, batch.session)) ? "session_deleted" : "session_not_open");
+    const deleted = options.participant ? await this.#deletedFor([`deleted/sessions/${enc(host)}/${enc(batch.session)}`, `deleted/${task}`]) : await this.#deletedEvidence();
+    const written: string[] = [];
     const base = observationBase(host, batch.scope, batch.session);
     let stored = 0;
     let duplicates = 0;
@@ -666,17 +838,34 @@ export class LocalRecord {
         event: redacted.event,
         exclusions: redacted.exclusions,
       };
-      if (await this.#write(key, record, true)) stored++;
-      else {
+      // `quota: "none"` is for a caller that bounds its own writes (cr-evidence: events per
+      // participant session and notes per experiment are capped), so a write costs the same
+      // however much the record holds; the default checks the review quota (MC-35).
+      if (await this.#write(key, record, true, options.quota ?? "review")) {
+        stored++;
+        written.push(key);
+      } else {
         // Duplicate delivery is fine; different content under the same id is never overwritten.
         const existing = await this.#read<ObservationRecord>(key);
-        check(existing && canonicalJson(existing.event) === canonicalJson(record.event), "conflicting_event");
+        check(existing && (options.sameEvent ? options.sameEvent(existing.event, record.event) : canonicalJson(existing.event) === canonicalJson(record.event)), "conflicting_event");
         duplicates++;
       }
       const first: Assignment = { task, history: [{ from: null, to: task, by: "adapter_explicit", reason: task ? "session_link" : "no_session_link", at: raw.at }] };
-      await this.#write(assignmentKey(key), first, true);
+      await this.#write(assignmentKey(key), first, true, options.quota ?? "review");
     }
-    await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
+    // The session was erased (or its task deleted) while this batch was being written: what the
+    // batch wrote must not outlive it. `deleteTask` also sweeps the task's scope for anything a
+    // race still leaves.
+    if (options.participant && (await this.taskForSession(host, batch.session)) !== task) {
+      for (const k of written) {
+        await this.#remove(k);
+        await this.#remove(assignmentKey(k));
+      }
+      throw new Error("session_deleted");
+    }
+    // A caller that delivers one session in many small batches (the participant snippet)
+    // passes `gaps: false`: each batch's own numbering would report the earlier batches missing.
+    if (options.gaps !== false) await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
     return { task, stored, duplicates, refused_deleted: refusedDeleted, exclusions, missing };
   }
 
@@ -909,6 +1098,154 @@ export class LocalRecord {
     return review;
   }
 
+  // ── Participant evidence (cr-evidence #1394; CR-23–CR-27, CR-69) ─────────────
+  /** Every stored observation of one host and scope (an experiment's participant events or notes), oldest key first. */
+  async observationsOf(host: string, scope: string): Promise<ObservationRecord[]> {
+    check(text(host, 100) && text(scope, 200), "invalid_host");
+    const out: ObservationRecord[] = [];
+    for (const k of await this.#keys(`observations/${enc(host)}/${enc(scope)}/`)) {
+      const r = await this.#read<ObservationRecord>(k);
+      if (r) out.push(r);
+    }
+    return out;
+  }
+
+  /** The key a draft source reference names inside this task's record (interpretation.ts `EVIDENCE_REF`). */
+  evidenceRefKey(taskId: string, ref: string): string | null {
+    const m = /^(session|event|note):(.+)$/.exec(String(ref));
+    if (!m) return null;
+    if (m[1] === "session") return `sessions/${enc(PARTICIPANT_HOST)}/${enc(m[2]!)}`;
+    if (m[1] === "note") return `${observationBase(NOTES_HOST, taskId, taskId)}${enc(m[2]!)}`;
+    const slash = m[2]!.indexOf("/");
+    if (slash < 1) return null;
+    return `${observationBase(PARTICIPANT_HOST, taskId, m[2]!.slice(0, slash))}${enc(m[2]!.slice(slash + 1))}`;
+  }
+
+  /**
+   * Does a draft source reference resolve to a live record of THIS task (CR-25, CR-27)? A
+   * participant session must be linked to this task (`foreign` when it is another
+   * experiment's); a record removed by a deletion is `deleted` (CR-69), anything else absent
+   * is `missing`. Another project's ids are never in this record at all.
+   */
+  async resolveEvidenceRef(taskId: string, ref: string, deleted?: Set<string>): Promise<RefResolution> {
+    const key = this.evidenceRefKey(taskId, ref);
+    if (!key) return "missing";
+    if ((deleted ?? (await this.#deletedEvidence())).has(key)) return "deleted";
+    if (key.startsWith("sessions/")) {
+      const s = await this.#read<{ task: string }>(key);
+      return !s ? "missing" : s.task === taskId ? "ok" : "foreign";
+    }
+    return (await this.#read(key)) ? "ok" : "missing";
+  }
+
+  /**
+   * Store one revision of an Observed / Interpreted / Assumed / Next draft (CR-25, CR-26). Every
+   * reference must resolve to a live record of this task, or nothing is written and every
+   * refused item is named. A revision > 1 needs its predecessor; a stored revision is never
+   * rewritten (MC-22). `quota: "none"` for a caller that bounds drafts per task.
+   * `repeatedUse` is whether the experiment declared repeated-use measurement (CR-72): when it
+   * did not, every session has a fresh pseudonym and returns are not measured, so any item
+   * carrying a return basis or count is refused (`return_not_measured`), zero included.
+   */
+  async saveEvidenceDraft(taskId: string, value: unknown, options: { quota?: "review" | "none"; repeatedUse?: boolean } = {}): Promise<{ ok: true; draft: EvidenceDraft } | { ok: false; refusals: DraftRefusal[] }> {
+    await this.getTask(taskId);
+    const draft = validateEvidenceDraftShape(value);
+    check(draft.experiment === taskId, "invalid_evidence_draft");
+    const deleted = await this.#deletedEvidence();
+    const refusals = await draftRefusals(draft, (ref) => this.resolveEvidenceRef(taskId, ref, deleted));
+    // CR-72: a statement counted per device pseudonym is a return count over the sessions it
+    // cites; the count, the sessions and their one pseudonym must agree, or it is refused.
+    for (const it of draft.items) {
+      if ((it.basis !== undefined || it.return_count !== undefined) && options.repeatedUse !== true) {
+        if (!refusals.some((r) => r.item === it.id)) refusals.push({ item: it.id, code: "return_not_measured" });
+        continue;
+      }
+      if (it.basis !== "per_device_pseudonym" || refusals.some((r) => r.item === it.id)) continue;
+      const pseudonyms = new Map<string, string | null>();
+      for (const ref of it.source_refs) {
+        const key = ref.startsWith("session:") ? this.evidenceRefKey(taskId, ref) : null;
+        if (key) pseudonyms.set(ref, (await this.#read<{ pseudonym?: string }>(key))?.pseudonym ?? null);
+      }
+      const problem = returnItemProblem(it, (ref) => pseudonyms.get(ref) ?? null);
+      if (problem) refusals.push({ item: it.id, code: problem });
+    }
+    if (refusals.length) return { ok: false, refusals };
+    if (draft.revision > 1) check(await this.#read(draftKey(taskId, { id: draft.id, revision: draft.revision - 1 })), "missing_previous_revision");
+    const key = draftKey(taskId, draft);
+    if (!(await this.#write(key, draft, true, options.quota ?? "review"))) check(canonicalJson(await this.#read(key)) === canonicalJson(redactDeep(draft)), "revision_exists");
+    return { ok: true, draft };
+  }
+
+  /** Every stored draft revision of a task, by id then revision. */
+  async evidenceDrafts(taskId: string): Promise<EvidenceDraft[]> {
+    check(ID.test(String(taskId)), "invalid_task");
+    const out: EvidenceDraft[] = [];
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      const d = await this.#read<EvidenceDraft>(k);
+      if (d) out.push(d);
+    }
+    return out.sort((a, b) => a.id.localeCompare(b.id) || a.revision - b.revision);
+  }
+
+  /**
+   * Erase one session (CR-69; recon R6): its session link, every observation recorded in it
+   * with their assignments and gap note, every hps-interpretation/1 about it, and every draft
+   * (all revisions) that cites it, so no derived item keeps citing deleted records. Like
+   * `deleteTask`, it leaves a keys-only tombstone so a retried delivery and a later draft
+   * refuse the deleted evidence, and it reports what it removed and what it cannot reach.
+   */
+  async deleteSession(host: string, sessionId: string, input: { by: "user"; at: number }): Promise<{ task: string; removed: Record<string, number>; not_covered: readonly string[] }> {
+    check(isObj(input) && input.by === "user", "delete_requires_user");
+    check(text(host, 100) && text(sessionId, 200), "invalid_session_link");
+    const sessionKey = `sessions/${enc(host)}/${enc(sessionId)}`;
+    const link = await this.#read<{ task: string; pseudonym?: string }>(sessionKey);
+    check(link, "unknown_session");
+    const taskId = link.task;
+    const removed = { observations: 0, interpretations: 0, drafts: 0, sessions: 0 };
+    const evidence: string[] = [sessionKey];
+    const sessionSeg = enc(sessionId);
+    const tombstone = `deleted/sessions/${enc(host)}/${sessionSeg}`;
+    // Refuse new writes before scanning for content (CR-69): the tombstone first, then the
+    // session key. A batch whose post-write check runs after this point finds the session gone
+    // and removes what it wrote (`appendObservations`); one that wrote earlier is in the scan below.
+    await this.#tombstone(tombstone, { task: taskId, session: sessionId, at: input.at, evidence });
+    await this.#remove(sessionKey);
+    removed.sessions = 1;
+    for (const k of await this.#keys(`observations/${enc(host)}/`)) {
+      if (k.split("/")[3] !== sessionSeg) continue;
+      await this.#remove(k);
+      await this.#remove(assignmentKey(k));
+      evidence.push(k);
+      removed.observations++;
+    }
+    for (const k of await this.#keys(`gaps/${enc(host)}/`)) if (k.split("/")[3] === sessionSeg) await this.#remove(k);
+    for (const k of await this.#keys(`interpretations/${taskId}/`)) {
+      if ((await this.#read<InterpretationRecord>(k))?.interpretation.batch.session !== sessionId) continue;
+      await this.#remove(k);
+      removed.interpretations++;
+    }
+    const cites = (ref: string) => ref === `session:${sessionId}` || ref.startsWith(`event:${sessionId}/`);
+    const doomed = new Set<string>();
+    for (const d of await this.evidenceDrafts(taskId)) if (d.items.some((i) => i.source_refs.some(cites))) doomed.add(d.id);
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      const id = decodeURIComponent(k.slice(`drafts/${taskId}/`.length).replace(/@\d+$/, ""));
+      if (!doomed.has(id)) continue;
+      await this.#remove(k);
+      removed.drafts++;
+    }
+    // CR-65: the session's pseudonym index key goes with it, unless another live session of the
+    // task still carries that pseudonym (a declared repeated-use device's other visits).
+    const pseudonym = link.pseudonym;
+    if (pseudonym) {
+      const others = (await this.sessionLinks(host)).some((s) => s.task === taskId && s.pseudonym === pseudonym);
+      const pKey = `pseudonyms/${enc(host)}/${pseudonym}`;
+      if (!others && (await this.#read<{ task: string }>(pKey))?.task === taskId) await this.#remove(pKey);
+    }
+    // Keys only, no content, under the deleted/ prefix every append and draft check reads.
+    await this.#tombstone(tombstone, { task: taskId, session: sessionId, at: input.at, evidence });
+    return { task: taskId, removed, not_covered: DELETE_NOT_COVERED };
+  }
+
   /**
    * Instructor confirmation state (SX-42): the newest teacher record about one observed event, or
    * `unreviewed` when there is none. Computed on read, never stored on the event.
@@ -1084,12 +1421,36 @@ export class LocalRecord {
     };
   }
 
-  /** Deletes what the core manages for one task and says what it cannot reach (MC-31). */
+  /**
+   * Deletes what the core manages for one task and says what it cannot reach (MC-31).
+   *
+   * cr-evidence (CR-69): the record stops taking writes for the task before it is scanned. The
+   * tombstone is written and the task and its session keys removed first, so a participant
+   * batch whose post-write check runs after that removes what it wrote, and a session open
+   * that lands after it is refused (`linkSessionKey`). A task deleted before (its tombstone
+   * stands) can be deleted again: that sweeps whatever a racing write left, and a delete
+   * interrupted half-way can be retried.
+   */
   async deleteTask(taskId: string, input: { by: "user"; at: number }): Promise<{ removed: Record<string, number>; not_covered: readonly string[] }> {
     check(isObj(input) && input.by === "user", "delete_requires_user");
-    await this.getTask(taskId);
-    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0 };
+    const tombstone = `deleted/${taskId}`;
+    try {
+      await this.getTask(taskId);
+    } catch (e) {
+      if (!(e instanceof Error) || e.message !== "unknown_task" || (await this.#read(tombstone)) === null) throw e;
+    }
+    const removed = { observations: 0, interpretations: 0, reviews: 0, submissions: 0, receipts: 0, improvements: 0, sessions: 0, browser_result_bytes: 0, drafts: 0 };
     const evidence: string[] = [];
+    await this.#tombstone(tombstone, { task: taskId, at: input.at, evidence });
+    await this.#remove(`tasks/${taskId}`);
+    for (const k of await this.#keys("sessions/")) {
+      if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
+      await this.#remove(k);
+      evidence.push(k);
+      removed.sessions++;
+    }
+    // cr-evidence (CR-65): the task's pseudonym index keys go with its sessions.
+    for (const k of await this.#keys("pseudonyms/")) if ((await this.#read<{ task: string }>(k))?.task === taskId) await this.#remove(k);
     // CR-10 — the stored bytes this task's observations name go with them.
     const named = new Set<string>();
     const namesOf = (o: ObservationRecord | null): string[] =>
@@ -1105,6 +1466,17 @@ export class LocalRecord {
       evidence.push(oKey);
       removed.observations++;
     }
+    // cr-evidence (CR-69): every observation scoped to the task (participant events and manual
+    // records name their experiment as scope) goes too, whatever its assignment says, so an
+    // event a race stored with no task cannot outlive the experiment's deletion.
+    for (const k of await this.#keys("observations/")) {
+      if (k.split("/")[2] !== enc(taskId)) continue;
+      for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.add(d);
+      await this.#remove(k);
+      await this.#remove(assignmentKey(k));
+      evidence.push(k);
+      removed.observations++;
+    }
     for (const k of await this.#keys(`interpretations/${taskId}/`)) {
       await this.#remove(k);
       removed.interpretations++;
@@ -1112,6 +1484,11 @@ export class LocalRecord {
     for (const k of await this.#keys(`reviews/${taskId}/`)) {
       await this.#remove(k);
       removed.reviews++;
+    }
+    // cr-evidence (CR-69): the task's evidence drafts are derived from its records and go with them.
+    for (const k of await this.#keys(`drafts/${taskId}/`)) {
+      await this.#remove(k);
+      removed.drafts++;
     }
     for (const k of await this.#keys("submissions/")) {
       if ((await this.#read<{ payload: { task: { id: string } } }>(k))?.payload.task.id !== taskId) continue;
@@ -1128,19 +1505,13 @@ export class LocalRecord {
       await this.#remove(k);
       removed.improvements++;
     }
-    for (const k of await this.#keys("sessions/")) {
-      if ((await this.#read<{ task: string }>(k))?.task !== taskId) continue;
-      await this.#remove(k);
-      removed.sessions++;
-    }
     if (named.size) {
       // Bytes another remaining observation still names stay (content-addressed, shared).
       for (const k of await this.#keys("observations/")) for (const d of namesOf(await this.#read<ObservationRecord>(k))) named.delete(d);
       removed.browser_result_bytes = (await this.deleteBlobs({ by: "user", at: input.at, digests: [...named] })).removed;
     }
     // Keys only, no content: lets later collection and reinterpretation refuse the deleted evidence.
-    await this.#write(`deleted/${taskId}`, { task: taskId, at: input.at, evidence }, false);
-    await this.#remove(`tasks/${taskId}`);
+    await this.#tombstone(tombstone, { task: taskId, at: input.at, evidence });
     return { removed, not_covered: DELETE_NOT_COVERED };
   }
 
@@ -1224,7 +1595,8 @@ export class LocalRecord {
       const g = await this.#read<MyRecords["gaps"][number]>(k);
       if (g && (g.missing.length > 0 || g.incomplete)) gaps.push(g);
     }
-    const deleted = (await this.#keys("deleted/")).map((k) => k.slice("deleted/".length));
+    // Session tombstones (deleteSession) are not deleted tasks.
+    const deleted = (await this.#keys("deleted/")).filter((k) => !k.startsWith("deleted/sessions/")).map((k) => k.slice("deleted/".length));
     const browser_results = { stored: await this.blobCount(), bytes: await this.#blobUsage(), max_bytes: this.#maxBlobBytes };
     return { tasks, improvements, unassigned_observations: unassigned, gaps, deleted_tasks: deleted, browser_results };
   }
