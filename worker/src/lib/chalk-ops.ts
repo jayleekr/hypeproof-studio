@@ -33,7 +33,7 @@ export interface ConsentItem {
 /** auto_materials[] embedded in brief(file=ops). */
 export function buildAutoMaterials(
   profile: Profile,
-  skillValidator: (name: string) => boolean = () => true,
+  skillValidator: (name: string) => boolean,
 ): AutoMaterial[] {
   const items: AutoMaterial[] = [];
 
