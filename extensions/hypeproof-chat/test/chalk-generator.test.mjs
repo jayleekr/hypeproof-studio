@@ -484,4 +484,94 @@ await check('T-G20 runBrowserOpen #507: wrong loopback port corrected to live se
   assert.equal(openedWith, null, 'openBrowser must NOT be called when #507 startLivePreview handles it');
 });
 
+// ─── T-G21: chalk_record_feedback in CHALK_TOOL_DEFINITIONS ──────────────────
+await check('T-G21 chalk_record_feedback present in CHALK_TOOL_DEFINITIONS', async () => {
+  const def = CHALK_TOOL_DEFINITIONS.find(d => d.name === 'chalk_record_feedback');
+  assert.ok(def, 'chalk_record_feedback must be in CHALK_TOOL_DEFINITIONS');
+  assert.deepEqual(def.inputSchema.required.sort(), ['cohort_id', 'course_id', 'request_id', 'text'].sort());
+  assert.equal(def.inputSchema.additionalProperties, false);
+});
+
+// ─── T-G22: chalk_view_diff in CHALK_TOOL_DEFINITIONS ────────────────────────
+await check('T-G22 chalk_view_diff present in CHALK_TOOL_DEFINITIONS', async () => {
+  const def = CHALK_TOOL_DEFINITIONS.find(d => d.name === 'chalk_view_diff');
+  assert.ok(def, 'chalk_view_diff must be in CHALK_TOOL_DEFINITIONS');
+  assert.deepEqual(def.inputSchema.required.sort(), ['cohort_id', 'course_id'].sort());
+  assert.equal(def.inputSchema.additionalProperties, false);
+});
+
+// ─── T-G23: chalk_record_feedback calls POST /feedback with auto-filled base_revision ──
+await check('T-G23 chalk_record_feedback: POST /feedback auto-fills base_revision from server', async () => {
+  let capturedPath = null;
+  let capturedBody = null;
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.url.includes('/authoring/')) {
+        // fetchExpectedRevision GET — no body
+        res.end(JSON.stringify({ revision: 5 }));
+      } else {
+        // POST /feedback
+        capturedPath = req.url;
+        capturedBody = JSON.parse(body);
+        res.end(JSON.stringify({ feedback_id: 'fb_test-req-01', base_revision: 5, created_at: 12345 }));
+      }
+    });
+  });
+  await new Promise(r => server.listen(0, r));
+  const { port } = server.address();
+
+  const ctx = {
+    serverUrl: `http://127.0.0.1:${port}`,
+    secrets: { get: async () => 'fake-issuer-token' },
+    currentModel: 'claude-sonnet-5',
+  };
+
+  const result = await callChalkTool(ctx, 'chalk_record_feedback', {
+    cohort_id: 'c1', course_id: 'crs1',
+    text: '피드백 내용',
+    request_id: 'test-req-01',
+  });
+  const parsed = JSON.parse(result);
+
+  assert.ok(parsed.feedback_id, 'feedback_id must be returned');
+  assert.ok(capturedBody !== null, `capturedBody must be set; capturedPath=${capturedPath}`);
+  assert.equal(capturedBody.base_revision, 5, 'base_revision must be auto-filled from fetchExpectedRevision');
+  assert.equal(capturedBody.model, 'claude-sonnet-5', 'model must be auto-filled from ctx.currentModel');
+  assert.equal(capturedBody.request_id, 'test-req-01');
+
+  server.close();
+});
+
+// ─── T-G24: chalk_view_diff calls GET /diff with optional params ─────────────
+await check('T-G24 chalk_view_diff: GET /diff with from+to params', async () => {
+  let capturedUrl = null;
+  const server = createServer((req, res) => {
+    capturedUrl = req.url;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ from_revision: 2, to_revision: 3, file: 'lesson', changes: [] }));
+  });
+  await new Promise(r => server.listen(0, r));
+  const { port } = server.address();
+
+  const ctx = {
+    serverUrl: `http://127.0.0.1:${port}`,
+    secrets: { get: async () => 'fake-issuer-token' },
+  };
+
+  const result = await callChalkTool(ctx, 'chalk_view_diff', {
+    cohort_id: 'c1', course_id: 'crs1', from: 2, to: 3, file: 'lesson',
+  });
+  const parsed = JSON.parse(result);
+
+  assert.ok(capturedUrl.includes('from=2'), `URL must include from=2: ${capturedUrl}`);
+  assert.ok(capturedUrl.includes('to=3'), `URL must include to=3: ${capturedUrl}`);
+  assert.ok(capturedUrl.includes('file=lesson'), `URL must include file=lesson: ${capturedUrl}`);
+  assert.deepEqual(parsed.changes, []);
+
+  server.close();
+});
+
 console.log(`\n${passed} tests passed`);

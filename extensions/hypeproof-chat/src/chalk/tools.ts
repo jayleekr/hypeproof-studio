@@ -31,6 +31,8 @@ export interface ChalkToolContext {
    * `true` 반환 → 진행, `false` → 취소.
    */
   requestConfirmation?: (message: string) => Promise<boolean>;
+  /** #1466 (E2-7) — 현재 강사 대화에 선택된 모델 ID. chalk_record_feedback 자동 채움용. */
+  currentModel?: string;
 }
 
 export interface ChalkToolDefinition {
@@ -639,6 +641,72 @@ export async function execSavePlan(
   }
 }
 
+// ─── #1466 (E2-7) 도구 정의 ──────────────────────────────────────────────
+
+export const CHALK_RECORD_FEEDBACK_DEF: ChalkToolDefinition = {
+  name: "chalk_record_feedback",
+  description: "강사의 피드백을 서버에 기록하고 feedback_id를 반환합니다. base_revision과 model은 현재 상태에서 자동 채워집니다.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cohort_id: { type: "string" },
+      course_id: { type: "string" },
+      text: { type: "string", description: "피드백 본문 (16 KB 이하)" },
+      request_id: { type: "string", description: "멱등성 키 (a-z A-Z 0-9 _ - 1~128자)" },
+    },
+    required: ["cohort_id", "course_id", "text", "request_id"],
+    additionalProperties: false,
+  },
+};
+
+export const CHALK_VIEW_DIFF_DEF: ChalkToolDefinition = {
+  name: "chalk_view_diff",
+  description: "두 계획서 개정판 사이의 변경 내역을 반환합니다. from 미지정 시 바로 이전 개정판과 비교합니다.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cohort_id: { type: "string" },
+      course_id: { type: "string" },
+      to: { type: "number", description: "비교 대상 개정 번호 (생략 시 최신)" },
+      from: { type: "number", description: "기준 개정 번호 (생략 시 이전 개정판)" },
+      file: { type: "string", description: "lesson 또는 ops (기본값: lesson)" },
+    },
+    required: ["cohort_id", "course_id"],
+    additionalProperties: false,
+  },
+};
+
+async function execRecordFeedback(ctx: ChalkToolContext, input: Record<string, unknown>): Promise<unknown> {
+  const cohort = input.cohort_id as string;
+  const course = input.course_id as string;
+  const text = input.text as string;
+  const requestId = input.request_id as string;
+
+  const baseRevision = await fetchExpectedRevision(ctx, cohort, course);
+  const model = ctx.currentModel ?? "unknown";
+
+  return await issuerFetch(ctx, `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/feedback`, {
+    method: "POST",
+    body: { text, model, base_revision: baseRevision, request_id: requestId },
+  });
+}
+
+async function execViewDiff(ctx: ChalkToolContext, input: Record<string, unknown>): Promise<unknown> {
+  const cohort = input.cohort_id as string;
+  const course = input.course_id as string;
+  const file = (input.file as string | undefined) ?? "lesson";
+  const params = new URLSearchParams({ file });
+  if (input.from !== undefined) params.set("from", String(input.from));
+  if (input.to !== undefined) params.set("to", String(input.to));
+
+  return await issuerFetch(ctx, `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/diff?${params.toString()}`);
+}
+
+export const CHALK_TOOL_DEFINITIONS_FEEDBACK: ChalkToolDefinition[] = [
+  CHALK_RECORD_FEEDBACK_DEF,
+  CHALK_VIEW_DIFF_DEF,
+];
+
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
 
 export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
@@ -649,6 +717,8 @@ export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_GENERATOR_BRIEF_DEF,
   CHALK_OPEN_COURSE_DEF,
   CHALK_SAVE_PLAN_DEF,
+  CHALK_RECORD_FEEDBACK_DEF,
+  CHALK_VIEW_DIFF_DEF,
 ];
 
 type ExecutorMap = Record<
@@ -664,6 +734,8 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_generator_brief: execGeneratorBrief,
   chalk_open_course: execOpenCourse,
   chalk_save_plan: execSavePlan,
+  chalk_record_feedback: execRecordFeedback,
+  chalk_view_diff: execViewDiff,
 };
 
 /**

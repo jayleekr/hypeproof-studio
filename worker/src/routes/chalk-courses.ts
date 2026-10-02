@@ -1,9 +1,11 @@
 // #1295 — Chalk course generation routes (server side).
-// PUT  /chalk/cohorts/:cohort/courses/:course/inputs  — save 5 inputs + optional vocab
-// PUT  /chalk/cohorts/:cohort/courses/:course/plan    — save plan file + auto-check
-// GET  /chalk/cohorts/:cohort/courses/:course/brief   — generation brief bundle
-// GET  /chalk/cohorts/:cohort/courses/:course/plan    — read plan file (issuer only)
-// POST /chalk/cohorts/:cohort/courses/:course/check   — pedagogy + parser check (#1294)
+// PUT  /chalk/cohorts/:cohort/courses/:course/inputs    — save 5 inputs + optional vocab
+// PUT  /chalk/cohorts/:cohort/courses/:course/plan      — save plan file + auto-check
+// GET  /chalk/cohorts/:cohort/courses/:course/brief     — generation brief bundle
+// GET  /chalk/cohorts/:cohort/courses/:course/plan      — read plan file (issuer only)
+// POST /chalk/cohorts/:cohort/courses/:course/check     — pedagogy + parser check (#1294)
+// POST /chalk/cohorts/:cohort/courses/:course/feedback  — record feedback (#1466 E2-7)
+// GET  /chalk/cohorts/:cohort/courses/:course/diff      — revision diff (#1466 E2-7)
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -14,6 +16,7 @@ import { readDraft, owns, writeDraft, type Draft } from "../lib/authoring-draft-
 import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFields } from "../lib/chalk-recommend";
 import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
 import { parsePlan, type Violation } from "../lib/chalk-plan";
+import { planUnits, diffUnits } from "../lib/chalk-plan/units.ts";
 import type { SessionDesign } from "../lib/session-design";
 
 type Vars = { Variables: { author: IssuerAuthz } };
@@ -401,6 +404,21 @@ chalkCourses.put(
     const hash = await sha256Hex(JSON.stringify([b.expected_revision, prior!.profile_id, newContent]));
     const now = new Date().toISOString();
 
+    // Optional feedback link: feedback_id must belong to this cohort/course.
+    let feedbackLinkStmt: ReturnType<typeof c.env.HPS_DB.prepare> | null = null;
+    if (typeof b.feedback_id === "string") {
+      const fbRow = await c.env.HPS_DB.prepare(
+        "SELECT feedback_id FROM chalk_feedback WHERE feedback_id=? AND cohort_id=? AND course_id=?"
+      ).bind(b.feedback_id, cohort, course).first<{ feedback_id: string }>();
+      if (!fbRow) return c.json({ code: "invalid_request", error: "feedback_id not found for this course" }, 400);
+      feedbackLinkStmt = c.env.HPS_DB.prepare(
+        `INSERT INTO chalk_feedback_revisions (feedback_id,revision,file,cohort_id,course_id,created_at)
+         SELECT ?,?,?,?,?,?
+         WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)`
+      ).bind(b.feedback_id as string, newRevision, b.file, cohort, course, nowMs,
+             cohort, course, newRevision, b.request_id as string, hash);
+    }
+
     // Plan file insert: conditional on the draft UPDATE succeeding (SELECT WHERE EXISTS).
     // This is a no-op if the CAS UPDATE matched 0 rows, preserving data integrity.
     const planFileInsert = c.env.HPS_DB.prepare(
@@ -410,6 +428,8 @@ chalkCourses.put(
     ).bind(cohort, course, 'draft', String(newRevision), b.file, b.html, sha256, b.knowledge_version, nowMs,
            cohort, course, newRevision, b.request_id as string, hash);
 
+    const extraBatch = feedbackLinkStmt ? [planFileInsert, feedbackLinkStmt] : [planFileInsert];
+
     const wr = await writeDraft(c.env.HPS_DB, prior!, {
       cohort, course, owner_id: auth.payload.u,
       expected_revision: b.expected_revision as number,
@@ -418,7 +438,7 @@ chalkCourses.put(
       content_json: newContent, hash, now,
       independent: !!prior!.independent,
       profile_scope: auth.scope.profiles ?? [],
-      extra_batch_stmts: [planFileInsert],
+      extra_batch_stmts: extraBatch,
     });
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent') {
@@ -727,3 +747,129 @@ function fromPedagogyFinding(f: PedagogyFinding): CheckResultItem {
     blocks_confirm: f.severity === 'fail',
   };
 }
+
+// ── POST /feedback ────────────────────────────────────────────────────────────
+
+const FEEDBACK_MAX_BYTES = 16 * 1024;
+
+interface FeedbackBody {
+  text: string;
+  model: string;
+  base_revision: number;
+  request_id: string;
+}
+
+chalkCourses.post(
+  "/chalk/cohorts/:cohort/courses/:course/feedback",
+  bodyLimit({ maxSize: FEEDBACK_MAX_BYTES + 4 * 1024, onError: c => c.json({ error: "피드백이 너무 깁니다", max_bytes: FEEDBACK_MAX_BYTES }, 413) }),
+  async (c) => {
+    const cohort = c.req.param("cohort")!;
+    const course = c.req.param("course")!;
+    const { err, auth } = await authAndOwn(c, cohort, course) as any;
+    if (err) return err;
+
+    c.header("cache-control", "no-store");
+
+    let body: unknown;
+    try { body = await c.req.json(); } catch { return c.json({ code: "invalid_request", error: "invalid JSON" }, 400); }
+    if (typeof body !== "object" || body === null) return c.json({ code: "invalid_request", error: "request body must be a JSON object" }, 400);
+    const b = body as Record<string, unknown>;
+
+    if (typeof b.text !== "string" || b.text.length === 0)
+      return c.json({ code: "invalid_request", error: "text is required" }, 400);
+    if (new TextEncoder().encode(b.text).length > FEEDBACK_MAX_BYTES)
+      return c.json({ error: "피드백이 너무 깁니다", max_bytes: FEEDBACK_MAX_BYTES }, 413);
+    if (typeof b.model !== "string" || b.model.length === 0)
+      return c.json({ code: "invalid_request", error: "model is required" }, 400);
+    if (!Number.isSafeInteger(b.base_revision) || (b.base_revision as number) < 1)
+      return c.json({ code: "invalid_request", error: "base_revision must be a positive integer" }, 400);
+    if (typeof b.request_id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(b.request_id))
+      return c.json({ code: "invalid_request", error: "request_id required" }, 400);
+
+    const fb = b as unknown as FeedbackBody;
+    const nowMs = Date.now();
+    const feedbackId = `fb_${fb.request_id}`;
+
+    // Idempotent: if request_id already exists for this course, return it.
+    const existing = await c.env.HPS_DB.prepare(
+      "SELECT feedback_id, base_revision, created_at FROM chalk_feedback WHERE request_id=? AND cohort_id=? AND course_id=?"
+    ).bind(fb.request_id, cohort, course).first<{ feedback_id: string; base_revision: number; created_at: number }>();
+    if (existing) {
+      return c.json({ feedback_id: existing.feedback_id, base_revision: existing.base_revision, created_at: existing.created_at });
+    }
+
+    await c.env.HPS_DB.prepare(
+      `INSERT INTO chalk_feedback (feedback_id,cohort_id,course_id,base_revision,text,model,actor,request_id,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`
+    ).bind(feedbackId, cohort, course, fb.base_revision, fb.text, fb.model, auth.payload.u, fb.request_id, nowMs).run();
+
+    return c.json({ feedback_id: feedbackId, base_revision: fb.base_revision, created_at: nowMs });
+  },
+);
+
+// ── GET /diff ─────────────────────────────────────────────────────────────────
+
+chalkCourses.get(
+  "/chalk/cohorts/:cohort/courses/:course/diff",
+  async (c) => {
+    const cohort = c.req.param("cohort")!;
+    const course = c.req.param("course")!;
+    const { err } = await authAndOwn(c, cohort, course) as any;
+    if (err) return err;
+
+    c.header("cache-control", "no-store");
+
+    const toStr = c.req.query("to");
+    const fromStr = c.req.query("from");
+    const file = c.req.query("file") ?? "lesson";
+
+    if (!VALID_FILES.includes(file as any))
+      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
+
+    // Resolve 'to' revision (default: latest).
+    let toRevision: number;
+    if (toStr !== undefined) {
+      const parsed = parseInt(toStr, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) return c.json({ code: "invalid_request", error: "to must be a positive integer" }, 400);
+      toRevision = parsed;
+    } else {
+      const latest = await c.env.HPS_DB.prepare(
+        "SELECT MAX(CAST(ref AS INTEGER)) AS rev FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft'"
+      ).bind(cohort, course, file).first<{ rev: number | null }>();
+      if (!latest?.rev) return c.json({ code: "not_found", error: "no plan file found" }, 404);
+      toRevision = latest.rev;
+    }
+
+    const toRow = await c.env.HPS_DB.prepare(
+      "SELECT html FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND ref=?"
+    ).bind(cohort, course, file, String(toRevision)).first<{ html: string }>();
+    if (!toRow) return c.json({ code: "not_found", error: "to revision not found" }, 404);
+
+    // Resolve 'from' revision (optional: absent → use previous).
+    let fromRevision: number | null = null;
+    if (fromStr !== undefined) {
+      const parsed = parseInt(fromStr, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) return c.json({ code: "invalid_request", error: "from must be a positive integer" }, 400);
+      fromRevision = parsed;
+    } else {
+      // Find previous revision before toRevision.
+      const prevRow = await c.env.HPS_DB.prepare(
+        "SELECT MAX(CAST(ref AS INTEGER)) AS rev FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND CAST(ref AS INTEGER) < ?"
+      ).bind(cohort, course, file, toRevision).first<{ rev: number | null }>();
+      fromRevision = prevRow?.rev ?? null;
+    }
+
+    if (fromRevision === null) {
+      // No previous revision available.
+      return c.json({ from_revision: null, to_revision: toRevision, file, changes: [] });
+    }
+
+    const fromRow = await c.env.HPS_DB.prepare(
+      "SELECT html FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND file=? AND ref_kind='draft' AND ref=?"
+    ).bind(cohort, course, file, String(fromRevision)).first<{ html: string }>();
+    if (!fromRow) return c.json({ code: "not_found", error: "from revision not found" }, 404);
+
+    const changes = diffUnits(planUnits(fromRow.html, file), planUnits(toRow.html, file));
+    return c.json({ from_revision: fromRevision, to_revision: toRevision, file, changes });
+  },
+);

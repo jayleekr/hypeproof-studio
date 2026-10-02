@@ -3915,6 +3915,39 @@
           "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-FEEDBACK",
+      "stage": "implementation",
+      "label": "Chalk 피드백 기록·비교·이력 구현 (E2-7 / #1466)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-TEST-CHALK-FEEDBACK"
+      ],
+      "sources": [
+        { "path": "worker/migrations/00XX-chalk-feedback.sql" },
+        { "path": "worker/src/lib/chalk-plan/units.ts" },
+        { "path": "worker/src/routes/chalk-courses.ts" },
+        { "path": "worker/src/routes/chalk-instructor.ts" },
+        { "path": "worker/src/lib/instructor-auth.ts" },
+        { "path": "extensions/hypeproof-chat/src/chalk/tools.ts" },
+        { "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts" }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-FEEDBACK",
+      "stage": "test",
+      "label": "Chalk 피드백 라우트·도구 시험 (E2-7 / #1466)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-CHALK-FEEDBACK"
+      ],
+      "sources": [
+        { "path": "worker/test/chalk-feedback.test.mjs" },
+        { "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs" }
+      ]
     }
   ]
 }
