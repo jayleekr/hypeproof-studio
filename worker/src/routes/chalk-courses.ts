@@ -106,6 +106,7 @@ function generateSkeleton(opts: {
   <meta name="chalk:audience-tier" content="${audience_tier ?? ''}">
   <meta name="chalk:family-session" content="${family_session}">
   <meta name="chalk:duration-min" content="${duration_min}">
+  <meta name="chalk:prerequisites" content="">
   <meta name="chalk:methods" content="${methods.join(" ")}">
   <style>
     body { font-family: sans-serif; background: #fff; color: #111; max-width: 900px; margin: 0 auto; padding: 1rem; font-size: 1rem; }
