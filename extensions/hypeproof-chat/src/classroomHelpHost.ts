@@ -169,12 +169,12 @@ export class ClassroomHelpHost {
     const saved = await this.setEnvelope(sk, (cur) => { busy = !!cur && cur.state !== "prepared"; return busy ? undefined : envelope; });
     await this.refresh(busy ? "보낸 요청을 아직 확인하는 중이라 새로 미리 보지 않았습니다." : saved === "failed" ? "이 기기에 미리 보기를 저장하지 못했습니다. 다시 시도해 주세요." : null, sk);
   }
-  async cancel(key: string): Promise<void> {
+  async cancel(key: string, requestId: string): Promise<void> {
     await this.ready(); const w = await this.who(); if (!w.binding || draftKey(w.binding) !== key) return;
     const sk = sendKey(w.binding);
     // A consented request whose answer is unknown is not silently forgotten: it may exist on the Service.
-    await this.setEnvelope(sk, (e) => (e?.state === "prepared" ? null : undefined));
-    await this.refresh("보내지 않았습니다. 쓴 질문은 그대로 있습니다.", sk);
+    const changed = await this.setEnvelope(sk, (e) => (e?.request_id === requestId && e.state === "prepared" ? null : undefined));
+    await this.refresh(changed === true ? "보내지 않았습니다. 쓴 질문은 그대로 있습니다." : "미리 본 내용이 바뀌었거나 지우지 못했습니다. 다시 확인해 주세요.", sk);
   }
 
   /** The learner ticked consent and pressed send (or retries a request whose answer was lost — same id, same envelope). */
@@ -200,7 +200,7 @@ export class ClassroomHelpHost {
       // and only for the same request id — never onto another preview. It is drawn only if that learner is still here.
       const settled = await this.setEnvelope(sk, (x) => (!mine(x) ? undefined : verdict === "stored" ? null : verdict === "unknown" ? { ...x, state: "unknown" } : null));
       if (settled === true && verdict === "stored") await this.clearSent(key, e.content.question ?? "");
-      await this.refresh(verdict === "stored" ? "강사에게 보냈습니다. 강사가 답하면 여기에 표시됩니다." : verdict === "unknown" ? "보냈는지 확인하지 못했습니다. ‘다시 확인’을 누르면 같은 요청으로 다시 확인합니다(중복되지 않습니다)." : verdict === "expired" ? "동의한 열람 기간이 이미 지나 보내지 않았습니다. 쓴 질문은 그대로 있으니 다시 미리 보고 동의해 주세요." : verdict === "changed" ? "받는 강사나 수업 연결이 바뀌어 저장되지 않았습니다. 쓴 질문은 그대로 있습니다." : "요청이 받아들여지지 않았습니다. 쓴 질문은 그대로 있습니다.", sk, verdict === "stored" ? e.request_id : undefined);
+      await this.refresh(verdict === "stored" ? "강사에게 보냈습니다. 강사가 답하면 여기에 표시됩니다." : verdict === "unknown" ? "보냈는지 확인하지 못했습니다. ‘다시 확인’을 누르면 같은 요청으로 다시 확인합니다(중복되지 않습니다)." : verdict === "expired" ? "동의한 열람 기간이 이미 지나 보내지 않았습니다. 쓴 질문은 그대로 있으니 다시 미리 보고 동의해 주세요." : verdict === "changed" ? "받는 강사나 수업 연결이 바뀌어 저장되지 않았습니다. 쓴 질문은 그대로 있습니다." : verdict === "too_large" ? "보낼 내용이 너무 큽니다. 질문이나 고른 대화를 줄여 다시 미리 봐 주세요. 쓴 질문은 그대로 있습니다." : "요청이 받아들여지지 않았습니다. 쓴 질문은 그대로 있습니다.", sk, verdict === "stored" ? e.request_id : undefined);
     } finally { this.busy = false; }
   }
 
@@ -226,9 +226,10 @@ export class ClassroomHelpHost {
     await this.refresh(r.status === 200 ? "공유를 철회했습니다. 강사는 더 이상 이 내용을 열 수 없습니다." : r.status === 404 ? "이미 철회됐거나 만료된 공유입니다." : "철회하지 못했습니다. 다시 시도해 주세요.", sendKey(w.binding));
   }
   /** A lost-answer request the learner no longer wants: dropped here AND withdrawn on the Service if it exists there. */
-  async discard(key: string): Promise<void> {
+  async discard(key: string, requestId: string): Promise<void> {
     await this.ready(); const w = await this.who(); if (!w.binding || draftKey(w.binding) !== key) return;
-    const sk = sendKey(w.binding), e = await this.envelopeOf(sk); if (!e) return;
+    const sk = sendKey(w.binding), e = await this.envelopeOf(sk);
+    if (!e || e.request_id !== requestId) { await this.refresh("미리 본 내용이 바뀌었습니다. 다시 확인해 주세요.", sk); return; }
     const r = await this.call(`shares/${encodeURIComponent(e.request_id)}`, w.token, { method: "DELETE" });
     if (r.status !== 200 && r.status !== 404) { await this.refresh("지금은 서버에서 지우지 못했습니다. 요청은 이 기기에 그대로 있습니다.", sk); return; }
     await this.setEnvelope(sk, (x) => (x?.request_id === e.request_id ? null : undefined));

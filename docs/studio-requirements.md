@@ -789,3 +789,18 @@ board alike (the learner's notice is shown once, nothing is retried), classified
 stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
 the window keeps the learner's work folder (it used to move them to the profile's default folder). Pause still refuses only NEW model requests: a request already streaming is not
 cut, the next request of the same turn is a new request and is refused, nothing is re-sent on resume.
+
+## Classroom integrity corrections (#1409)
+
+ADM-03/05 voluntary help cancellation and discard carry the request ID displayed
+in the preview; a stale window cannot cancel a replacement request. Oversize HTTP
+413 responses preserve the draft and explain the size refusal. The existing
+8,000-code-unit field limit is unchanged; the student share body budget covers
+six fields, including JSON escaping. Local help-store commits are confirmed by
+commit identity, so a successor does not replay an already committed mutation.
+
+ADM collection copies repeat approved artifact bytes at approval time, including
+after restart, and keep undated damaged fragments only inside the evidenced time
+window (all-undated legacy inputs retain compatibility). Missing approved pages
+never receive complete coverage. See the existing classroom-admin contract and
+`docs/testing/classroom-admin.md` for the nine regression cases and actual results.

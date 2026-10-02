@@ -19,11 +19,14 @@ const idOK=(s:unknown):s is string=>typeof s==='string'&&/^[a-zA-Z0-9_-]{1,128}$
 const now=()=>Math.floor(Date.now()/1000);
 const metadata=(r:Row)=>({id:r.id,student_id:r.student_id,recipient_id:r.recipient_id,profile_id:r.profile_id,session_id:r.session_id,kind:r.kind,revision:r.revision,status:r.status,created_at:r.created_at,expires_at:r.expires_at});
 const studentView=(r:Row)=>({...metadata(r),content:JSON.parse(r.content_json),feedback:r.feedback,next_action:r.next_action});
+// Six 8,000-code-unit fields may each require six JSON bytes per unit (escaped controls).
+// Include bounded identifiers/consent metadata without changing the field limits.
+const shareLimit=bodyLimit({maxSize:6*8000*6+8192,onError:c=>c.json({error:'share too large',reason:'too_large'},413)});
 const limit=bodyLimit({maxSize:32*1024,onError:c=>c.json({error:'share too large'},413)});
 const json=async(c:any)=>{try{return await c.req.json();}catch{return null;}};
 
 export const classroomStudent=new Hono<StudentEnv>();
-classroomStudent.use('*',limit);
+classroomStudent.use('*',shareLimit);
 classroomStudent.use('*',async(c,next)=>{
  c.header('cache-control','no-store');
  const token=bearer(c.req.header('authorization'));if(!token)return c.json({error:'student Bearer required'},401);

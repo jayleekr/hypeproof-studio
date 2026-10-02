@@ -2070,6 +2070,12 @@
         },
         {
           "path": "e2e/classroom/g4-journey.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/collection-integrity.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/help-request.mjs"
         }
       ]
     },
