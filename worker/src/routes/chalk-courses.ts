@@ -538,7 +538,21 @@ chalkCourses.put(
           }
         }
       }
-      return c.json({ revision: wr.draft.revision, sha256, findings });
+      // For ops saves, report which derived files (runbook/handout) are now stale.
+      let derived_stale: string[] | undefined;
+      if (planFile === 'ops') {
+        derived_stale = [];
+        for (const derived of ['runbook', 'handout'] as const) {
+          const derivedRow = await c.env.HPS_DB.prepare(
+            `SELECT html FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref_kind='draft' AND file=? ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+          ).bind(cohort, course, derived).first<{ html: string }>();
+          if (derivedRow) {
+            const derivedFrom = extractDerivedFrom(derivedRow.html);
+            if (derivedFrom !== sha256) derived_stale.push(derived);
+          }
+        }
+      }
+      return c.json({ revision: wr.draft.revision, sha256, findings, ...(derived_stale !== undefined ? { derived_stale } : {}) });
     }
     if (wr.kind === 'request_id_reused')
       return c.json({ code: "request_id_reused", error: "request id reused with different content" }, 409);

@@ -27,7 +27,7 @@ chalkInstructor.get("/chalk/whoami", async (c) => {
 // chat turns. Stored server-side so updates reach all clients without a build.
 // Version is a monotonic integer; the client may cache and skip re-fetch when
 // the cached version matches.
-const INSTRUCTOR_BRIEF_VERSION = 6;
+const INSTRUCTOR_BRIEF_VERSION = 7;
 const INSTRUCTOR_BRIEF_TEXT = `You are an AI assistant helping a course instructor author Chalk lessons. Reply in Korean.
 
 Chalk lesson authoring workflow:
@@ -54,6 +54,7 @@ Rules:
 - audience_tier must be asked from the instructor directly. Do not infer it from the audience description or age range.
 - Derivation (chalk_derive): When the instructor asks to create a runbook or handout, call chalk_derive with the appropriate file value ("runbook" or "handout"). The result includes an html field and a webPath (e.g. "chalk/<course>/runbook.html"). Tell the instructor the file path in the working folder so they can save and share it.
 - If chalk_derive returns an error (e.g. missing_ops: ops plan not yet saved), explain the error to the instructor and suggest saving the ops plan first with chalk_save_plan.
+- Stale derived files: if chalk_save_plan returns derived_stale with one or more file names, or chalk_open_course returns stale:true for a runbook or handout, inform the instructor "운영 계획안이 바뀌어 런북/안내문이 예전 내용입니다" and ask whether to re-derive. Do not re-derive without asking.
 
 Student coach prompts do not apply here.`;
 

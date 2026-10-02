@@ -1,5 +1,5 @@
 // #1469 (E3-3) — deriveRunbook / deriveHandout pure functions + POST /derive + GET /plan?file=runbook|handout
-// DR-01~DR-11
+// DR-01~DR-13
 import './harness/loader.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -16,6 +16,20 @@ const app = await bootApp();
 const AUTHORING_SCHEMA = readFileSync(new URL('../migrations/0002-chalk-authoring.sql', import.meta.url), 'utf8');
 const PLAN_SCHEMA = readFileSync(new URL('../migrations/0031-chalk-plan-files.sql', import.meta.url), 'utf8');
 const TIER_DURATION_SCHEMA = readFileSync(new URL('../migrations/0035-chalk-course-inputs-tier-duration.sql', import.meta.url), 'utf8');
+const KB_SCHEMA = `
+CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
+  version INTEGER PRIMARY KEY, parent_version INTEGER,
+  origin TEXT NOT NULL, source_repo TEXT, source_commit TEXT,
+  note TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+  doc_count INTEGER NOT NULL, digest TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
+  version INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
+  doc_id TEXT NOT NULL, kind TEXT NOT NULL, fields_json TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '', source_path TEXT,
+  PRIMARY KEY (version, doc_id)
+);
+`;
 
 const profileId = listProfiles().find(p => p.session.cohort_id === COHORT)?.id;
 assert.ok(profileId, 'profile not found for COHORT');
@@ -94,9 +108,11 @@ const SAMPLE_OPS_SHA = 'test-ops-sha-abc123';
 function makeDb() {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys=ON');
+  db.exec(KB_SCHEMA);
   db.exec(AUTHORING_SCHEMA);
   db.exec(PLAN_SCHEMA);
   db.exec(TIER_DURATION_SCHEMA);
+  db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,1,'digest0')`).run();
   db.prepare(
     `INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
      VALUES (?,?,?,?,?,?,?,?,?)`
@@ -309,6 +325,53 @@ await check('DR-11 PUT /plan file=runbook → 400 invalid_request', async () => 
   const { tok } = await makeTok(db);
   const r = await req('PUT', 'plan', { html: '<html></html>', file: 'runbook', knowledge_version: 1, expected_revision: 1, request_id: 'req-dr11' }, tok, db);
   assert.equal(r.status, 400, `PUT /plan file=runbook must be 400: ${JSON.stringify(r.json)}`);
+});
+
+// DR-12: after deriving runbook, re-saving ops → PUT /plan response has derived_stale: ["runbook"]
+await check('DR-12 re-saving ops after derive → derived_stale includes derived file names', async () => {
+  const db = makeDb();
+  const { tok } = await makeTok(db);
+  await seedOps(db);
+
+  // Derive runbook
+  const deriveR = await req('POST', 'derive', { file: 'runbook' }, tok, db);
+  assert.equal(deriveR.status, 201, `derive must succeed: ${JSON.stringify(deriveR.json)}`);
+
+  // Re-save ops with different HTML (new sha)
+  const newOpsHtml = SAMPLE_OPS_HTML.replace('탐구 활동', '탐구 활동 수정됨');
+  const putR = await req('PUT', 'plan', {
+    html: newOpsHtml,
+    file: 'ops',
+    knowledge_version: 1,
+    expected_revision: 1,
+    request_id: 'req-dr12-plan',
+  }, tok, db);
+  assert.equal(putR.status, 200, `PUT /plan ops must succeed: ${JSON.stringify(putR.json)}`);
+  const stale = putR.json.derived_stale;
+  assert.ok(Array.isArray(stale), `derived_stale must be array, got: ${JSON.stringify(stale)}`);
+  assert.ok(stale.includes('runbook'), `derived_stale must include "runbook", got: ${JSON.stringify(stale)}`);
+  assert.ok(!stale.includes('handout'), `derived_stale must not include "handout" (not yet derived), got: ${JSON.stringify(stale)}`);
+});
+
+// DR-13: no derived files → PUT /plan ops returns derived_stale: []
+await check('DR-13 no derived files → PUT /plan ops returns derived_stale: []', async () => {
+  const db = makeDb();
+  const { tok } = await makeTok(db);
+  await seedOps(db);
+
+  // Save ops without any prior derive
+  const newOpsHtml = SAMPLE_OPS_HTML.replace('탐구 활동', '탐구 활동 v2');
+  const putR = await req('PUT', 'plan', {
+    html: newOpsHtml,
+    file: 'ops',
+    knowledge_version: 1,
+    expected_revision: 1,
+    request_id: 'req-dr13-plan',
+  }, tok, db);
+  assert.equal(putR.status, 200, `PUT /plan ops must succeed: ${JSON.stringify(putR.json)}`);
+  const stale = putR.json.derived_stale;
+  assert.ok(Array.isArray(stale), `derived_stale must be array, got: ${JSON.stringify(stale)}`);
+  assert.equal(stale.length, 0, `derived_stale must be empty when no derived files exist, got: ${JSON.stringify(stale)}`);
 });
 
 console.log(`\nAll ${passed} tests passed.`);

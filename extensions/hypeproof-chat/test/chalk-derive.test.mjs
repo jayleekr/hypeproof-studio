@@ -92,4 +92,58 @@ await check('T-D4 chalk_derive in CHALK_TOOL_DEFINITIONS with required fields', 
   assert.deepEqual(def.inputSchema.required.sort(), ['cohort', 'course', 'file'].sort());
 });
 
+// ─── T-D5: execSavePlan passes derived_stale from server response ────────────
+await check('T-D5 execSavePlan passes derived_stale from server response to caller', async () => {
+  const { execSavePlan } = await import('../src/chalk/tools.ts');
+  await withMockServer((req, res) => {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      if (req.method === 'GET' && req.url.includes('/authoring/')) {
+        // fetchExpectedRevision calls GET /admin/cohorts/:cohort/authoring/:course
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ revision: 1 }));
+      } else if (req.method === 'GET' && req.url.includes('/versions')) {
+        // resolveKnowledgeVersion calls GET /admin/chalk/knowledge/versions
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ version: 1 }));
+      } else if (req.method === 'PUT' && req.url.includes('/plan')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ revision: 2, sha256: 'sha-new', findings: [], derived_stale: ['runbook'] }));
+      } else {
+        res.writeHead(404); res.end('{}');
+      }
+    });
+  }, async (port) => {
+    const cwd = join(tmpdir(), `chalk-derive-t-d5-${Date.now()}`);
+    await mkdir(cwd, { recursive: true });
+    const { mkdir: mkdirFs, writeFile } = await import('node:fs/promises');
+    await mkdirFs(join(cwd, 'chalk', 'test-course'), { recursive: true });
+    await writeFile(join(cwd, 'chalk', 'test-course', 'ops.html'), '<html></html>', 'utf8');
+    const ctx = { serverUrl: `http://127.0.0.1:${port}`, secrets: fakeSecrets, cwd };
+    const result = await execSavePlan(ctx, { cohort: 'test-cohort', course: 'test-course', file: 'ops', knowledge_version: 1 });
+    assert.ok(Array.isArray(result.derived_stale), 'must include derived_stale array');
+    assert.ok(result.derived_stale.includes('runbook'), 'derived_stale must include "runbook"');
+  });
+});
+
+// ─── T-D6: execOpenCourse passes stale:true from server GET /plan ────────────
+await check('T-D6 execOpenCourse passes stale:true from server GET /plan', async () => {
+  const { execOpenCourse } = await import('../src/chalk/tools.ts');
+  const { writeFile, mkdir: mkdirFs } = await import('node:fs/promises');
+  await withMockServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ html: SAMPLE_HTML, sha256: 'sha-rb', stale: true }));
+    });
+  }, async (port) => {
+    const cwd = join(tmpdir(), `chalk-derive-t-d6-${Date.now()}`);
+    await mkdir(cwd, { recursive: true });
+    const ctx = { serverUrl: `http://127.0.0.1:${port}`, secrets: fakeSecrets, cwd };
+    const result = await execOpenCourse(ctx, { cohort: 'test-cohort', course: 'test-course', file: 'runbook' });
+    assert.equal(result.stale, true, 'stale:true from server must be passed through');
+  });
+});
+
 console.log(`\nAll ${passed} tests passed.`);
