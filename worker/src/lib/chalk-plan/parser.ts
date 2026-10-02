@@ -2,6 +2,7 @@ import { tokenize } from './tokenizer.ts';
 import type {
   ParsedPlan, PlanMeta, ParsedStep, ParsedStuck, ParsedSection, Violation, ViolationCode,
   ProhibitedMove, KeyQuestion, Objective, Evidence, ParsedBlock, ParsedRisk,
+  ParsedMaterial, ParsedConsentItem, ParsedPostDeliverable,
 } from './types.ts';
 
 const MAX_SIZE_BYTES = 256 * 1024;
@@ -165,6 +166,103 @@ function parseOpsBlocks(html: string, file: string, violations: Violation[], fam
   }
 
   return blocks;
+}
+
+// #1468 (E3-2) — materials/consent/post-deliverables section extractors.
+
+const VALID_MATERIAL_KINDS = new Set(['physical', 'digital', 'account']);
+const VALID_MATERIAL_OWNERS = new Set(['instructor', 'learner', 'parent']);
+
+function parseOpsMaterials(html: string, file: string, violations: Violation[]): ParsedMaterial[] {
+  const mHtml = sectionHtml(html, 'materials');
+  if (!mHtml) return [];
+
+  const materials: ParsedMaterial[] = [];
+  const liRe = /<li([^>]*data-chalk-material[^>]*)>([\s\S]*?)<\/li>/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = liRe.exec(mHtml)) !== null) {
+    const attrsStr = m[1] ?? '';
+    const liHtml = m[2] ?? '';
+
+    const idAttr = /data-chalk-material="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const id = idAttr || null;
+    const kind = /data-kind="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const owner = /data-owner="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const autoAttr = /data-auto="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const auto = autoAttr === 'true';
+
+    const rawText = liHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    if (!kind || !VALID_MATERIAL_KINDS.has(kind)) {
+      violations.push(violation('spec.material_kind_missing', ['PLAN-05'], `준비물 항목 ${id ?? '(id없음)'} 에 kind(physical|digital|account) 가 없거나 어휘 밖이다`, file, 'materials', null, 'data-kind'));
+    }
+    if (!owner || !VALID_MATERIAL_OWNERS.has(owner)) {
+      violations.push(violation('spec.material_owner_missing', ['PLAN-05'], `준비물 항목 ${id ?? '(id없음)'} 에 owner(instructor|learner|parent) 가 없거나 어휘 밖이다`, file, 'materials', null, 'data-owner'));
+    }
+
+    materials.push({ id, kind, owner, text: rawText, auto });
+  }
+
+  return materials;
+}
+
+const REQUIRED_CONSENT_KEYS = ['model', 'account'] as const;
+
+function parseOpsConsent(html: string, file: string, violations: Violation[]): ParsedConsentItem[] {
+  const cHtml = sectionHtml(html, 'consent');
+  if (!cHtml) return [];
+
+  const items: ParsedConsentItem[] = [];
+  const liRe = /<li([^>]*data-chalk-consent[^>]*)>([\s\S]*?)<\/li>/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = liRe.exec(cHtml)) !== null) {
+    const attrsStr = m[1] ?? '';
+    const liHtml = m[2] ?? '';
+
+    const key = /data-chalk-consent="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const autoAttr = /data-auto="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const auto = autoAttr === 'true' || autoAttr === 'pending';
+    const pending = autoAttr === 'pending';
+
+    const rawText = liHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const text = pending || rawText === '' ? null : rawText;
+
+    items.push({ key, text, auto });
+  }
+
+  const foundKeys = new Set(items.map(i => i.key));
+  for (const key of REQUIRED_CONSENT_KEYS) {
+    if (!foundKeys.has(key)) {
+      violations.push(violation('spec.consent_missing', ['PLAN-08'], `필수 동의 항목 ${key} 가 없다`, file, 'consent', null, key));
+    }
+  }
+
+  return items;
+}
+
+function parseOpsPostDeliverables(html: string, _file: string, _violations: Violation[]): ParsedPostDeliverable[] {
+  const pdHtml = sectionHtml(html, 'post-deliverables');
+  if (!pdHtml) return [];
+
+  const items: ParsedPostDeliverable[] = [];
+  const liRe = /<li([^>]*data-chalk-deliverable[^>]*)>([\s\S]*?)<\/li>/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = liRe.exec(pdHtml)) !== null) {
+    const attrsStr = m[1] ?? '';
+    const liHtml = m[2] ?? '';
+
+    const idAttr = /data-chalk-deliverable="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const id = idAttr || null;
+    const owner = /data-owner="([^"]*)"/.exec(attrsStr)?.[1] ?? null;
+    const rawText = liHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    items.push({ id, owner, text: rawText });
+  }
+
+  return items;
 }
 
 function parseOpsRisks(html: string, file: string, violations: Violation[]): ParsedRisk[] {
@@ -623,9 +721,12 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
     }
   }
 
-  // ops-specific section checks and block/risk extraction
+  // ops-specific section checks and block/risk/materials/consent/post-deliverables extraction
   let blocks: ParsedBlock[] | undefined;
   let risks: ParsedRisk[] | undefined;
+  let materials: ReturnType<typeof parseOpsMaterials> | undefined;
+  let consentItems: ReturnType<typeof parseOpsConsent> | undefined;
+  let postDeliverables: ReturnType<typeof parseOpsPostDeliverables> | undefined;
   if (meta.kind === 'ops') {
     if (!sections.has('schedule')) {
       sections.set('schedule', { key: 'schedule', present: false });
@@ -637,6 +738,9 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
     }
     blocks = parseOpsBlocks(html, file, violations, meta.familySession);
     risks = parseOpsRisks(html, file, violations);
+    materials = parseOpsMaterials(html, file, violations);
+    consentItems = parseOpsConsent(html, file, violations);
+    postDeliverables = parseOpsPostDeliverables(html, file, violations);
   }
 
   return {
@@ -654,6 +758,9 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
     violations,
     blocks,
     risks,
+    materials,
+    consentItems,
+    postDeliverables,
   };
   } catch (err) {
     violations.push(violation('markup.internal', ['HTML-02'], `내부 오류: ${err instanceof Error ? err.message : String(err)}`, file, null, null));

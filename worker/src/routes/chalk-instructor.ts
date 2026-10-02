@@ -27,7 +27,7 @@ chalkInstructor.get("/chalk/whoami", async (c) => {
 // chat turns. Stored server-side so updates reach all clients without a build.
 // Version is a monotonic integer; the client may cache and skip re-fetch when
 // the cached version matches.
-const INSTRUCTOR_BRIEF_VERSION = 5;
+const INSTRUCTOR_BRIEF_VERSION = 6;
 const INSTRUCTOR_BRIEF_TEXT = `You are an AI assistant helping a course instructor author Chalk lessons. Reply in Korean.
 
 Chalk lesson authoring workflow:
@@ -42,6 +42,8 @@ Chalk lesson authoring workflow:
    b. Call chalk_generator_brief with file: "ops" and (for track) break_min: <confirmed value> to retrieve the ops skeleton.
    c. Call chalk_open_course with file: "ops" and the same break_min value used in step 7b (for track format) to open the working copy (ops.html). Fill in the blocks referring to the lesson plan steps.
    d. Call chalk_save_plan with file: "ops" to save and check. Review check results.
+   e. If chalk_generator_brief returns consent_pending (a list of consent item keys): ask the instructor to supply the missing values and fill those <li data-chalk-consent> items in the ops plan. Do not guess or invent consent values.
+   f. The track break duration defaults to 20 minutes. Confirm with the instructor before creating the ops plan and use the confirmed value.
 
 Rules:
 - Use only the teaching methods the server recommends (chalk_recommend_methods). Do not substitute another method.

@@ -19,7 +19,13 @@ export type ViolationCode =
   | 'spec.risk_missing'
   | 'spec.buffer_missing'
   | 'spec.block_step_unlinked'
-  | 'spec.step_block_unlinked';
+  | 'spec.step_block_unlinked'
+  // #1468 (E3-2) — ops materials/consent checks
+  | 'spec.material_kind_missing'
+  | 'spec.material_owner_missing'
+  | 'spec.consent_missing'
+  | 'spec.material_ref_unknown'
+  | 'spec.auto_material_stale';
 
 export interface ViolationAt {
   file: string;
@@ -132,6 +138,27 @@ export interface ParsedRisk {
   firstLine: string | null;
 }
 
+// #1468 (E3-2) — ops-specific parsed structures for materials/consent/post-deliverables.
+export interface ParsedMaterial {
+  id: string | null;
+  kind: string | null;
+  owner: string | null;
+  text: string;
+  auto: boolean;
+}
+
+export interface ParsedConsentItem {
+  key: string | null;
+  text: string | null;
+  auto: boolean;
+}
+
+export interface ParsedPostDeliverable {
+  id: string | null;
+  owner: string | null;
+  text: string;
+}
+
 export interface ParsedPlan {
   meta: PlanMeta;
   sections: ParsedSection[];
@@ -148,4 +175,7 @@ export interface ParsedPlan {
   // ops-only (undefined for lesson files)
   blocks?: ParsedBlock[];
   risks?: ParsedRisk[];
+  materials?: ParsedMaterial[];
+  consentItems?: ParsedConsentItem[];
+  postDeliverables?: ParsedPostDeliverable[];
 }

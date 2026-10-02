@@ -15,6 +15,9 @@ import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFi
 import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
 import { parsePlan, type Violation } from "../lib/chalk-plan";
 import type { SessionDesign } from "../lib/session-design";
+import { getProfile } from "../profiles/index";
+import { isKnownSkill } from "../skills/index";
+import { buildAutoMaterials, buildAutoConsent, consentPendingKeys, diffAutoMaterials } from "../lib/chalk-ops";
 
 type Vars = { Variables: { author: IssuerAuthz } };
 
@@ -191,13 +194,16 @@ function generateSkeleton(opts: {
 </html>`;
 }
 
-// #1467 (E3-1) — ops plan skeleton HTML.
+// #1467 (E3-1) / #1468 (E3-2) — ops plan skeleton HTML.
 function generateOpsSkeleton(opts: {
   course_id: string; knowledge_version: number; format: string;
   family_session: boolean; duration_min: number; break_min: number;
   audience_tier: string | null;
+  autoMaterialsHtml?: string;
+  autoConsentHtml?: string;
 }): string {
-  const { course_id, knowledge_version, format, family_session, duration_min, break_min, audience_tier } = opts;
+  const { course_id, knowledge_version, format, family_session, duration_min, break_min, audience_tier,
+    autoMaterialsHtml = '', autoConsentHtml = '' } = opts;
   const parentCell = family_session
     ? `\n        <td data-chalk-role="parent" data-chalk-parent-role=""></td>` : '';
 
@@ -252,7 +258,7 @@ function generateOpsSkeleton(opts: {
   </section>
 
   <section data-chalk-section="materials">
-    <ul></ul>
+    <ul>${autoMaterialsHtml ? '\n      ' + autoMaterialsHtml + '\n    ' : ''}</ul>
   </section>
 
   <section data-chalk-section="risks">
@@ -266,7 +272,7 @@ function generateOpsSkeleton(opts: {
   </section>
 
   <section data-chalk-section="consent">
-    <ul></ul>
+    <ul>${autoConsentHtml ? '\n      ' + autoConsentHtml + '\n    ' : ''}</ul>
   </section>
 
   <section data-chalk-section="post-deliverables">
@@ -528,6 +534,17 @@ chalkCourses.put(
             }
           }
         }
+
+        // #1468 (E3-2) spec.auto_material_stale: compare stored auto materials with current profile config.
+        const opsProfile = wr.draft.profile_id ? getProfile(wr.draft.profile_id) : null;
+        if (opsProfile) {
+          const opsParsed2 = parsePlan(b.html as string, 'ops');
+          const storedAutoIds = (opsParsed2.materials ?? []).filter(m => m.auto).map(m => m.id ?? '');
+          const liveAutoIds = buildAutoMaterials(opsProfile, isKnownSkill).map(m => m.id);
+          if (diffAutoMaterials(storedAutoIds, liveAutoIds)) {
+            findings.push({ item: 'spec.auto_material_stale', severity: 'warn', judge: 'machine', at: { file: 'ops', section: 'materials', step: null, field: 'data-auto' }, message: '저장된 자동 준비물이 현재 프로필 설정과 다릅니다. 운영 계획안 뼈대를 다시 받아 준비물 절을 갱신하세요', source: 'chalk-ops auto_material_stale', blocks_confirm: false });
+          }
+        }
       }
       return c.json({ revision: wr.draft.revision, sha256, findings });
     }
@@ -544,7 +561,7 @@ chalkCourses.get(
   async (c) => {
     const cohort = c.req.param("cohort")!;
     const course = c.req.param("course")!;
-    const { err } = await authAndOwn(c, cohort, course) as any;
+    const { err, draft: briefDraft } = await authAndOwn(c, cohort, course) as any;
     if (err) return err;
 
     c.header("cache-control", "no-store");
@@ -669,6 +686,26 @@ chalkCourses.get(
         ? { format: 'workshop', core: [...WORKSHOP_CORE], blocks: WORKSHOP_CORE.map(k => ({ key: k })), total_min: opsTotalMin }
         : { format: 'track', blocks: [{ key: 'block-1', min: 110 }, { key: 'break', min: break_min, kind: 'break' }, { key: 'block-2', min: 110 }], total_min: opsTotalMin };
 
+      // #1468 (E3-2) — build auto materials and consent items from cohort profile.
+      const opsProfile = briefDraft?.profile_id ? getProfile(briefDraft.profile_id) : null;
+      let opsContent: any = null;
+      try { opsContent = briefDraft ? JSON.parse(briefDraft.content_json) : null; } catch { /* ignore */ }
+      const lessonModelPolicy = opsContent?.model ?? null;
+
+      const autoMaterials = opsProfile ? buildAutoMaterials(opsProfile, isKnownSkill) : [];
+      const autoConsent = buildAutoConsent(opsProfile, lessonModelPolicy);
+      const consent_pending = consentPendingKeys(autoConsent);
+
+      const autoMaterialsHtml = autoMaterials.map(m =>
+        `<li data-chalk-material="${m.id}" data-kind="${m.kind}" data-owner="${m.owner}" data-auto="true">${m.text}</li>`
+      ).join('\n      ');
+
+      const autoConsentHtml = autoConsent.map(c2 => {
+        const pending = c2.text === null;
+        const dataAuto = pending ? 'data-auto="pending"' : 'data-auto="true"';
+        return `<li data-chalk-consent="${c2.key}" ${dataAuto}>${c2.text ?? ''}</li>`;
+      }).join('\n      ');
+
       const ops_skeleton_html = generateOpsSkeleton({
         course_id: course,
         knowledge_version: kbVersion,
@@ -677,6 +714,8 @@ chalkCourses.get(
         duration_min: opsTotalMin,
         break_min,
         audience_tier: inputs.audience_tier,
+        autoMaterialsHtml,
+        autoConsentHtml,
       });
 
       return c.json({
@@ -694,6 +733,8 @@ chalkCourses.get(
         time_spec: ops_time_spec,
         skeleton_html: ops_skeleton_html,
         family_session: familySession,
+        auto_materials: autoMaterials,
+        consent_pending,
       });
     }
 
