@@ -4013,39 +4013,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             : undefined;
           // Browser tools for the local runtime: live_preview_start + browser_open.
           // Reuses INSTRUCTOR_TOOL_PROFILE.sdk_tools.browser to stay in sync with the policy.
-          // Delegates to runBrowserOpen / runLivePreviewStart (same logic as the SDK MCP path)
-          // via a minimal BrowserMcpHost so the instructor gets 404 checks, #507 port
-          // correction and #526 displacement notices without duplicating that logic here.
-          // Instructor allows loopback-only; no CR gating and no approval modal needed.
+          // Delegates to runBrowserOpen / runLivePreviewStart via the same BrowserMcpHost the
+          // student SDK path uses (buildBrowserMcpHost). That gives the instructor the full
+          // #507 port correction (livePreviewUrl), #415 duplicate suppression (openPages /
+          // currentPage), and #526 slot-displaced notice. The host's crEnabled / crScope
+          // are fine for the instructor: with CR off they are no-ops; with CR on the
+          // instructor is subject to the same scope rules as a student.
           const browserTools: BrowserToolsForLocal | undefined =
             INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser
               ? (() => {
-                  const instructorHost: BrowserMcpHost = {
-                    openBrowser: async (url: string) => {
-                      await vscode.window.openBrowserTab(url, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
-                    },
-                    screenshot: async () => null,
-                    startLivePreview: () => this.startLivePreview(),
-                    fetchHead: async (url: string) => {
-                      try {
-                        const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(3000) });
-                        return { ok: r.ok, status: r.status };
-                      } catch {
-                        return { ok: false, status: 0 };
-                      }
-                    },
-                  };
+                  const host = this.buildBrowserMcpHost();
                   return {
                     definitions: [...INSTRUCTOR_LOCAL_BROWSER_DEFS],
                     call: async (name: string, input: unknown) => {
                       const r =
                         name === "live_preview_start"
-                          ? await runLivePreviewStart(instructorHost)
+                          ? await runLivePreviewStart(host)
                           : name === "browser_open"
-                            ? await runBrowserOpen(instructorHost, typeof (input as Record<string, unknown>)?.url === "string" ? (input as Record<string, unknown>).url as string : "")
+                            ? await runBrowserOpen(host, typeof (input as Record<string, unknown>)?.url === "string" ? (input as Record<string, unknown>).url as string : "")
                             : null;
                       if (!r) throw new Error(`알 수 없는 브라우저 도구: ${name}`);
-                      return r.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+                      // isError mirrors the workspace/chalk tool convention: throw so the
+                      // local runtime marks the tool result as a failure.
+                      const text = r.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+                      if (r.isError) throw new Error(text);
+                      return text;
                     },
                   };
                 })()

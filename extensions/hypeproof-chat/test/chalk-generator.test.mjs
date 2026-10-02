@@ -23,6 +23,7 @@ const {
 } = await import('../src/chalk/tools.ts');
 
 const { mergeChalkTools, mergeBrowserTools } = await import('../src/localRuntime/index.ts');
+const { runBrowserOpen, runLivePreviewStart } = await import('../src/browserMcp.ts');
 
 let passed = 0;
 const check = async (name, fn) => { await fn(); passed++; console.log(`PASS ${name}`); };
@@ -428,6 +429,59 @@ await check('T-G18 mergeBrowserTools routes browser_open and passes the url inpu
   // The url must be passed through to browserTools.call, not ignored.
   assert.deepEqual(calledWith?.input, { url: TARGET_URL }, `url이 browserTools.call에 전달되지 않았다: ${JSON.stringify(calledWith?.input)}`);
   assert.equal(result, 'opened', '결과가 browserTools.call 반환값과 다르다');
+});
+
+// ─── T-G19: runBrowserOpen isError → call throws (강사 경로 실패 전파) ──────
+await check('T-G19 runBrowserOpen isError propagates: call throws so local runtime sees failure', async () => {
+  // Fake host: live server up, fetchHead returns 404 for the requested path.
+  const LIVE_URL = 'http://127.0.0.1:9999/';
+  const fakeHost = {
+    openBrowser: async () => {},
+    screenshot: async () => null,
+    startLivePreview: async () => LIVE_URL,
+    livePreviewUrl: async () => LIVE_URL,
+    fetchHead: async (_url) => ({ ok: false, status: 404 }),
+    currentPage: async () => null,
+    openPages: async () => null,
+  };
+
+  const r = await runBrowserOpen(fakeHost, LIVE_URL + 'chalk/lesson-01/lesson.html');
+  assert.ok(r.isError, 'runBrowserOpen must return isError:true for 404');
+  assert.ok(r.content.some(b => b.type === 'text' && b.text.includes('파일이 없어요')),
+    `result text must mention 파일이 없어요: ${JSON.stringify(r.content)}`);
+
+  // Simulate what the instructor call() does: throw when isError.
+  const text = r.content.map(b => b.type === 'text' ? b.text : '').join('\n');
+  let threw = false;
+  try {
+    if (r.isError) throw new Error(text);
+  } catch {
+    threw = true;
+  }
+  assert.ok(threw, 'call must throw for isError result so local runtime marks tool as failed');
+});
+
+// ─── T-G20: runBrowserOpen #507 포트 교정 — 잘못된 포트 → 라이브 서버 주소로 교정 ─
+await check('T-G20 runBrowserOpen #507: wrong loopback port corrected to live server url', async () => {
+  const LIVE_URL = 'http://127.0.0.1:58085/';
+  let openedWith = null;
+  const fakeHost = {
+    openBrowser: async (url) => { openedWith = url; },
+    screenshot: async () => null,
+    // livePreviewUrl returns null initially → triggers #507 startLivePreview branch.
+    livePreviewUrl: async () => null,
+    startLivePreview: async () => LIVE_URL,
+    currentPage: async () => null,
+    openPages: async () => null,
+  };
+
+  const WRONG_PORT_URL = 'http://127.0.0.1:3000/';
+  const r = await runBrowserOpen(fakeHost, WRONG_PORT_URL);
+  assert.ok(!r.isError, `must succeed: ${JSON.stringify(r)}`);
+  const text = r.content.map(b => b.type === 'text' ? b.text : '').join('\n');
+  assert.ok(text.includes(LIVE_URL), `result must mention the corrected live url ${LIVE_URL}: ${text}`);
+  // #507 branch calls startLivePreview which opens the browser — openBrowser is NOT called.
+  assert.equal(openedWith, null, 'openBrowser must NOT be called when #507 startLivePreview handles it');
 });
 
 console.log(`\n${passed} tests passed`);
