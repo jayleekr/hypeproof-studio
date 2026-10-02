@@ -181,7 +181,7 @@ const blank = (v: unknown): boolean => typeof v !== 'string' || !v.trim();
  */
 export function checkLessonPedagogy(
   content: SessionDesign,
-  opts?: { parsedSteps?: ParsedStep[]; audienceTier?: string | null },
+  opts?: { parsedSteps?: ParsedStep[]; audienceTier?: string | null; planText?: string },
 ): PedagogyFinding[] {
   const findings: PedagogyFinding[] = [];
   const steps = Array.isArray(content.steps) ? content.steps : [];
@@ -235,7 +235,8 @@ export function checkLessonPedagogy(
     }
   }
 
-  // G2-9 duration_consistency — parsedSteps 있으면 활성화, 없으면 skip.
+  // v0: duration_consistency — parsedSteps 있으면 G2-9 판정, 없으면 항상 skip.
+  // opts 없는 호출(스택 확정 경로)에서도 이 skipped finding은 v0 동작을 그대로 유지한다.
   if (opts?.parsedSteps) {
     for (const f of checkDurationConsistency(opts.parsedSteps, content.duration_minutes ?? 0)) {
       findings.push(f);
@@ -253,44 +254,26 @@ export function checkLessonPedagogy(
     });
   }
 
-  // G3-4 closing_duration — parsedSteps 있으면 활성화.
-  if (opts?.parsedSteps) {
-    for (const f of checkClosingDuration(opts.parsedSteps)) {
-      findings.push(f);
-    }
-  } else {
-    findings.push({
-      check: 'g3_4_closing_duration',
-      severity: 'warn',
-      skipped: true,
-      message: '단계 시간 칸이 없어 정리 단계 시간을 확인하지 못했습니다.',
-      remedy: '계획서 단계에 시간 정보를 추가하세요.',
-      source: SRC_DURATION,
-    });
-  }
+  // 아래 항목들은 chalk 경로(opts)에서만 실행. opts 없는 스택 확정 경로는 위의 v0 항목만.
+  if (!opts) return findings;
 
-  // G3-1 instructor_ratio — parsedSteps 있으면 활성화.
-  if (opts?.parsedSteps) {
-    for (const f of checkInstructorRatio(opts.parsedSteps)) {
-      findings.push(f);
-    }
-  } else {
-    findings.push({
-      check: 'g3_1_instructor_ratio',
-      severity: 'warn',
-      skipped: true,
-      message: '교사/학습자 칸 없음 — 단계 계획서가 필요합니다.',
-      remedy: '계획서에서 교사·학습자 칸을 채우세요.',
-      source: SRC_DURATION,
-    });
-  }
-
-  // G1-* — audience_tier 있으면 활성화.
-  for (const f of checkG1Pedagogy(content, opts?.audienceTier ?? null)) {
+  // G3-4 closing_duration
+  for (const f of checkClosingDuration(opts.parsedSteps ?? [])) {
     findings.push(f);
   }
 
-  // G2-5, G2-7, G2-8, G2-11 — 칸/값 공간 미확정, 항상 skipped.
+  // G3-1 instructor_ratio
+  for (const f of checkInstructorRatio(opts.parsedSteps ?? [])) {
+    findings.push(f);
+  }
+
+  // G1-* — audience_tier 있으면 활성화.
+  const planText = opts.planText ?? null;
+  for (const f of checkG1Pedagogy(content, opts.audienceTier ?? null, planText)) {
+    findings.push(f);
+  }
+
+  // G2-5, G2-7, G2-8, G2-11 — 칸/값 공간 미확정, skipped.
   findings.push(
     {
       check: 'g2_5_atomic',
@@ -362,13 +345,7 @@ export function checkDurationConsistency(
       source: SRC_DURATION,
     }];
   }
-  return [{
-    check: 'duration_consistency',
-    severity: 'warn', skipped: false,
-    message: `단계 시간 합(${total}분)이 수업 시간(${durationMinutes}분)과 일치합니다.`,
-    remedy: '',
-    source: SRC_DURATION,
-  }];
+  return [];
 }
 
 /** G3-4: 정리 단계(마지막 단계) 시간이 10분 이상인지. */
@@ -402,14 +379,7 @@ export function checkClosingDuration(steps: ParsedStep[]): PedagogyFinding[] {
       source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
     }];
   }
-  return [{
-    check: 'g3_4_closing_duration',
-    severity: 'warn', skipped: false,
-    step_id: last.id,
-    message: `마지막 단계를 정리로 봄 — 정리 시간 ${last.durationMin}분이 10분 이상입니다.`,
-    remedy: '',
-    source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
-  }];
+  return [];
 }
 
 /** G3-1: 교사 설명이 학습자 행동보다 짧은지 (글자 수 기준). */
@@ -430,15 +400,6 @@ export function checkInstructorRatio(steps: ParsedStep[]): PedagogyFinding[] {
         source: '관문3-1 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
       });
     }
-  }
-  if (findings.length === 0 && steps.length > 0) {
-    findings.push({
-      check: 'g3_1_instructor_ratio',
-      severity: 'warn', skipped: false,
-      message: '모든 단계에서 교사 설명이 학습자 행동보다 짧거나 같습니다.',
-      remedy: '',
-      source: '관문3-1 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
-    });
   }
   return findings;
 }
@@ -484,7 +445,7 @@ function collectStepTexts(content: SessionDesign): string {
   return parts.join('\n');
 }
 
-function checkG1Pedagogy(content: SessionDesign, audienceTier: string | null): PedagogyFinding[] {
+function checkG1Pedagogy(content: SessionDesign, audienceTier: string | null, planText?: string | null): PedagogyFinding[] {
   const findings: PedagogyFinding[] = [];
 
   const skipAllReason =
@@ -512,7 +473,7 @@ function checkG1Pedagogy(content: SessionDesign, audienceTier: string | null): P
     return findings;
   }
 
-  const text = collectStepTexts(content);
+  const text = planText ?? collectStepTexts(content);
 
   for (const { check, pattern, message, remedy } of G1_PATTERNS) {
     if (pattern.test(text)) {

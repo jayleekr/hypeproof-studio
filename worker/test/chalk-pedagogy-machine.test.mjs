@@ -57,12 +57,10 @@ function t(label, fn) {
 
 console.log('=== G2-9 duration_consistency ===');
 
-t('G2-9 양성: 합 = duration_minutes → skipped false, 경고 없음', () => {
+t('G2-9 양성: 합 = duration_minutes → finding 0개 (통과는 아무것도 내지 않음)', () => {
   const steps = [mkParsedStep('s1', 30), mkParsedStep('s2', 30), mkParsedStep('s3', 30)];
   const findings = checkDurationConsistency(steps, 90);
-  const f = findings[0];
-  assert.ok(!f.skipped, 'should not be skipped');
-  assert.ok(!findings.some(x => !x.skipped === false || x.message.includes('차이')), 'no diff warning');
+  assert.equal(findings.length, 0, `expected 0 findings, got: ${JSON.stringify(findings)}`);
 });
 
 t('G2-9 초과: 합이 12분 초과 → warn, blocks_confirm false, item G2-9 (fromPedagogyFinding 통해)', () => {
@@ -101,12 +99,10 @@ t('DURATION_TOLERANCE_MIN = 10', () => {
 
 console.log('=== G3-4 closing_duration ===');
 
-t('G3-4 양성: 마지막 단계 durationMin = 10 → skipped false, warn 없음 (diff 없음)', () => {
+t('G3-4 양성: 마지막 단계 durationMin = 10 → finding 0개 (통과는 아무것도 내지 않음)', () => {
   const steps = [mkParsedStep('s1', 20), mkParsedStep('s2', 10)];
   const findings = checkClosingDuration(steps);
-  assert.equal(findings.length, 1);
-  assert.ok(!findings[0].skipped);
-  assert.ok(!findings[0].message.includes('미만'), `message: ${findings[0].message}`);
+  assert.equal(findings.length, 0, `expected 0 findings, got: ${JSON.stringify(findings)}`);
 });
 
 t('G3-4 경고: 마지막 단계 durationMin = 8 → warn, "마지막 단계를 정리로 봄" 포함', () => {
@@ -261,29 +257,29 @@ t('SRC_* 문자열이 item 값으로 나오지 않음 (lesson-pedagogy findings.
 
 console.log('=== skipped 항목 이유 ===');
 
-t('G2-5 skipped reason 포함', () => {
-  const findings = checkLessonPedagogy(BASE_CONTENT);
+t('G2-5 skipped reason 포함 (opts 있어야 새 항목 돌아감)', () => {
+  const findings = checkLessonPedagogy(BASE_CONTENT, { parsedSteps: [] });
   const f = findCheck(findings, 'g2_5_atomic')[0];
-  assert.ok(f.skipped);
+  assert.ok(f && f.skipped, `expected skipped finding, got: ${JSON.stringify(f)}`);
   assert.ok(f.message.includes('활동 원자(act-*) 미적재'), f.message);
   assert.ok(f.message.includes('KPS Q4'), f.message);
 });
 
-t('G2-7 skipped reason 포함', () => {
-  const f = findCheck(checkLessonPedagogy(BASE_CONTENT), 'g2_7_forbids')[0];
-  assert.ok(f.skipped);
+t('G2-7 skipped reason 포함 (opts 있어야 새 항목 돌아감)', () => {
+  const f = findCheck(checkLessonPedagogy(BASE_CONTENT, { parsedSteps: [] }), 'g2_7_forbids')[0];
+  assert.ok(f && f.skipped, `expected skipped finding, got: ${JSON.stringify(f)}`);
   assert.ok(f.message.includes('forbids 값 공간 미확정(KPS Q4)'), f.message);
 });
 
-t('G2-8 skipped reason 포함', () => {
-  const f = findCheck(checkLessonPedagogy(BASE_CONTENT), 'g2_8_placement')[0];
-  assert.ok(f.skipped);
+t('G2-8 skipped reason 포함 (opts 있어야 새 항목 돌아감)', () => {
+  const f = findCheck(checkLessonPedagogy(BASE_CONTENT, { parsedSteps: [] }), 'g2_8_placement')[0];
+  assert.ok(f && f.skipped, `expected skipped finding, got: ${JSON.stringify(f)}`);
   assert.ok(f.message.includes('배치 규칙 칸이 계획서·저장 형식에 없음'), f.message);
 });
 
-t('G2-11 skipped reason 포함', () => {
-  const f = findCheck(checkLessonPedagogy(BASE_CONTENT), 'g2_11_safety')[0];
-  assert.ok(f.skipped);
+t('G2-11 skipped reason 포함 (opts 있어야 새 항목 돌아감)', () => {
+  const f = findCheck(checkLessonPedagogy(BASE_CONTENT, { parsedSteps: [] }), 'g2_11_safety')[0];
+  assert.ok(f && f.skipped, `expected skipped finding, got: ${JSON.stringify(f)}`);
   assert.ok(f.message.includes('safety 칸이 계획서·저장 형식에 없음'), f.message);
 });
 
@@ -322,6 +318,26 @@ t('새 항목 severity = warn (G2-9 포함)', () => {
   const steps = [mkParsedStep('s1', 60), mkParsedStep('s2', 45)];
   const findings = checkDurationConsistency(steps, 90);
   assert.equal(findings[0].severity, 'warn');
+});
+
+// ── opts 없는 호출 회귀 (v0 동일성) ────────────────────────────────────────────
+
+console.log('=== opts-less 회귀 (새 항목 없음) ===');
+
+t('opts 없으면 G2-5/G2-7/G2-8/G2-11 finding 없음', () => {
+  const findings = checkLessonPedagogy(BASE_CONTENT);
+  assert.equal(findCheck(findings, 'g2_5_atomic').length, 0, 'G2-5 must not appear without opts');
+  assert.equal(findCheck(findings, 'g2_7_forbids').length, 0, 'G2-7 must not appear without opts');
+  assert.equal(findCheck(findings, 'g2_8_placement').length, 0, 'G2-8 must not appear without opts');
+  assert.equal(findCheck(findings, 'g2_11_safety').length, 0, 'G2-11 must not appear without opts');
+});
+
+t('opts 없으면 G3-1/G3-4/G1-* finding 없음', () => {
+  const findings = checkLessonPedagogy(BASE_CONTENT);
+  assert.equal(findCheck(findings, 'g3_1_instructor_ratio').length, 0, 'G3-1 must not appear without opts');
+  assert.equal(findCheck(findings, 'g3_4_closing_duration').length, 0, 'G3-4 must not appear without opts');
+  const g1Items = findings.filter(f => f.check.startsWith('g1_'));
+  assert.equal(g1Items.length, 0, `G1-* must not appear without opts: ${JSON.stringify(g1Items)}`);
 });
 
 // ── 요약 ───────────────────────────────────────────────────────────────────────

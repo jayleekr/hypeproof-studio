@@ -627,6 +627,8 @@ function runPlanCheck(
 
   let derivedPrerequisites: string | null = null;
   let parsedSteps: import('../lib/chalk-plan/types.ts').ParsedStep[] | undefined;
+  let parsedPlanText: string | undefined;
+  let parsedAudienceTier: string | null | undefined;
 
   if (htmlOverride !== undefined) {
     const parsed = parsePlan(htmlOverride, 'lesson');
@@ -639,7 +641,15 @@ function runPlanCheck(
       derivedPrerequisites = parsed.meta.prerequisites;
     }
     parsedSteps = parsed.steps;
+    // Strip tags from full HTML for G1 text checks.
+    parsedPlanText = htmlOverride.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    // Use parsed audienceTier when caller did not supply one.
+    if (audienceTier === undefined && parsed.meta.audienceTier) {
+      parsedAudienceTier = parsed.meta.audienceTier;
+    }
   }
+
+  const effectiveAudienceTier = audienceTier !== undefined ? audienceTier : (parsedAudienceTier ?? null);
 
   let content: SessionDesign | null = null;
   try {
@@ -663,7 +673,12 @@ function runPlanCheck(
     ? { ...content, prerequisites: derivedPrerequisites }
     : content;
 
-  const pedagogyFindings = checkLessonPedagogy(checkContent, { parsedSteps, audienceTier });
+  const pedagogyFindings = checkLessonPedagogy(
+    checkContent,
+    parsedSteps !== undefined
+      ? { parsedSteps, audienceTier: effectiveAudienceTier, planText: parsedPlanText }
+      : undefined,
+  );
   for (const f of pedagogyFindings) {
     results.push(fromPedagogyFinding(f));
   }
