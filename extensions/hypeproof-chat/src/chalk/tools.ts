@@ -707,8 +707,10 @@ export async function execRecordJudgement(
     [k: string]: unknown;
   };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
-  const model = ctx.currentModel ?? "claude-sonnet-4-6";
-  const body = { ...rest, model };
+  if (!ctx.currentModel) {
+    return { error: "model_unknown", message: "모델 정보를 알 수 없어 판정을 저장하지 않았습니다." };
+  }
+  const body = { ...rest, model: ctx.currentModel };
   try {
     return await issuerFetch(
       ctx,

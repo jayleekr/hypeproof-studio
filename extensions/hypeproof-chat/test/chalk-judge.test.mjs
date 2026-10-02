@@ -108,26 +108,24 @@ await check('TJ-04 execRecordJudgement posts to correct route and fills model fr
   });
 });
 
-// ─── TJ-05: execRecordJudgement — currentModel 없으면 fallback ───────────────
-await check('TJ-05 execRecordJudgement uses fallback model when currentModel absent', async () => {
-  let capturedBody = null;
+// ─── TJ-05: execRecordJudgement — currentModel 없으면 POST 안 보내고 오류 반환 ──
+await check('TJ-05 execRecordJudgement returns model_unknown error when currentModel absent', async () => {
+  let serverCalled = false;
   await withMockServer((req, res) => {
-    let body = '';
-    req.on('data', d => { body += d; });
-    req.on('end', () => {
-      try { capturedBody = JSON.parse(body); } catch {}
-      res.writeHead(201, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ judgement_id: 'j_fallback' }));
-    });
+    serverCalled = true;
+    res.writeHead(201, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ judgement_id: 'j_should_not_appear' }));
   }, async (port) => {
     // currentModel 없는 ctx
-    await execRecordJudgement(fakeCtx(port), {
+    const result = await execRecordJudgement(fakeCtx(port), {
       cohort: 'sk-kids', course: 'lesson-01',
       check: 'G2-2', plan_sha256: 'abc', revision: 1,
       prompt_id: 'G2-2', prompt_version: 1,
       verdict: 'pass', rationale: '좋음',
     });
-    assert.ok(typeof capturedBody?.model === 'string' && capturedBody.model.length > 0, 'model must be non-empty');
+    assert.equal(serverCalled, false, 'server must not be called when currentModel absent');
+    assert.equal(result.error, 'model_unknown');
+    assert.ok(typeof result.message === 'string' && result.message.length > 0);
   });
 });
 
@@ -137,7 +135,7 @@ await check('TJ-06 human_only 400 returns structured error, not throw', async ()
     res.writeHead(400, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ code: 'human_only', error: 'G2-12은 사람이 확인하는 항목입니다.' }));
   }, async (port) => {
-    const result = await execRecordJudgement(fakeCtx(port), {
+    const result = await execRecordJudgement(fakeCtx(port, { currentModel: 'claude-sonnet-4-6' }), {
       cohort: 'sk-kids', course: 'lesson-01',
       check: 'G2-12', plan_sha256: 'abc', revision: 1,
       prompt_id: 'G2-12', prompt_version: 1,
@@ -154,7 +152,7 @@ await check('TJ-07 other 400 from record returns { error, message }', async () =
     res.writeHead(400, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ code: 'unknown_plan', error: '계획 SHA256 불일치' }));
   }, async (port) => {
-    const result = await execRecordJudgement(fakeCtx(port), {
+    const result = await execRecordJudgement(fakeCtx(port, { currentModel: 'claude-sonnet-4-6' }), {
       cohort: 'sk-kids', course: 'lesson-01',
       check: 'G2-2', plan_sha256: 'wrong', revision: 1,
       prompt_id: 'G2-2', prompt_version: 1,
@@ -173,7 +171,7 @@ await check('TJ-08 server 500 from record throws IssuerHttpError', async () => {
     res.end(JSON.stringify({ error: 'internal server error' }));
   }, async (port) => {
     await assert.rejects(
-      () => execRecordJudgement(fakeCtx(port), {
+      () => execRecordJudgement(fakeCtx(port, { currentModel: 'claude-sonnet-4-6' }), {
         cohort: 'sk-kids', course: 'lesson-01',
         check: 'G2-2', plan_sha256: 'abc', revision: 1,
         prompt_id: 'G2-2', prompt_version: 1,
