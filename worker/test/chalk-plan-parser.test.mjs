@@ -331,7 +331,7 @@ const BIOPHARM_SAMPLE = `<!DOCTYPE html>
 // evidence lesson.html (증거 파일): head에 chalk:prerequisites 없고 표에만 있음 — before-fix 시나리오
 import { readFileSync } from 'node:fs';
 const EVIDENCE_HTML = readFileSync(
-  '/Users/jj_home/Git/HypeProof/_worklog/chalk/po/evidence-1306-20261002/lesson.html', 'utf8'
+  new URL('./fixtures/chalk-plan/evidence-1306-lesson.html', import.meta.url), 'utf8'
 );
 const EVIDENCE_TABLE_PREREQ = 'AI 사용 경험·바이오 지식 불필요 (선행지식 없이 시작 가능). 준비물: 짝당 AI 도구가 열린 기기 1대';
 
