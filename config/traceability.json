@@ -2885,6 +2885,19 @@
       ]
     },
     {
+      "id": "ST-TEST-CHALK-PEDAGOGY-MACHINE",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-pedagogy-machine.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-SX-P1",
       "stage": "implementation",
       "owner": "jayleekr",

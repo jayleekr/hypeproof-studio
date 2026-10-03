@@ -54,12 +54,27 @@
 // 통과가 아니다.
 
 import type { SessionDesign } from './session-design.ts';
+import type { ParsedStep } from './chalk-plan/types.ts';
 
 export const PEDAGOGY_CHECKS = [
   'step_acceptance',
   'lesson_prerequisites',
   'step_evidence',
   'duration_consistency',
+  'g1_1_type',
+  'g1_2_rank',
+  'g1_3_total_score',
+  'g1_4_credential',
+  'g1_5_expert',
+  'g1_6_peer_comparison',
+  'g1_7_consent',
+  'g1_8_model_age',
+  'g2_5_atomic',
+  'g2_7_forbids',
+  'g2_8_placement',
+  'g2_11_safety',
+  'g3_1_instructor_ratio',
+  'g3_4_closing_duration',
 ] as const;
 export type PedagogyCheck = (typeof PEDAGOGY_CHECKS)[number];
 
@@ -164,7 +179,10 @@ const blank = (v: unknown): boolean => typeof v !== 'string' || !v.trim();
  * 입력은 `validateSessionDesign`을 이미 통과한 content다 — 형태 검증은 하지 않고
  * 교육 설계만 본다. 아무것도 변경하지 않으며, 순서가 안정적인 배열을 돌려준다.
  */
-export function checkLessonPedagogy(content: SessionDesign): PedagogyFinding[] {
+export function checkLessonPedagogy(
+  content: SessionDesign,
+  opts?: { parsedSteps?: ParsedStep[]; audienceTier?: string | null; planText?: string },
+): PedagogyFinding[] {
   const findings: PedagogyFinding[] = [];
   const steps = Array.isArray(content.steps) ? content.steps : [];
 
@@ -217,21 +235,259 @@ export function checkLessonPedagogy(content: SessionDesign): PedagogyFinding[] {
     }
   }
 
-  // warn 2 — 단계 시간 합계가 수업 시간과 맞는가.
-  // v0에서는 항상 skip이다: hps-session-design/1의 step에 시간 필드가 없다.
-  // 제목의 "(15분)" 같은 표기를 파싱할 수도 있지만, 그것은 생성기 하나의 관례이지
-  // 스키마 계약이 아니다 — 짐작으로 판정 기준을 세우지 않는다
-  // (.claude/rules/verification.md 규칙 1).
-  findings.push({
-    check: 'duration_consistency',
-    severity: 'warn',
-    skipped: true,
-    message:
-      '단계별 시간이 스키마에 없어 수업 시간과의 정합을 확인하지 못했습니다. 통과가 아니라 미확인입니다.',
-    remedy:
-      `단계 시간 검사를 켜려면 steps[]에 시간 필드가 필요합니다. 칸이 생기면 ±${DURATION_TOLERANCE_MIN}분으로 판정합니다. 필드 추가는 저작 화면의 미확인 필드 보존(#1036)이 먼저입니다.`,
-    source: SRC_DURATION,
-  });
+  // v0: duration_consistency — parsedSteps 있으면 G2-9 판정, 없으면 항상 skip.
+  // opts 없는 호출(스택 확정 경로)에서도 이 skipped finding은 v0 동작을 그대로 유지한다.
+  if (opts?.parsedSteps) {
+    for (const f of checkDurationConsistency(opts.parsedSteps, content.duration_minutes ?? 0)) {
+      findings.push(f);
+    }
+  } else {
+    findings.push({
+      check: 'duration_consistency',
+      severity: 'warn',
+      skipped: true,
+      message:
+        '단계별 시간이 스키마에 없어 수업 시간과의 정합을 확인하지 못했습니다. 통과가 아니라 미확인입니다.',
+      remedy:
+        `단계 시간 검사를 켜려면 steps[]에 시간 필드가 필요합니다. 칸이 생기면 ±${DURATION_TOLERANCE_MIN}분으로 판정합니다. 필드 추가는 저작 화면의 미확인 필드 보존(#1036)이 먼저입니다.`,
+      source: SRC_DURATION,
+    });
+  }
+
+  // 아래 항목들은 chalk 경로(opts)에서만 실행. opts 없는 스택 확정 경로는 위의 v0 항목만.
+  if (!opts) return findings;
+
+  // G3-4 closing_duration
+  for (const f of checkClosingDuration(opts.parsedSteps ?? [])) {
+    findings.push(f);
+  }
+
+  // G3-1 instructor_ratio
+  for (const f of checkInstructorRatio(opts.parsedSteps ?? [])) {
+    findings.push(f);
+  }
+
+  // G1-* — audience_tier 있으면 활성화.
+  const planText = opts.planText ?? null;
+  for (const f of checkG1Pedagogy(content, opts.audienceTier ?? null, planText)) {
+    findings.push(f);
+  }
+
+  // G2-5, G2-7, G2-8, G2-11 — 칸/값 공간 미확정, skipped.
+  findings.push(
+    {
+      check: 'g2_5_atomic',
+      severity: 'warn', skipped: true,
+      message: '활동 원자(act-*) 미적재 — 값 공간 미확정(KPS Q4)',
+      remedy: '활동 원자 ID를 단계에 연결하세요.',
+      source: '관문2-5 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    },
+    {
+      check: 'g2_7_forbids',
+      severity: 'warn', skipped: true,
+      message: 'forbids 값 공간 미확정(KPS Q4)',
+      remedy: 'forbids 값 공간이 확정되면 자동 검사됩니다.',
+      source: '관문2-7 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    },
+    {
+      check: 'g2_8_placement',
+      severity: 'warn', skipped: true,
+      message: '배치 규칙 칸이 계획서·저장 형식에 없음',
+      remedy: '배치 규칙 칸이 생기면 자동 검사됩니다.',
+      source: '관문2-8 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    },
+    {
+      check: 'g2_11_safety',
+      severity: 'warn', skipped: true,
+      message: 'safety 칸이 계획서·저장 형식에 없음',
+      remedy: 'safety 링크 칸이 생기면 자동 검사됩니다.',
+      source: '관문2-11 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    },
+  );
+
+  return findings;
+}
+
+// ─── 순수 함수 (E3-1 ops 블록 재사용 대비) ────────────────────────────────────
+
+/** G2-9: 단계 시간 합계가 수업 시간과 ±10분 내인지. 모든 단계에 durationMin 있을 때만 판정. */
+export function checkDurationConsistency(
+  steps: ParsedStep[],
+  durationMinutes: number,
+): PedagogyFinding[] {
+  if (steps.length === 0) {
+    return [{
+      check: 'duration_consistency',
+      severity: 'warn', skipped: true,
+      message: '단계 없음 — 시간 합산 불가',
+      remedy: '단계를 추가하세요.',
+      source: SRC_DURATION,
+    }];
+  }
+  const missing = steps.filter((s) => s.durationMin == null);
+  if (missing.length > 0) {
+    return [{
+      check: 'duration_consistency',
+      severity: 'warn', skipped: true,
+      message: `시간 없는 단계 있음 — 합산 건너뜀 (${missing.length}개)`,
+      remedy: '모든 단계에 duration_min을 채우세요.',
+      source: SRC_DURATION,
+    }];
+  }
+  const total = steps.reduce((s, step) => s + (step.durationMin ?? 0), 0);
+  const diff = Math.abs(total - durationMinutes);
+  if (diff > DURATION_TOLERANCE_MIN) {
+    return [{
+      check: 'duration_consistency',
+      severity: 'warn',
+      message: `단계 시간 합(${total}분)이 수업 시간(${durationMinutes}분)과 ${diff}분 차이납니다 (허용 ±${DURATION_TOLERANCE_MIN}분).`,
+      remedy: '단계 시간 합이 수업 시간과 ±10분 내가 되도록 조정하세요.',
+      source: SRC_DURATION,
+    }];
+  }
+  return [];
+}
+
+/** G3-4: 정리 단계(마지막 단계) 시간이 10분 이상인지. */
+export function checkClosingDuration(steps: ParsedStep[]): PedagogyFinding[] {
+  const last = steps.at(-1);
+  if (!last) return [{
+    check: 'g3_4_closing_duration',
+    severity: 'warn', skipped: true,
+    message: '단계 없음 — 정리 단계 확인 불가',
+    remedy: '단계를 추가하세요.',
+    source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+  }];
+  if (last.durationMin == null) {
+    return [{
+      check: 'g3_4_closing_duration',
+      severity: 'warn', skipped: true,
+      message: '마지막 단계에 시간 정보 없음 — 정리 단계 시간 확인 불가',
+      remedy: '마지막 단계에 duration_min을 채우세요.',
+      source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    }];
+  }
+  if (last.durationMin < 10) {
+    return [{
+      check: 'g3_4_closing_duration',
+      severity: 'warn',
+      step_id: last.id,
+      message: `마지막 단계를 정리로 봄 — 정리 시간 ${last.durationMin}분이 10분 미만입니다.`,
+      remedy: '정리 단계를 10분 이상으로 늘리세요.',
+      source: '관문3-4 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+    }];
+  }
+  return [];
+}
+
+/** G3-1: 교사 설명이 학습자 행동보다 짧은지 (글자 수 기준). */
+export function checkInstructorRatio(steps: ParsedStep[]): PedagogyFinding[] {
+  const findings: PedagogyFinding[] = [];
+  const stripTags = (s: string) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  for (const step of steps) {
+    const teacher = stripTags(step.cells.teacher ?? '');
+    const learner = stripTags(step.cells.learner ?? '');
+    if (!teacher && !learner) continue;
+    if (teacher.length > learner.length) {
+      findings.push({
+        check: 'g3_1_instructor_ratio',
+        severity: 'warn',
+        step_id: step.id,
+        message: `단계 "${step.title ?? step.id}" — 교사 설명(${teacher.length}자)이 학습자 행동(${learner.length}자)보다 깁니다.`,
+        remedy: '교사 역할을 줄이거나 학습자 활동을 늘려 학습자 중심 설계로 바꾸세요.',
+        source: '관문3-1 · curriculum_wiki/design/lesson-plan-quality-checklist.md',
+      });
+    }
+  }
+  return findings;
+}
+
+// ─── G1-* 텍스트 체크 ──────────────────────────────────────────────────────────
+
+const SRC_G1 = '관문1 · curriculum_wiki/design/lesson-plan-quality-checklist.md';
+
+const G1_PATTERNS: Array<{
+  check: PedagogyCheck;
+  pattern: RegExp;
+  message: string;
+  remedy: string;
+}> = [
+  {
+    check: 'g1_2_rank',
+    pattern: /순위|등수|랭킹|상위\s*\d+\s*%|또래와 비교/,
+    message: '아동 비교·순위 표현이 있습니다.',
+    remedy: '비교·순위 표현을 제거하고 개인 성장 중심 언어로 바꾸세요.',
+  },
+  {
+    check: 'g1_4_credential',
+    pattern: /자격증/,
+    message: '자격증 표현이 있습니다.',
+    remedy: '"자격증" 대신 "수료증" 또는 "이수증"을 쓰세요.',
+  },
+  {
+    check: 'g1_6_peer_comparison',
+    pattern: /뒤처|또래보다/,
+    message: '또래 비교 표현이 있습니다.',
+    remedy: '또래 비교 표현을 제거하고 개인 성장 언어로 바꾸세요.',
+  },
+];
+
+function collectStepTexts(content: SessionDesign): string {
+  const parts: string[] = [];
+  for (const step of content.steps ?? []) {
+    if (step.title) parts.push(step.title);
+    if (step.instructions) parts.push(step.instructions);
+    if (step.hint) parts.push(step.hint);
+    if (step.acceptance) parts.push(step.acceptance);
+  }
+  return parts.join('\n');
+}
+
+function checkG1Pedagogy(content: SessionDesign, audienceTier: string | null, planText?: string | null): PedagogyFinding[] {
+  const findings: PedagogyFinding[] = [];
+
+  const skipAllReason =
+    audienceTier == null ? '등급 없음' :
+    audienceTier === 'adult' ? '성인 수업' : null;
+
+  const skippedChecks: Array<{ check: PedagogyCheck; reason: string }> = [
+    { check: 'g1_1_type', reason: '패턴 판정 불가(문맥 판정 E2-5 후보)' },
+    { check: 'g1_3_total_score', reason: '문맥 판정(E2-5)' },
+    { check: 'g1_5_expert', reason: '계획서에 정보 없음' },
+    { check: 'g1_7_consent', reason: '패턴 판정 불가(문맥 판정 E2-5 후보)' },
+    { check: 'g1_8_model_age', reason: '패턴 판정 불가(문맥 판정 E2-5 후보)' },
+  ];
+
+  if (skipAllReason) {
+    for (const { check } of [...G1_PATTERNS, ...skippedChecks.map((s) => ({ check: s.check }))]) {
+      findings.push({
+        check,
+        severity: 'warn', skipped: true,
+        message: `G1 검사 건너뜀 — ${skipAllReason}`,
+        remedy: '',
+        source: SRC_G1,
+      });
+    }
+    return findings;
+  }
+
+  const text = planText ?? collectStepTexts(content);
+
+  for (const { check, pattern, message, remedy } of G1_PATTERNS) {
+    if (pattern.test(text)) {
+      findings.push({ check, severity: 'warn', message, remedy, source: SRC_G1 });
+    }
+  }
+
+  for (const { check, reason } of skippedChecks) {
+    findings.push({
+      check,
+      severity: 'warn', skipped: true,
+      message: `G1 검사 건너뜀 — ${reason}`,
+      remedy: '',
+      source: SRC_G1,
+    });
+  }
 
   return findings;
 }
