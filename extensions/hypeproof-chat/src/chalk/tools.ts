@@ -31,7 +31,7 @@ export interface ChalkToolContext {
    * `true` 반환 → 진행, `false` → 취소.
    */
   requestConfirmation?: (message: string) => Promise<boolean>;
-  /** #1466 (E2-7) — 현재 강사 대화에 선택된 모델 ID. chalk_record_feedback 자동 채움용. */
+  /** 현재 강사 대화에 선택된 모델 ID. chalk_record_feedback(E2-7)·chalk_record_judgement(E2-5) 자동 채움용. */
   currentModel?: string;
 }
 
@@ -647,6 +647,7 @@ export async function execSavePlan(
   }
 }
 
+<<<<<<< HEAD
 // ─── #1466 (E2-7) 도구 정의 ──────────────────────────────────────────────
 
 export const CHALK_RECORD_FEEDBACK_DEF: ChalkToolDefinition = {
@@ -714,6 +715,97 @@ export const CHALK_TOOL_DEFINITIONS_FEEDBACK: ChalkToolDefinition[] = [
   CHALK_VIEW_DIFF_DEF,
 ];
 
+=======
+// chalk_judge_items — GET /admin/chalk/cohorts/:cohort/courses/:course/judge-brief
+// (#1465 E2-5): returns 5 model-judged items with prompt text + plan excerpt.
+export const CHALK_JUDGE_ITEMS_DEF: ChalkToolDefinition = {
+  name: "chalk_judge_items",
+  description:
+    "저장된 계획서의 모델 판정 대상 항목(지시문+발췌)을 가져옵니다. G2-2·G2-3·G3-2·G1-3·hint_gives_answer 5개 항목. 각 항목을 발췌만 근거로 판정한 뒤 chalk_record_judgement로 저장합니다. G2-12·G3-6은 이 도구로 판정하지 않습니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execJudgeItems(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course } = input as { cohort: string; course: string };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  return issuerFetch(
+    ctx,
+    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/judge-brief`,
+  );
+}
+
+// chalk_record_judgement — POST /admin/chalk/cohorts/:cohort/courses/:course/judgements
+// (#1465 E2-5): stores a model judgement. model is filled from chalkCtx.currentModel.
+export const CHALK_RECORD_JUDGEMENT_DEF: ChalkToolDefinition = {
+  name: "chalk_record_judgement",
+  description:
+    "판정 결과를 서버에 저장합니다. check·plan_sha256·revision·prompt_id·prompt_version은 chalk_judge_items 응답에서 가져옵니다. model은 자동으로 채워집니다. G2-12·G3-6은 저장하지 않습니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      check: { ...str, description: "판정 항목 키 (예: G2-2)" },
+      plan_sha256: { ...str, description: "judge-brief에서 받은 plan_sha256" },
+      revision: { type: "integer", description: "judge-brief에서 받은 revision" },
+      prompt_id: { ...str, description: "judge-brief 항목의 prompt_id" },
+      prompt_version: { type: "integer", description: "judge-brief 항목의 prompt_version" },
+      verdict: {
+        type: "string",
+        enum: ["pass", "violation", "unsure"],
+        description: "판정 결과",
+      },
+      rationale: { ...str, description: "판정 근거 (2048자 이하)" },
+    },
+    ["cohort", "course", "check", "plan_sha256", "revision", "prompt_id", "prompt_version", "verdict", "rationale"],
+  ),
+};
+
+export async function execRecordJudgement(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, ...rest } = input as {
+    cohort: string;
+    course: string;
+    [k: string]: unknown;
+  };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  if (!ctx.currentModel) {
+    return { error: "model_unknown", message: "모델 정보를 알 수 없어 판정을 저장하지 않았습니다." };
+  }
+  const body = { ...rest, model: ctx.currentModel };
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/judgements`,
+      { method: "POST", body },
+    );
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      const b = e.body as Record<string, unknown> | null;
+      const code = typeof b?.code === "string" ? b.code : null;
+      const errMsg = typeof b?.error === "string" ? b.error : null;
+      if (e.status === 400 && code === "human_only") {
+        return { error: "human_only", message: "G2-12·G3-6은 사람이 직접 확인하는 항목입니다. chalk_record_judgement로 저장하지 않습니다." };
+      }
+      if (e.status === 400) {
+        return { error: code ?? "invalid_request", message: errMsg ?? "잘못된 요청입니다." };
+      }
+    }
+    throw e;
+  }
+}
+
+>>>>>>> origin/main
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
 
 export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
@@ -724,8 +816,13 @@ export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_GENERATOR_BRIEF_DEF,
   CHALK_OPEN_COURSE_DEF,
   CHALK_SAVE_PLAN_DEF,
+<<<<<<< HEAD
   CHALK_RECORD_FEEDBACK_DEF,
   CHALK_VIEW_DIFF_DEF,
+=======
+  CHALK_JUDGE_ITEMS_DEF,
+  CHALK_RECORD_JUDGEMENT_DEF,
+>>>>>>> origin/main
 ];
 
 type ExecutorMap = Record<
@@ -741,8 +838,13 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_generator_brief: execGeneratorBrief,
   chalk_open_course: execOpenCourse,
   chalk_save_plan: execSavePlan,
+<<<<<<< HEAD
   chalk_record_feedback: execRecordFeedback,
   chalk_view_diff: execViewDiff,
+=======
+  chalk_judge_items: execJudgeItems,
+  chalk_record_judgement: execRecordJudgement,
+>>>>>>> origin/main
 };
 
 /**

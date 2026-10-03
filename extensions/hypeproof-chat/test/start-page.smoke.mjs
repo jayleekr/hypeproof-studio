@@ -241,3 +241,33 @@ console.log('PASS activity folder choice: no candidate opens no dialog, cancel k
   fs.rmSync(tmp,{recursive:true,force:true});
 }
 console.log('PASS saved activity selection: record drives token/workspace, credential never reaches the UI, unknown ref and foreign Service refuse before forwarding');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ② shouldHideSidebar — tabGroups × chatViewVisible 네 경우
+// ③ openChat() — panel 있으면 openInEditor+started, 없으면 noop
+// ─────────────────────────────────────────────────────────────────────────────
+const {shouldHideSidebar}=module.exports;
+// (탭 없고 뷰 숨김) → 숨겨야 한다
+assert.equal(shouldHideSidebar([{tabs:[]}],false),true,'빈 탭 그룹+뷰 숨김인데 false');
+// (탭 있고 뷰 숨김) → 숨기지 않는다
+assert.equal(shouldHideSidebar([{tabs:[{}]}],false),false,'탭 있는데 true');
+// (탭 없고 뷰 보임) → 숨기지 않는다
+assert.equal(shouldHideSidebar([{tabs:[]}],true),false,'뷰 보이는데 true');
+// (그룹 없고 뷰 숨김) → 숨겨야 한다
+assert.equal(shouldHideSidebar([],false),true,'빈 그룹 배열+뷰 숨김인데 false');
+console.log('PASS shouldHideSidebar: tabGroups × chatViewVisible four cases');
+
+{
+  const startsBefore=starts;
+  page.started=false;
+  attach();
+  await page.openChat();
+  assert.equal(starts,startsBefore+1,'openChat()이 openInEditor를 안 불렀다');
+  assert.equal(page.panel,undefined,'openChat() 후 panel이 남아 있다');
+  assert.equal(page.started,true,'openChat() 후 started가 true가 아니다');
+  // panel 없으면 noop
+  page.started=false;
+  await page.openChat();
+  assert.equal(starts,startsBefore+1,'panel 없는데 openChat()이 openInEditor를 불렀다');
+  console.log('PASS openChat(): panel present calls openInEditor, absent is noop');
+}

@@ -23,9 +23,10 @@ REVIEW_COHORT_ARG=""
 NO_APP=0
 AFTER_SCRIPT=""
 DEV_APP_PID=""
+STUDENT_SESSION=0
 
 if [[ -z "$INPUT" ]]; then
-  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app]" >&2
+  echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>] [--profile <id>] [--cohort <id>] [--no-app] [--student-session]" >&2
   exit 1
 fi
 shift
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --cohort) REVIEW_COHORT_ARG="$2"; shift 2 ;;
     --no-app) NO_APP=1; shift ;;
     --after) AFTER_SCRIPT="$2"; shift 2 ;;
+    --student-session) STUDENT_SESSION=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -120,6 +122,8 @@ cleanup() {
   fi
   [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
   [[ -n "${HPS_DEV_ISSUER_TOKEN_FILE:-}" ]] && rm -f "$HPS_DEV_ISSUER_TOKEN_FILE" 2>/dev/null || true
+  # Student token file (--student-session): cleanup target, never survives the session.
+  rm -f "${WORKTREE_DIR}/student-token.txt" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
     echo "Removing worktree $WORKTREE_DIR..."
     git -C "$REPO" worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
@@ -171,6 +175,18 @@ if [[ -d "$STATE_DIR/user-data/User/workspaceStorage" ]]; then
   done < <(find "$STATE_DIR/user-data/User/workspaceStorage" -name "state.vscdb" -print0 2>/dev/null)
 fi
 [[ $TOTAL_DELETED -gt 0 ]] && echo "이전 대화 비움 (${TOTAL_DELETED}행)" || echo "지울 대화 없음"
+
+BINDINGS_DIR="$STATE_DIR/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+BINDINGS_DELETED=0
+STATE_DIR_REAL="$(realpath "$STATE_DIR" 2>/dev/null || true)"
+# Safety: only delete files when operating inside the Dev state folder.
+if [[ -n "$STATE_DIR_REAL" ]] && echo "$STATE_DIR_REAL" | grep -q "HypeProof Studio Development/" && [[ -d "$BINDINGS_DIR" ]]; then
+  while IFS= read -r -d '' f; do
+    rm -f "$f"
+    BINDINGS_DELETED=$((BINDINGS_DELETED + 1))
+  done < <(find "$BINDINGS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+fi
+[[ $BINDINGS_DELETED -gt 0 ]] && echo "이전 검수 폴더 연결 ${BINDINGS_DELETED}건 비움" || echo "지울 폴더 연결 없음"
 
 # ── Step 2: extension deps ────────────────────────────────────────────────────
 echo ""
@@ -350,13 +366,18 @@ if [[ "$COHORT_LINE_COUNT" -ne 1 || -z "$COHORT_ID" ]]; then
 fi
 echo "Profile: $PROFILE_ID  Cohort: $COHORT_ID"
 
+_ISSUE_ARGS=()
+if [[ "${STUDENT_SESSION:-0}" -eq 1 ]]; then
+  _ISSUE_ARGS+=(--can-start-session --max-session-hours 3)
+fi
 TOKEN_JSON="$(HPS_SIGNING_SECRET="$LOCAL_SECRET" \
   node --experimental-strip-types \
   "$WORKTREE_DIR/worker/scripts/issue-issuer-token.ts" \
   --instructor "jy-review-$$" \
   --cohorts "$COHORT_ID" \
   --profiles "$PROFILE_ID" \
-  --max-hours 4 --days 1 2>&1)"
+  --max-hours 4 --days 1 \
+  ${_ISSUE_ARGS[@]+"${_ISSUE_ARGS[@]}"} 2>&1)"
 
 TOKEN="$(echo "$TOKEN_JSON" | python3 -c "import sys,re; m=re.search(r'\"token\":\s*\"([^\"]+)\"', sys.stdin.read()); print(m.group(1) if m else '')" 2>/dev/null)"
 if [[ -z "$TOKEN" ]]; then
@@ -456,6 +477,43 @@ print(hashlib.sha256(str(Path(sys.argv[1]).resolve()).encode()).hexdigest()[:12]
   echo "  3. chalk_set_inputs 호출 시 로그에 찍힌 강의 ID(${DRAFT_COURSE})를 course 인자로 사용"
   echo ""
   echo "When done reviewing, press Ctrl+C to clean up."
+
+  # ── Student session (--student-session only) ─────────────────────────────────
+  if [[ "$STUDENT_SESSION" -eq 1 ]] && [[ -n "${ISSUER_TOKEN_FILE:-}" ]]; then
+    echo ""
+    echo "[+] Opening student session..."
+    _STUDENT_RESP_TMP="$(mktemp "$WORKTREE_DIR/.student-resp-XXXXXX.json")"
+    chmod 600 "$_STUDENT_RESP_TMP"
+    _AUTH_HEADER_TMP="$(mktemp "$WORKTREE_DIR/.auth-hdr-XXXXXX")"
+    chmod 600 "$_AUTH_HEADER_TMP"
+    printf 'Authorization: Bearer %s\n' "$(cat "$ISSUER_TOKEN_FILE")" > "$_AUTH_HEADER_TMP"
+    _STUDENT_HTTP_STATUS=""
+    _STUDENT_HTTP_STATUS="$(curl -s -X POST \
+      "http://127.0.0.1:${WRANGLER_PORT}/admin/cohorts/${COHORT_ID}/session/open" \
+      -H @"$_AUTH_HEADER_TMP" \
+      -H "Content-Type: application/json" \
+      -d "{\"profile_id\":\"${PROFILE_ID}\",\"user\":\"review-student-$$\",\"token_hours\":3,\"session_hours\":3}" \
+      -w "%{http_code}" -o "$_STUDENT_RESP_TMP" 2>&1)" || true
+    rm -f "$_AUTH_HEADER_TMP"
+    echo "[+] session/open HTTP ${_STUDENT_HTTP_STATUS}"
+    _STUDENT_TOKEN="$(python3 -c "
+import sys, json
+try:
+    d = json.load(open(sys.argv[1]))
+    print(d.get('token', ''))
+except Exception:
+    print('')
+" "$_STUDENT_RESP_TMP" 2>/dev/null)"
+    rm -f "$_STUDENT_RESP_TMP"
+    if [[ -n "$_STUDENT_TOKEN" ]]; then
+      (umask 077; printf '%s' "$_STUDENT_TOKEN" > "${WORKTREE_DIR}/student-token.txt")
+      chmod 0600 "${WORKTREE_DIR}/student-token.txt"
+      echo "[+] Student token written to ${WORKTREE_DIR}/student-token.txt"
+    else
+      echo "[!] Failed to extract student token (HTTP ${_STUDENT_HTTP_STATUS})" >&2
+    fi
+    unset _STUDENT_TOKEN
+  fi
 
   # ── 거짓 Ready guard: 15 s survival + initialization log check ──────────────
   if [[ -n "${DEV_APP_PID:-}" ]]; then

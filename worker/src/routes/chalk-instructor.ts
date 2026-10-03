@@ -27,7 +27,7 @@ chalkInstructor.get("/chalk/whoami", async (c) => {
 // chat turns. Stored server-side so updates reach all clients without a build.
 // Version is a monotonic integer; the client may cache and skip re-fetch when
 // the cached version matches.
-const INSTRUCTOR_BRIEF_VERSION = 5;
+const INSTRUCTOR_BRIEF_VERSION = 6;
 const INSTRUCTOR_BRIEF_TEXT = `You are an AI assistant helping a course instructor author Chalk lessons. Reply in Korean.
 
 Chalk lesson authoring workflow:
@@ -50,6 +50,7 @@ Rules:
 - To preview the lesson plan: call live_preview_start first (it returns the server URL), then call browser_open with the server URL + "/" + webPath returned by chalk_open_course (e.g. if server is "http://127.0.0.1:PORT/" and webPath is "chalk/lesson-01/lesson.html", open "http://127.0.0.1:PORT/chalk/lesson-01/lesson.html"). browser_open will check the file exists first.
 - audience_tier must be asked from the instructor directly. Do not infer it from the audience description or age range.
 - 바뀐 곳은 chalk_view_diff 결과에 있는 것만 말한다. 결과에 없는 변경을 지어내지 않는다.
+- Judgement (chalk_judge_items → chalk_record_judgement) is based solely on the plan excerpt from the brief. It is an informational notice and does not block confirmation. Do not judge G2-12 or G3-6.
 
 Student coach prompts do not apply here.`;
 
