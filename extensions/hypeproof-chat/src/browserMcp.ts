@@ -66,6 +66,34 @@ export const MCP_BROWSER_TOOLS = [
   MCP_BROWSER_TYPE,
 ] as const;
 
+/**
+ * Curriculum Runtime Experiment Browser tools (CR-04, CR-06). Granted only when the
+ * served profile has the CR switch on (CR-02; `permittedMcpToolsFor`), and registered
+ * only when granted. Short names match the proxy's CR_BROWSER_TOOLS one for one.
+ */
+export const MCP_BROWSER_OBSERVE = "mcp__hypeproof__browser_observe";
+export const MCP_BROWSER_SELECT = "mcp__hypeproof__browser_select";
+export const MCP_BROWSER_SCROLL = "mcp__hypeproof__browser_scroll";
+export const MCP_BROWSER_HOVER = "mcp__hypeproof__browser_hover";
+export const MCP_BROWSER_RELOAD = "mcp__hypeproof__browser_reload";
+export const MCP_CR_BROWSER_TOOLS = [
+  MCP_BROWSER_OBSERVE,
+  MCP_BROWSER_SELECT,
+  MCP_BROWSER_SCROLL,
+  MCP_BROWSER_HOVER,
+  MCP_BROWSER_RELOAD,
+] as const;
+
+/**
+ * AI Verify tools (cr-verify, CR-12–CR-16): the coach hands the runner a criterion's plan
+ * (`verify_criterion`) or proposes criteria the student must confirm
+ * (`verify_propose_criteria`). Same grant and switch as the CR browser tools; short names
+ * match the proxy's CR_VERIFY_TOOLS one for one.
+ */
+export const MCP_VERIFY_CRITERION = "mcp__hypeproof__verify_criterion";
+export const MCP_VERIFY_PROPOSE = "mcp__hypeproof__verify_propose_criteria";
+export const MCP_CR_VERIFY_TOOLS = [MCP_VERIFY_CRITERION, MCP_VERIFY_PROPOSE] as const;
+
 /** MCP CallToolResult content we produce (structural subset of the MCP SDK type). */
 export type McpContentBlock =
   | { type: "text"; text: string }
@@ -121,6 +149,11 @@ export interface BrowserMcpHost {
   /** Ensure the #309 live server + open the browser; returns the URL or null. */
   startLivePreview(): Promise<string | null>;
   /**
+   * HEAD-check a URL before opening it, so browser_open can surface a 404
+   * instead of opening a blank or error page. Optional — absent means skip check.
+   */
+  fetchHead?(url: string): Promise<{ ok: boolean; status: number }>;
+  /**
    * #507 — 지금 **떠 있는** 라이브 서버의 주소 (안 떠 있으면 null). 시작시키지
    * 않는다 — "주소가 뭐냐"를 묻는 것이 서버를 켜는 부작용을 가지면 안 된다.
    *
@@ -170,6 +203,55 @@ export interface BrowserMcpHost {
    * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
    */
   inspect?(name: string, input: Record<string, unknown>): Promise<McpToolResult | null>;
+  /**
+   * CR-02/CR-11 — is the Curriculum Runtime switch on for the served profile? With it on,
+   * agent browser actions stay on the student's own preview origin (`crScope`), and the
+   * CR executor's refusals are final: no tool falls back to a path that ignores scope.
+   */
+  crEnabled?(): boolean;
+  /** CR-11 — may an agent open `url`? Asked only while `crEnabled()` is true. */
+  crScope?(url: string): { ok: true } | { ok: false; reason: string };
+  /** cr-verify — run `verify_criterion` / `verify_propose_criteria` (VerifySession). */
+  verify?(name: string, input: Record<string, unknown>): Promise<McpToolResult>;
+}
+
+/**
+ * Tool name, description and JSON inputSchema for browser_open. Exported so the
+ * instructor local runtime can register the same tool definition without duplicating
+ * the description string.
+ */
+export const BROWSER_OPEN_TOOL_DEF = {
+  name: "browser_open",
+  description:
+    "통합 브라우저에서 URL을 연다. 학생의 라이브 프리뷰나 참고 사이트를 보여줄 때 사용. " +
+    "http(s)/localhost/file 주소만 허용되며, 실행 전 학생의 승인을 받는다. " +
+    "이미 같은 주소가 열려 있으면 다시 열지 않는다(탭 중복·승인 모달 반복 방지).",
+  inputSchema: { type: "object" as const, properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+} as const;
+
+/**
+ * Tool name, description and JSON inputSchema for live_preview_start. Exported for
+ * reuse in the instructor local runtime path (same handler, different call path).
+ */
+export const LIVE_PREVIEW_START_TOOL_DEF = {
+  name: "live_preview_start",
+  description:
+    "학생 워크스페이스를 로컬 라이브 서버(127.0.0.1)로 서빙하고 통합 브라우저에서 연다. " +
+    "파일이 바뀌면 자동 새로고침된다. 브라우저까지 열리므로 뒤이어 browser_open 을 부를 필요가 없다.",
+  inputSchema: { type: "object" as const, properties: {}, required: [], additionalProperties: false },
+} as const;
+
+/**
+ * CR-11 — the reason `browser_open` must refuse `url` with the switch on, or null. A
+ * loopback address while no live server runs is left to #507, which starts the student's
+ * own live server instead of opening the guessed port. Shared by canUseTool (so no
+ * approval modal is raised for a request that will be refused) and the handler.
+ */
+export async function crBrowserOpenRefusal(host: BrowserMcpHost, url: string): Promise<string | null> {
+  if (!host.crEnabled?.() || !host.crScope) return null;
+  if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) return null;
+  const v = host.crScope(url);
+  return v.ok ? null : v.reason;
 }
 
 /**
@@ -330,6 +412,140 @@ export interface ZodLike {
   string(): unknown;
   /** #457 — browser_type 의 submit 플래그용. */
   boolean?(): unknown;
+  /** CR-06 — for browser_scroll's dy. */
+  number?(): unknown;
+}
+
+/** `schema.optional()` when the injected zod schema has it (the real one); else as is. */
+function optionalSchema(schema: unknown): unknown {
+  const opt = (schema as { optional?: () => unknown } | null)?.optional;
+  return typeof opt === "function" ? opt.call(schema) : schema;
+}
+
+/**
+ * BrowserToolResult (text | image_url) → McpToolResult (text | image). One conversion for
+ * every delegated tool, so both coach runtimes see the same result (CR-03).
+ */
+export function toMcpToolResult(r: {
+  content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  isError: boolean;
+}): McpToolResult {
+  return {
+    content: r.content.map((b) =>
+      b.type === "text"
+        ? { type: "text" as const, text: b.text }
+        : {
+            type: "image" as const,
+            data: b.image_url.url.replace(/^data:[^,]*,/, ""),
+            mimeType: /^data:([^;,]+)/.exec(b.image_url.url)?.[1] ?? "image/jpeg",
+          },
+    ),
+    ...(r.isError ? { isError: true } : {}),
+  };
+}
+
+/**
+ * Core handler for browser_open — extracted from buildHypeproofMcpServer so the
+ * instructor local runtime path can reuse the same logic (404 check, #507 port
+ * correction, #415 duplicate suppression, #526 slot-displaced notice) without
+ * duplicating it. The MCP server factory.tool callback delegates here.
+ */
+export async function runBrowserOpen(host: BrowserMcpHost, raw: string): Promise<McpToolResult> {
+  const { url, current, alreadyOpen, redirectedFrom } = await resolveAlreadyOpen(host, raw);
+  if (!url) {
+    return {
+      content: [{ type: "text", text: `이 주소는 열 수 없어요: ${raw}` }],
+      isError: true,
+    };
+  }
+  const crRefused = await crBrowserOpenRefusal(host, url);
+  if (crRefused) return { content: [{ type: "text", text: crRefused }], isError: true };
+  if (alreadyOpen) {
+    const focused = await focusOpenPage(host, url);
+    return withPageState(
+      { content: [{ type: "text", text: `이미 브라우저에 열려 있어요 — 다시 열지 않았어요: ${url}` }] },
+      focused ?? current ?? null,
+    );
+  }
+  if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) {
+    const started = await host.startLivePreview();
+    if (started) {
+      return withPageState(
+        {
+          content: [
+            {
+              type: "text",
+              text:
+                `${url} 은(는) 이 Studio 의 주소가 아니에요 — 라이브 서버 포트는 실행할 때마다 ` +
+                `무작위로 정해집니다. 라이브 서버를 시작하고 브라우저에 열었어요: ${started}. ` +
+                `앞으로 미리보기는 이 주소를 그대로 쓰세요(포트를 추측하거나 참가자에게 묻지 마세요).`,
+            },
+          ],
+        },
+        { url: started },
+      );
+    }
+  }
+  if (host.crEnabled?.() && host.crScope) {
+    const v = host.crScope(url);
+    if (!v.ok) return { content: [{ type: "text", text: v.reason }], isError: true };
+  }
+  if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) !== null && host.fetchHead) {
+    try {
+      const head = await host.fetchHead(url);
+      if (!head.ok) {
+        return withPageState(
+          {
+            content: [{ type: "text", text: `파일이 없어요: ${url} (HTTP ${head.status}). chalk_open_course로 파일을 먼저 만드세요.` }],
+            isError: true,
+          },
+          await readCurrentPage(host),
+        );
+      }
+    } catch { /* timeout 등 → 기존 경로로 진행 */ }
+  }
+  let outcome: BrowserOpenOutcome | void;
+  try {
+    outcome = await host.openBrowser(url);
+  } catch (err) {
+    if (!host.crEnabled?.()) throw err;
+    return { content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }], isError: true };
+  }
+  const replaced = replacedPageOf(outcome, url);
+  const opened = redirectedFrom
+    ? `${redirectedFrom} 이 아니라 실제 라이브 서버 주소로 열었어요: ${url} ` +
+      `(포트는 실행할 때마다 달라집니다 — 추측하지 말고 이 주소를 쓰세요).`
+    : `브라우저에서 열었어요: ${url}`;
+  const text = replaced
+    ? `${opened}\n` +
+      `(참고: 같은 자리에 있던 ${replaced} 는 이 주소로 이동했어요 — ` +
+      `결과물 1개 · 참고 사이트 1개까지만 동시에 띄울 수 있어요. ` +
+      `둘을 비교하려면 번갈아 열어야 합니다.)`
+    : opened;
+  return withPageState({ content: [{ type: "text", text }] }, { url });
+}
+
+/**
+ * Core handler for live_preview_start — extracted so the instructor local runtime
+ * path can reuse the same logic. The MCP server factory.tool callback delegates here.
+ */
+export async function runLivePreviewStart(host: BrowserMcpHost): Promise<McpToolResult> {
+  const url = await host.startLivePreview();
+  if (!url) {
+    return withPageState(
+      {
+        content: [
+          { type: "text", text: "라이브 프리뷰를 시작하지 못했어요 (작업 폴더가 없나요?)." },
+        ],
+        isError: true,
+      },
+      await readCurrentPage(host),
+    );
+  }
+  return withPageState(
+    { content: [{ type: "text", text: `라이브 프리뷰를 시작하고 브라우저에 열었어요: ${url}` }] },
+    { url },
+  );
 }
 
 /**
@@ -342,96 +558,13 @@ export function buildHypeproofMcpServer(
   factory: SdkMcpFactory,
   z: ZodLike,
   host: BrowserMcpHost,
+  opts: { curriculumRuntime?: boolean } = {},
 ): unknown {
   const browserOpen = factory.tool(
-    "browser_open",
-    "통합 브라우저에서 URL을 연다. 학생의 라이브 프리뷰나 참고 사이트를 보여줄 때 사용. " +
-      "http(s)/localhost/file 주소만 허용되며, 실행 전 학생의 승인을 받는다. " +
-      "이미 같은 주소가 열려 있으면 다시 열지 않는다(탭 중복·승인 모달 반복 방지).",
+    BROWSER_OPEN_TOOL_DEF.name,
+    BROWSER_OPEN_TOOL_DEF.description,
     { url: z.string() },
-    async (args) => {
-      const raw = typeof args["url"] === "string" ? (args["url"] as string) : "";
-      // Belt over suspenders: canUseTool already ran the URL policy, but the
-      // handler re-validates so a policy bug can't turn into a hostile scheme.
-      const { url, current, alreadyOpen, redirectedFrom } = await resolveAlreadyOpen(host, raw);
-      if (!url) {
-        return {
-          content: [{ type: "text", text: `이 주소는 열 수 없어요: ${raw}` }],
-          isError: true,
-        };
-      }
-      // #415 — 이미 그 페이지가 떠 있으면 열지 않는다. 다시 열면 탭이 중복으로
-      // 생기고, 보고 있던 페이지가 리로드돼 스크롤·상태가 날아가고, 턴 예산이
-      // 깎인다. (승인 모달은 canUseTool 이 같은 판정으로 이미 건너뛴다.)
-      if (alreadyOpen) {
-        // #523 — 열지 않는다고 해서 **아무것도 안 해도 되는 게 아니다.** 그 탭을
-        // 코치의 운전 대상으로 고정하지 않으면 뒤이은 read/click/type 이 직전
-        // 타깃(다른 슬롯)에 붙어, 코치가 A 를 본다고 믿으며 B 를 읽는다.
-        const focused = await focusOpenPage(host, url);
-        // 상태 줄도 **매칭된 탭**으로 적는다. `current` 는 운전 중인 탭이라,
-        // 그대로 쓰면 한 결과 안에서 "A 가 열려 있다 / 현재 페이지는 B" 로
-        // 갈라진다 — 모델이 읽는 두 줄이 서로 다른 페이지를 말하게 된다.
-        return withPageState(
-          { content: [{ type: "text", text: `이미 브라우저에 열려 있어요 — 다시 열지 않았어요: ${url}` }] },
-          focused ?? current ?? null,
-        );
-      }
-      // #507 — 라이브 서버가 **안 떠 있는 걸 아는데** 코치가 루프백 주소를
-      // 요청했다면 그 주소는 반드시 틀렸다: 포트는 매 실행 무작위라 추측이 맞을
-      // 수 없다(실측 58085 vs 코치가 찍은 3000). 죽은 포트로 보내
-      // ERR_CONNECTION_REFUSED 를 보여주는 대신, 라이브 서버를 띄우고 **진짜
-      // 주소**를 알려준다. 호스트가 이 능력을 모르면(undefined) 손대지 않는다.
-      //
-      // 이 분기는 `host.openBrowser` 를 타지 않는다(라이브 프리뷰가 브라우저까지
-      // 연다) — 그래서 #526 의 "밀려남" 고지는 여기에 붙지 않는다.
-      if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) {
-        const started = await host.startLivePreview();
-        if (started) {
-          return withPageState(
-            {
-              content: [
-                {
-                  type: "text",
-                  text:
-                    `${url} 은(는) 이 Studio 의 주소가 아니에요 — 라이브 서버 포트는 실행할 때마다 ` +
-                    `무작위로 정해집니다. 라이브 서버를 시작하고 브라우저에 열었어요: ${started}. ` +
-                    `앞으로 미리보기는 이 주소를 그대로 쓰세요(포트를 추측하거나 참가자에게 묻지 마세요).`,
-                },
-              ],
-            },
-            { url: started },
-          );
-        }
-        // 시작 실패(작업 폴더 없음 등)는 아래 일반 경로로 떨어진다 — 여기서
-        // 멈추면 정상적인 루프백 요청까지 막힌다.
-      }
-      const outcome = await host.openBrowser(url);
-      // #526 — "열었어요"가 사실이 아닐 때가 있다. 슬롯당 탭 하나(#519)라서, 같은
-      // 슬롯에 탭이 있으면 그 탭이 **이 주소로 이동**한다 — 즉 보고 있던 페이지가
-      // 화면에서 사라진다. 결과가 그걸 말하지 않으면 코치는 참고 사이트 두 개가
-      // 나란히 떠 있다고 믿고 "왼쪽이 A, 오른쪽이 B" 같은 없는 화면을 설명한다
-      // (지어낸 성공 — R0 와 같은 실패 계열).
-      const replaced = replacedPageOf(outcome, url);
-      // #507 — 교정했으면 **말한다.** 조용히 바꾸면 코치는 다음 턴에도 같은 포트를
-      // 추측하고, 도구 결과와 자기 기억이 어긋난 채로 말한다.
-      const opened = redirectedFrom
-        ? `${redirectedFrom} 이 아니라 실제 라이브 서버 주소로 열었어요: ${url} ` +
-          `(포트는 실행할 때마다 달라집니다 — 추측하지 말고 이 주소를 쓰세요).`
-        : `브라우저에서 열었어요: ${url}`;
-      // 순서가 의미를 만든다 (#507 + #526 합류): **교정이 먼저**다. 교정은 코치가
-      // 방금 한 행동의 *대상 자체*를 바꾸는 정보라 먼저 읽혀야 하고, 밀려남은 그
-      // 행동의 부수 효과다. 뒤집으면 코치가 "밀려났구나"를 먼저 읽고 **잘못된
-      // 대상 위에서** 해석을 시작한다.
-      const text = replaced
-        ? `${opened}\n` +
-          `(참고: 같은 자리에 있던 ${replaced} 는 이 주소로 이동했어요 — ` +
-          `결과물 1개 · 참고 사이트 1개까지만 동시에 띄울 수 있어요. ` +
-          `둘을 비교하려면 번갈아 열어야 합니다.)`
-        : opened;
-      // 방금 연 주소가 곧 현재 상태다 (재조회는 탭이 아직 갱신 전일 수 있어
-      // 오히려 틀린 상태를 적을 위험이 있다).
-      return withPageState({ content: [{ type: "text", text }] }, { url });
-    },
+    async (args) => runBrowserOpen(host, typeof args["url"] === "string" ? (args["url"] as string) : ""),
   );
 
   const browserScreenshot = factory.tool(
@@ -451,6 +584,9 @@ export function buildHypeproofMcpServer(
       if (host.inspect) {
         const viaCdp = await host.inspect("browser_screenshot", {});
         if (viaCdp && !viaCdp.isError) return withPageState(viaCdp, await readCurrentPage(host));
+        // CR-11 — with the switch on the CR executor's refusal (out of scope, no version,
+        // a dialog open) is the answer; the fallback below would capture the tab anyway.
+        if (viaCdp && host.crEnabled?.()) return withPageState(viaCdp, await readCurrentPage(host));
       }
       const shot = await host.screenshot();
       if (!shot || !shot.imageBase64) {
@@ -479,32 +615,10 @@ export function buildHypeproofMcpServer(
   );
 
   const livePreviewStart = factory.tool(
-    "live_preview_start",
-    "학생 워크스페이스를 로컬 라이브 서버(127.0.0.1)로 서빙하고 통합 브라우저에서 연다. " +
-      "파일이 바뀌면 자동 새로고침된다. 브라우저까지 열리므로 뒤이어 browser_open 을 부를 필요가 없다.",
+    LIVE_PREVIEW_START_TOOL_DEF.name,
+    LIVE_PREVIEW_START_TOOL_DEF.description,
     {},
-    async () => {
-      const url = await host.startLivePreview();
-      if (!url) {
-        return withPageState(
-          {
-            content: [
-              { type: "text", text: "라이브 프리뷰를 시작하지 못했어요 (작업 폴더가 없나요?)." },
-            ],
-            isError: true,
-          },
-          await readCurrentPage(host),
-        );
-      }
-      // #415 — "라이브 프리뷰 시작: <url>" 만 돌려주면 모델은 이걸 "서버 주소를
-      // 받았다"로 읽고 곧바로 browser_open 을 부른다(2026-07-24 실사용에서 탭이
-      // 두 개 열리고 승인 모달로 턴이 2분 멈췄다). 결과 문장이 브라우저까지
-      // 열렸다는 사실을 직접 말해야 후속 open 이 필요 없어진다.
-      return withPageState(
-        { content: [{ type: "text", text: `라이브 프리뷰를 시작하고 브라우저에 열었어요: ${url}` }] },
-        { url },
-      );
-    },
+    async () => runLivePreviewStart(host),
   );
 
   // ── #457 검사 3종 ─────────────────────────────────────────────────────────
@@ -528,6 +642,10 @@ export function buildHypeproofMcpServer(
       await readCurrentPage(host),
     );
   };
+
+  /** cr-verify — delegated to the host's VerifySession, the one the proxy path runs (CR-03). */
+  const verifyOrFail = async (name: string, input: Record<string, unknown>): Promise<McpToolResult> =>
+    host.verify ? host.verify(name, input) : { content: [{ type: "text", text: "지금은 제품 테스트를 쓸 수 없어요." }], isError: true };
 
   const browserRead = factory.tool(
     "browser_read",
@@ -576,9 +694,70 @@ export function buildHypeproofMcpServer(
       ),
   );
 
+  // ── CR-04/CR-06 Experiment Browser tools, only behind the CR switch (CR-02) ──
+  const crTools: unknown[] = [];
+  if (opts.curriculumRuntime === true) {
+    const absent = "실험 브라우저 도구를 쓸 수 없어요. browser_observe로 다시 읽어보세요.";
+    crTools.push(
+      factory.tool(
+        "browser_observe",
+        "지금 페이지를 관찰한다: URL·경로, [ref=eN] 스냅샷, 화면 캡쳐, 뷰포트, 문서 세대, 이 문서의 콘솔·오류·실패한 요청, 산출물 버전.",
+        {},
+        async () => inspectOrFail("browser_observe", {}, absent),
+      ),
+      factory.tool(
+        "browser_select",
+        "ref 선택 상자(select)의 값을 고른다. value는 option의 value 또는 보이는 글자. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string(), value: z.string() },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail("browser_select", { ref: String(args["ref"] ?? ""), value: String(args["value"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_scroll",
+        "ref 요소가 보이게 스크롤한다. ref 없이 dy(픽셀)만 주면 페이지를 스크롤한다. 결과에 조작 뒤의 관찰이 온다.",
+        {
+          // Either field alone is valid, so both are optional where zod offers it.
+          ...(typeof z.number === "function" ? { dy: optionalSchema(z.number()) } : {}),
+          ref: optionalSchema(z.string()),
+        },
+        async (args: Record<string, unknown>) =>
+          inspectOrFail(
+            "browser_scroll",
+            { ...(args["ref"] ? { ref: String(args["ref"]) } : {}), ...(args["dy"] !== undefined ? { dy: Number(args["dy"]) } : {}) },
+            absent,
+          ),
+      ),
+      factory.tool(
+        "browser_hover",
+        "ref 요소 위에 마우스를 올린다. 결과에 조작 뒤의 관찰이 온다.",
+        { ref: z.string() },
+        async (args: Record<string, unknown>) => inspectOrFail("browser_hover", { ref: String(args["ref"] ?? "") }, absent),
+      ),
+      factory.tool(
+        "browser_reload",
+        "페이지를 새로 고친다. 새 문서가 되므로 이전 ref는 무효가 된다. 결과에 새로 고친 뒤의 관찰이 온다.",
+        {},
+        async () => inspectOrFail("browser_reload", {}, absent),
+      ),
+      // cr-verify — the runner, not the model, judges each criterion (CR-15).
+      factory.tool(
+        "verify_criterion",
+        "학생이 시작한 제품 테스트에서 기대 조건 하나를 실행한다. criterion_id와 plan(JSON 문자열 {steps, expect})을 준다. 러너가 미리보기를 새로 열어 단계를 실행하고 관찰로 판정한다.",
+        { criterion_id: z.string(), plan: z.string() },
+        async (args: Record<string, unknown>) => verifyOrFail("verify_criterion", { criterion_id: String(args["criterion_id"] ?? ""), plan: String(args["plan"] ?? "") }),
+      ),
+      factory.tool(
+        "verify_propose_criteria",
+        "학생에게 관찰 가능한 기대 조건 1~5개를 제안한다(criteria: JSON 배열 문자열). 학생이 확인해야 테스트에 쓰인다.",
+        { criteria: z.string() },
+        async (args: Record<string, unknown>) => verifyOrFail("verify_propose_criteria", { criteria: String(args["criteria"] ?? "") }),
+      ),
+    );
+  }
+
   return factory.createSdkMcpServer({
     name: HYPEPROOF_MCP_SERVER_NAME,
     version: "1.0.0",
-    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType],
+    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType, ...crTools],
   });
 }

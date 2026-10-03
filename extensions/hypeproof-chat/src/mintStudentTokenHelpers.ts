@@ -1,6 +1,8 @@
 // Pure helpers for the mint-student-token command (#66). Kept vscode-free so
 // they can be unit-tested under plain Node — mirrors updateCheckerHelpers.ts.
 
+import { adminBaseFrom } from "./chalk/serverBase.ts";
+
 export const ISSUER_TOKEN_KEY = "hypeproofChat.issuerToken";
 
 export interface MintRequest {
@@ -18,10 +20,10 @@ export interface MintResponse {
 
 /** Derive the admin-endpoint origin from the OpenAI-style proxyUrl.
  *  proxyUrl: https://api.hypeproof-ai.xyz/v1   →   https://api.hypeproof-ai.xyz
- *  Trailing `/v1` and any trailing slashes are stripped.
+ *  Delegates to adminBaseFrom (chalk/serverBase.ts) — single canonical impl.
  */
 export function adminBaseFor(proxyUrl: string): string {
-  return proxyUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+  return adminBaseFrom(proxyUrl);
 }
 
 /** Map a server error string to a friendly Korean line. */
@@ -90,7 +92,7 @@ export interface IssuerScope {
  * segments, not a 3-segment JWT. The payload is therefore parts[0].
  * Returns undefined for any unrecognized structure — never throws.
  */
-function decodeTokenPayload(token: string): Record<string, unknown> | undefined {
+export function decodeTokenPayload(token: string): Record<string, unknown> | undefined {
   try {
     const parts = token.split(".");
     if (parts.length !== 2) return undefined;

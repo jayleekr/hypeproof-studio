@@ -129,8 +129,9 @@ export function sendable(e: HelpEnvelope, binding: HelpBinding | null, assignmen
 }
 
 /** What an answer to the POST means. `stored` is the only outcome that says the request exists. */
-export function classifyPost(status: number, reason?: string): "stored" | "unknown" | "changed" | "conflict" | "expired" | "refused" {
+export function classifyPost(status: number, reason?: string): "stored" | "unknown" | "changed" | "conflict" | "expired" | "too_large" | "refused" {
   if (status === 200 || status === 201) return "stored";
+  if (status === 413) return "too_large";
   if (status === 409 && reason === "consent_expired") return "expired";
   if (status === 0 || status >= 500 || status === 429) return "unknown";
   if (status === 409 && (reason === "class_changed" || reason === "connection_changed" || reason === "recipient_not_assigned")) return "changed";

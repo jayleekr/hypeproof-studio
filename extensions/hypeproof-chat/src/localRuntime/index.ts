@@ -87,6 +87,41 @@ export function mergeChalkTools(
   };
 }
 
+/**
+ * Browser tools for the local (non-SDK) runtime — live_preview_start + browser_open.
+ * The host (chatPanelProvider) provides the implementations; this module only wires
+ * them into the tool list so they appear in every instructor turn uniformly.
+ */
+export interface BrowserToolsForLocal {
+  definitions: { name: string; description: string; inputSchema: unknown }[];
+  call(name: string, input: unknown): Promise<unknown>;
+}
+
+/** Append browser tools when provided (instructor mode only). */
+export function mergeBrowserTools(
+  tools: {
+    definitions: { name: string; description: string; inputSchema: unknown }[];
+    call: (n: string, i: unknown) => Promise<string>;
+  },
+  browserTools?: BrowserToolsForLocal,
+): {
+  definitions: { name: string; description: string; inputSchema: unknown }[];
+  call: (n: string, i: unknown) => Promise<string>;
+} {
+  if (!browserTools) return tools;
+  const browserNames = new Set(browserTools.definitions.map((d) => d.name));
+  return {
+    definitions: [...tools.definitions, ...browserTools.definitions],
+    call: async (name: string, input: unknown) => {
+      if (browserNames.has(name)) {
+        const result = await browserTools.call(name, input);
+        return typeof result === "string" ? result : JSON.stringify(result);
+      }
+      return tools.call(name, input);
+    },
+  };
+}
+
 export async function runLocalCoach(args: {
   config: LocalRuntimeConfig;
   profile: ResolvedProfile;
@@ -104,6 +139,8 @@ export async function runLocalCoach(args: {
   systemPrompt?: string;
   /** 강사 모드일 때만 넘긴다. 없으면 Chalk 도구를 AI 에 붙이지 않는다(SUB-06). */
   chalkCtx?: ChalkToolContext;
+  /** 강사 모드 browser tools (live_preview_start + browser_open). 없으면 붙이지 않는다. */
+  browserTools?: BrowserToolsForLocal;
 }) {
   const lifetime = new AbortController();
   const signal = AbortSignal.any([
@@ -120,7 +157,9 @@ export async function runLocalCoach(args: {
   });
 
   // Chalk 도구는 강사 모드(chalkCtx 있음)에서만 붙는다(SUB-06).
-  const tools = mergeChalkTools(workTools, args.chalkCtx);
+  const withChalk = mergeChalkTools(workTools, args.chalkCtx);
+  // Browser tools (live_preview_start + browser_open)은 강사 모드에서만 붙는다.
+  const tools = mergeBrowserTools(withChalk, args.browserTools);
   const system = args.systemPrompt ??
     ("You are the coach in a LOCAL DEVELOPMENT rehearsal of HypeProof Studio. Reply in Korean. Follow the supplied course. Only provided Studio file tools are available; do not claim shell, browser or deployment actions. Read existing files before changing them; preserve unrelated work. Never treat sample results as real customers.\n" +
     JSON.stringify({

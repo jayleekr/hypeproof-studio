@@ -79,7 +79,7 @@ G3 여러 세션 보고서·발송 → G4 이 통합 인수(실제 Mac 여정)�
 | G1-T6 메뉴 서랍 | 1024에서 메뉴 | 열면 뒤 화면 `inert`·포커스는 서랍 안, Esc로 닫고 ‘메뉴’로 포커스 | ① |
 | G1-T7 결과 카드 | 연결된 좌석 + 미연결 좌석 진단 | 첫 줄 “결과 확정 1 · 미확인 0 · 진행 중 1 / 2명 · 해결 확인 0 · 다음: …”, 학생별 짧은 상태, 펼치면 세부 근거, 실패만 다시 고르기는 명령 0건 | ⑤, `ops-results.mjs` |
 | G1-T8 마무리 단계 | 보고서·발송이 꺼진 수업 | 네 칸, 꺼진 단계는 ‘사용할 수 없음’과 이유, 미연결 경로 명시, 완료로 표시하지 않음 | ⑥ |
-| G1-T10 마무리 단계 판정 | ① 검토자의 대기만 있는 표시 픽스처(직접 렌더, 합성 표시) ② 실제 route: 실제 발송 배치에 기록 0건 ③ 평가기 미설정 ④ 3/4 검증 + 미연결 1, 평가기 거절 1, 초안 2건 중 1건 승인, 발송 승인만, 제공자 접수만 ⑤ 이전 묶음의 회수·작업·발송 응답을 잡아 두었다가 새 묶음 시작 뒤 도착 ⑥ 전원 검증·초안·승인·전달 확인 ⑦ 다시 읽기 실패와 회복 ⑧ 다른 수업 회차, 전원 동의 없음 | ①② 완료 없음, 진행 중·시작 전을 글자로 ③④ 일부만·확인 필요, 승인·접수는 발송 완료 아님 ⑤ 늦은 응답은 새 묶음을 표시하지 않고 이전 승인은 해제 ⑥ 3/4 전달은 일부만, 4/4에서만 ✓ 완료(배지 14px 이상, 대비 4.5 이상) ⑦ ? 확인 불가 + “마지막으로 읽은 값”, 다음 성공 읽기에서 복구 ⑧ 이전 회차 표시 없음, 대상 없음(완료 아님) | `e2e/classroom/ops-g1-wrap.mjs` A–G + 캡처 |
+| G1-T10 마무리 단계 판정 | ① 검토자의 대기만 있는 표시 픽스처(직접 렌더, 합성 표시) ② 실제 route: 실제 발송 배치에 기록 0건 ③ 평가기 미설정 ④ 3/4 검증 + 미연결 1, 평가기 거절 1, 초안 2건 중 1건 승인, 발송 승인만, 제공자 접수만 ⑤ 이전 묶음의 회수·작업·발송 응답을 잡아 두었다가 새 묶음 시작 뒤 도착 ⑥ 전원 검증·초안·승인·전달 확인 ⑦ 다시 읽기 실패와 회복 ⑧ 다른 수업 회차, 전원 동의 없음 ⑨ 검수자 격리(서비스 검수 route로 `quarantine` 결정): 발송 전·평가기 거절과 섞인 경우, 전달 확인 뒤 | ①② 완료 없음, 진행 중·시작 전을 글자로 ③④ 일부만·확인 필요, 승인·접수는 발송 완료 아님 ⑤ 늦은 응답은 새 묶음을 표시하지 않고 이전 승인은 해제 ⑥ 3/4 전달은 일부만, 4/4에서만 ✓ 완료(배지 14px 이상, 대비 4.5 이상) ⑦ ? 확인 불가 + “마지막으로 읽은 값”, 다음 성공 읽기에서 복구 ⑧ 이전 회차 표시 없음, 대상 없음(완료 아님) ⑨ “초안 실패”와 “검수에서 격리 N”을 따로 세고(격리만이면 초안·검수 ✓ 완료, “초안을 만들지 못한” 문구 없음), 목록 행은 “검수에서 격리됨”. 1–3단계·목록 행·작업 요약에 발송 추정 문구(보내지 않음·발송 대상에서 빠짐·전달 후 격리 등) 없음, 4단계 문장과 전달 목록은 격리 전과 같음 | `e2e/classroom/ops-g1-wrap.mjs` A–G, Q1–Q2 + 캡처 |
 | G1-T9 기존 계약 | 기존 브라우저 스위트 | classroom·ops·roster·selection·distribution·lesson-settings·help·results·report 전부 통과(바뀐 문구·위치만 시험 갱신) | CI `classroom-ops.yml` |
 
 기존 시험에서 바꾼 것은 **화면 위치·문구 기대값뿐**이다: 행의 원인 문장은 원인만(권장 조치는 상세 `앱이 보고한 상태`), 행의 조치 줄은 “조치: 이름 → 판정”
@@ -1432,3 +1432,30 @@ The latest instructor request supersedes the seven-column overview and green/lim
 These are local synthetic fixtures, not live students, production activation, real model evaluation or human visual acceptance of the original concept. The original concept is a design reference, not runtime evidence.
 
 Follow-up browser coverage for this revision: `test:classroom`, roster (7), selection (8), distribution (7), lesson settings (5), help, results (18), G1 wrap (8), authoring mission (7) and report rendering (4) passed locally. Tests open disclosures with real summary clicks and use the single refresh action. Additional findings fixed: connection-input contrast; old apps without step observation remain unknown; lesson binding/version is preserved in selected learner details; shared-outage guidance stays visible; mobile refresh remains reachable and disconnect appears with connection settings. Opening selection tools also reveals the composer without requiring a target, while sending still requires explicit selected-target confirmation.
+
+## Classroom stack regression corrections — 2026-10-02 (#1409)
+
+The nine reproduced defects are corrected against `8d2138e`. These are local
+synthetic-account results on macOS arm64 / Node 25.9, not production or classroom
+acceptance. Existing ADM/AT-47/AT-48 contracts govern the corrections.
+
+| Issue item | Regression evidence | Observed result |
+|---|---|---|
+| 1 stale cancel/discard | `classroom-help-host.smoke.mjs`, `e2e/classroom/help-request.mjs` | Replacement request survives; actual React buttons carry the displayed ID; matching actions still work |
+| 2 missing approved page | `collection-integrity.smoke.mjs`, `classroom-ops-collect-kinds.test.mjs` | Page bytes copied at approval, including restart; missing bytes give gaps instead of complete; withdrawn approval does not require the page |
+| 3 damaged record line | `classroom-ops-collect-kinds.test.mjs` | Matching malformed index/hash yields damaged; forged metadata and changed bytes remain rejected |
+| 4 committed store mutation replay | `classroom-help-store.smoke.mjs` | Draft and envelope linked-hook races apply once; pre-link stale writer, killed process, and expired receipt controls pass |
+| 5 Korean body budget | `classroom-help.test.mjs`, `classroom-help-host.smoke.mjs` | Full Korean and JSON-escaped fields accepted; overlong fields/body refused; 413 names the cause and keeps the draft |
+| 6 undated out-of-window fragment | `collection-integrity.smoke.mjs` | Leading/boundary fragments excluded; in-window damage and all-undated legacy behavior preserved |
+| 7 unlisted uploaded objects | `classroom-ops-collect-kinds.test.mjs` | Manifest extras quarantined/deleted; failed cleanup retry/reconcile, seal/PUT races, distinct and same-name concurrent PUT controls pass |
+| 8 legacy scope | `classroom-ops-reports.test.mjs` | Early review-required draft uses verified scope; legacy string input deletes runner-supplied scope |
+| 9 single-session copy | `classroom-ops-collect-kinds.test.mjs` | Report and guardian HTML describe one session without claiming a restart; multiple sessions are not assumed to mean a restart |
+
+Validation: Worker, extension and Chalk `npm test` passed. Worker/extension
+typechecks, extension/webview builds and docs checker (100/100) passed. Chromium
+help UI, instructor help queue, and guardian report desktop/mobile/200% rendering
+plus PDF passed. R2 conditional-write race tests model atomic preconditions in the
+local fixture; hosted R2/D1, a released App, Windows, school networks, real learners
+and production deployment are NOT RUN. The change adds no retention duration,
+consent grant or migration. Unrequested bytes are rejected under the existing
+collection contract.

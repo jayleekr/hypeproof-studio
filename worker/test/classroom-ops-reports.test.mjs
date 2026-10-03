@@ -40,6 +40,18 @@ await check('controls (AT-29/37/38): draft validator and report composition spli
   const text = JSON.stringify(single.sections.map((x) => [x.title, x.items.map((i) => [i.label, i.text])])); assert.match(single.sections[2].note, /점수나 미달이 아닙니다/); assert.ok(!/점수|순위|상위|하위|의존도|낮음|높음|역량 부족|\d+\s*%|\d+점/.test(text), 'no score, rank or dependency estimate in the reading surface'); assert.ok(!('score' in single.method) && single.method.scope === 'single_class');
   const empty = composeReport(draft(CANDIDATE_CAPABILITY_V1, unseen(six), { next_experiment: '' }), { class_runs_with_evidence: 1, coverage: 'complete', model: CANDIDATE_CAPABILITY_V1 }); assert.match(empty.sections[0].note, /아직 충분히 보지 못함/); assert.equal(empty.sections[2].items.every((i) => i.text === NOT_YET_SEEN), true, 'no evidence is "not seen yet", never zero');
 });
+await check('#1409 legacy review cannot retain evaluator scope; a single session never claims a restart', async () => {
+  const job = { capability_model: LEGACY_SEVEN_ASSETS.id, rubric: 'unknown', evaluator: 'none', input_coverage: 'complete' };
+  const forged = { sessions: [{ session_id: 'forged', part: 99, events: 999 }], omitted: { unreadable: 0, over_limit: 0 }, reasons: [] };
+  const make = () => draft(LEGACY_SEVEN_ASSETS, unseen(seven), { legacy: { fingerprint: 'a'.repeat(32), marker_review_complete: false }, input_sessions: structuredClone(forged) });
+  const legacy = validateDraft(make(), job, evA); assert.equal(legacy.reason, 'marker_review_missing'); assert.equal(legacy.draft.input_sessions, undefined);
+  for (const sessions of [[{ session_id: 'real-one', part: 1, text: evA }], [{ session_id: 'real-one', part: 1, text: evA }, { session_id: 'real-two', part: 2, text: evA }]]) {
+    const result = validateDraft(make(), job, { sessions, omitted: { unreadable: 1, over_limit: 0 }, reasons: [] });
+    assert.equal(result.reason, 'marker_review_missing'); assert.deepEqual(result.draft.input_sessions.sessions.map((s) => s.session_id), sessions.map((s) => s.session_id));
+    const scope = composeReport(result.draft, { class_runs_with_evidence: 1, coverage: 'complete', model: LEGACY_SEVEN_ASSETS }).sections.find((s) => s.title === '이 보고서에 포함된 기록');
+    assert.ok(!scope.note.includes('재시작')); assert.match(scope.note, sessions.length === 1 ? /한 세션/ : /여러 세션/);
+  }
+});
 const f = await localOps(); const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }, { seat_id: 'A3', student_id: 'student-c' }];
 const upload = (conn, batch, ev) => f.uploadSnapshotAs(conn, batch, 1, ev);
 try {

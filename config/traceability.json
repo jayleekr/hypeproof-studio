@@ -1163,6 +1163,10 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/pending-send.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/activity-resume.test.mjs",
+          "owner": "JinyongShin"
         }
       ]
     },
@@ -2070,6 +2074,12 @@
         },
         {
           "path": "e2e/classroom/g4-journey.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/collection-integrity.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/help-request.mjs"
         }
       ]
     },
@@ -2875,6 +2885,19 @@
       ]
     },
     {
+      "id": "ST-TEST-CHALK-PEDAGOGY-MACHINE",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-pedagogy-machine.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-SX-P1",
       "stage": "implementation",
       "owner": "jayleekr",
@@ -2925,6 +2948,320 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/evidenceDrawerLogic.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-INT-CR",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-SX",
+        "ST-INT-MEASUREMENT-CORE",
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/design/curriculum-runtime-prd-v1.0-2026-09-28.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CR",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CR",
+        "ST-REQ-SX",
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE",
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-REQ-VOICE-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Curriculum runtime proposal — 2026-09-29"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CR",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR"
+      ],
+      "sources": [
+        {
+          "path": "docs/plan/curriculum-runtime.md"
+        },
+        {
+          "path": "docs/plan/curriculum-runtime-recon.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CR-PUBLISH",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/curriculum.ts"
+        },
+        {
+          "path": "worker/src/routes/curriculum-test-origin.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/venture.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/store.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/publish-scan.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/test-origin.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/session-token.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/participant-record.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/participant-snippet.ts"
+        },
+        {
+          "path": "worker/migrations/0032-curriculum-runtime-publish.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishSet.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/publishView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/testQr.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/PublishPanel.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CR-EVIDENCE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-PUBLISH"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/measurement-core/participant-evidence.ts"
+        },
+        {
+          "path": "worker/src/lib/curriculum/retention.ts"
+        },
+        {
+          "path": "worker/src/routes/curriculum-admin.ts"
+        },
+        {
+          "path": "worker/migrations/0033-curriculum-runtime-evidence.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/EvidencePanel.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CR-MEMORY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-PUBLISH",
+        "ST-IMP-CR-EVIDENCE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/curriculum/memory.ts"
+        },
+        {
+          "path": "worker/migrations/0034-curriculum-runtime-memory.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/memorySession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/memoryView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/MemoryPanel.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CR-SKILLS",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-CR",
+        "ST-REQ-CR",
+        "ST-IMP-CR-EVIDENCE",
+        "ST-IMP-CR-MEMORY"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/skills/curriculum/registry.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/contract.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/rules.ts"
+        },
+        {
+          "path": "worker/src/skills/curriculum/curriculum-v5.json"
+        },
+        {
+          "path": "worker/src/lib/curriculum/skill-run.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/skillSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/skillView.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/SkillsPanel.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CR",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CR",
+        "ST-DES-CR",
+        "ST-IMP-CR-PUBLISH",
+        "ST-IMP-CR-EVIDENCE",
+        "ST-IMP-CR-MEMORY",
+        "ST-IMP-CR-SKILLS"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/curriculum-runtime.md"
+        },
+        {
+          "path": "worker/test/cr-traceability.test.mjs"
+        },
+        {
+          "path": "worker/test/cr-recon.test.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/cdp-probe.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-09-30-evidence.md"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-01-evidence.md"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-dev.md"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-evidence.md"
+        },
+        {
+          "path": "e2e/curriculum-runtime/publish-app.spec.ts"
+        },
+        {
+          "path": "worker/test/cr-publish.test.mjs"
+        },
+        {
+          "path": "worker/test/harness/curriculum.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-publish.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/test-qr.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/publish-panel.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/publish-runtime.real.mjs"
+        },
+        {
+          "path": "worker/test/cr-evidence.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-evidence.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-app.spec.ts"
+        },
+        {
+          "path": "e2e/curriculum-runtime/evidence-runtime.real.mjs"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-evidence-capture.md"
+        },
+        {
+          "path": "worker/test/cr-memory.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-memory.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/memory-app.spec.ts"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-memory.md"
+        },
+        {
+          "path": "worker/test/cr-skills.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/cr-skills.smoke.mjs"
+        },
+        {
+          "path": "e2e/curriculum-runtime/skills-app.spec.ts"
+        },
+        {
+          "path": "docs/testing/curriculum-runtime-2026-10-02-skills.md"
         }
       ]
     },
@@ -3292,7 +3629,8 @@
       "sources": [
         { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
         { "path": "worker/test/chalk-instructor-brief.test.mjs" },
-        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" }
+        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" },
+        { "path": "extensions/hypeproof-chat/test/instructor-render.test.tsx" }
       ]
     },
     {
@@ -3563,6 +3901,66 @@
         {
           "path": "extensions/hypeproof-chat/test/chalk-tools.test.mjs"
         }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-GEN-APP",
+      "stage": "implementation",
+      "label": "Chalk 생성 도구 4개 — 앱 측 (E2-6 / #1295, #1306)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-DES-CHALK-TOOLS",
+        "ST-IMP-CHALK-TOOL-LAYER"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-GEN-APP",
+      "stage": "test",
+      "label": "Chalk 생성 도구 단위 시험 (E2-6 / #1295, #1306)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-GEN-APP"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-generator.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-JUDGEMENTS",
+      "stage": "implementation",
+      "label": "Context judgement items and records — server (E2-5 / #1465)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-GEN-SERVER"
+      ],
+      "sources": [
+        {"path": "worker/src/routes/chalk-courses.ts"},
+        {"path": "worker/src/lib/chalk-judge-prompts.ts"},
+        {"path": "worker/src/lib/instructor-auth.ts"},
+        {"path": "worker/migrations/0037-chalk-judgements.sql"}
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-JUDGEMENTS",
+      "stage": "test",
+      "label": "Context judgement items and records — tests (E2-5 / #1465)",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-IMP-CHALK-JUDGEMENTS"
+      ],
+      "sources": [
+        {"path": "worker/test/chalk-judgements.test.mjs"},
+        {"path": "extensions/hypeproof-chat/test/chalk-judge.test.mjs"}
       ]
     }
   ]

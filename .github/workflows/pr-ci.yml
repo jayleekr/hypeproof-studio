@@ -56,6 +56,8 @@ jobs:
         run: |
           node e2e/unified-release/gate.test.mjs
           node scripts/test-unified-launcher.mjs
+      - name: review-pr.sh shell safety (#1302 SIGPIPE + ERR trap)
+        run: bash scripts/test/review-pr-shell.test.sh
 
   dev-channel-tag-classifier:
     name: dev-channel / tag-is-prerelease
@@ -115,6 +117,25 @@ jobs:
       - name: Run remote classroom operations against local D1
         working-directory: worker
         run: npm run test:classroom-ops:d1
+      # cr-publish (#1393) — Publish for User Test (CR-T80 and the publish routes) on local workerd/D1.
+      - name: Run Publish for User Test against local D1
+        working-directory: worker
+        run: npm run test:cr-publish:d1
+      # cr-memory (#1395) — Venture Memory (decisions, stakeholders, metrics, slides, register, timeline, director reads) on local workerd D1 and R2.
+      - name: Run Venture Memory against local D1 and R2
+        working-directory: worker
+        run: npm run test:cr-memory:d1
+      # cr-skills (#1396) — the curriculum skill gate and the Evidence skill's write-back on local workerd D1 and R2.
+      - name: Run Curriculum skills against local D1 and R2
+        working-directory: worker
+        run: npm run test:cr-skills:d1
+      # cr-evidence (#1394) — participant evidence, notes, drafts, deletion and controls on local workerd D1 and R2.
+      # Keep this step LAST in the job: its Miniflare round trips (the 120-session and 30x120 cases)
+      # leave several thousand sockets in TIME_WAIT for about a minute, and a local D1 suite started right
+      # after it can fail with EADDRNOTAVAIL (measured on macOS; see the note in the test file).
+      - name: Run Evidence capture against local D1 and R2
+        working-directory: worker
+        run: npm run test:cr-evidence:d1
 
   worker-typecheck:
     name: worker / typecheck
@@ -270,3 +291,35 @@ jobs:
       - name: Run extension smoke tests
         working-directory: extensions/hypeproof-chat
         run: npm test
+
+  cr-publish-browser:
+    # cr-publish (#1393): the published test runtime in real Chromium as a phone (CR-T18,
+    # CR-T19 incl. the service-worker and sibling-link cases, CR-T21 one visit, CR-T22, CR-T60,
+    # CR-T61). Synthetic: the real Service router over local SQLite and an in-memory R2.
+    name: cr-publish / real Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install worker deps
+        working-directory: worker
+        run: npm ci
+      - name: Install extension deps
+        working-directory: extensions/hypeproof-chat
+        run: npm ci --omit=optional
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm ci
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run the published runtime in real Chromium
+        working-directory: e2e
+        run: npm run test:cr-publish
+      # cr-evidence (#1394): participant events from the same runtime (CR-T23, CR-T62, CR-T67, CR-T19 events half).
+      - name: Run participant events in real Chromium
+        working-directory: e2e
+        run: npm run test:cr-evidence

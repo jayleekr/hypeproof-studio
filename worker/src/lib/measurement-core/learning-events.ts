@@ -107,6 +107,30 @@ export const REF_KEYS = ["criterion_ref", "turn_ref", "result_ref", "adopted_fro
 /** Keys that name an `artifact` event's sha256 in the same batch. Missing is `unknown_artifact`. */
 export const ARTIFACT_REF_KEYS = ["artifact_before", "artifact_after"] as const;
 
+/**
+ * Artifact references of an Experiment Browser result (CR-10, recon R4). Jay's decision 8
+ * (2026-10-01) allows them as ADDITIVE, OPTIONAL keys on `hps-observation/1` and `/2`: a
+ * record without them reads exactly as before. Only a `tool_result` event may carry them,
+ * each as `sha256:<64 hex>`, and the two digests only next to `artifact_version`
+ * (`invalid_artifact_reference` otherwise; the validator is `legacy-observation.ts`).
+ *
+ *   artifact_version   the R4 artifact version id, which IS the file-set digest
+ *   screenshot_digest  sha256 of the screenshot bytes the result was taken with
+ *   trace_digest       digest of the action trace (tool, input, outcome, step, document)
+ *
+ * The two digests are written only once their bytes are stored and read back on the
+ * seat's local record (`LocalRecord.putBlob`, local-record.ts), so a digest resolved when
+ * its event was written. The bytes can later be evicted by their bound or deleted by the
+ * person; the event then names bytes that are no longer stored.
+ *
+ * Not `ARTIFACT_REF_KEYS`: those name one `artifact` event's plain sha256 in the same
+ * batch (AE-37 binds single files), and a browser result references the version by these
+ * keys alone. Where a version must be an `artifact` event (cr-verify's `artifact_after`),
+ * it is recorded tagged `hps-artifact-version/1` and `observableAssets` skips it
+ * (`isVersionArtifact`, verification.ts), so it is never counted as a revision.
+ */
+export const BROWSER_RESULT_REF_KEYS = ["artifact_version", "screenshot_digest", "trace_digest"] as const;
+
 export interface LearningKindSpec {
   /** The actor the host fills in by default. NOT forced: SX-45 needs an actor=ai decision to be recordable. */
   actor: ObservationActor;
@@ -406,3 +430,80 @@ export function nextStep(input: {
   if (gate && !input.events.some((e) => satisfiesGate(e, gate))) return { ok: false, code: "gate_not_met", gate };
   return { ok: true, step: following.id };
 }
+
+// ── Participant evidence (cr-evidence #1394; CR-23, CR-24, CR-65, CR-67, CR-74) ──────────────
+//
+// Events a published test version records about its participants, and the student's manual
+// records about a test. They extend the /2 vocabulary of THIS table; `legacy-observation.ts`
+// stays the one validator (SX-48). Additive (Jay's decision 8): every key below is optional
+// and absent on every record written before it, and no format version moves.
+
+/**
+ * The six PRD P0-4 participant event kinds (CR-23), plus `input`: the fact that a participant
+ * typed into a field (CR-67). Its content is kept only for a field the experiment declared
+ * (`input_value`); otherwise the event records that the interaction happened, not what was
+ * typed. Never a learning kind: participant events are not the student's own behaviour, so
+ * the gates and `isHumanEvidence` never count them (actor `external_user`).
+ */
+export const PARTICIPANT_EVENT_KINDS = ["session_start", "page_view", "click", "task_start", "task_complete", "milestone", "input"] as const;
+export type ParticipantEventKind = (typeof PARTICIPANT_EVENT_KINDS)[number];
+export const isParticipantEventKind = (kind: unknown): kind is ParticipantEventKind => (PARTICIPANT_EVENT_KINDS as readonly string[]).includes(String(kind));
+
+/**
+ * The five manual record kinds (CR-24), carried as `note_kind` on an
+ * `external_feedback_received` event (recon R6: manual records use that kind, whose
+ * `provenance` and `source_state` are already required). `locator` is required for an
+ * external source and refused on the others.
+ */
+export const MANUAL_RECORD_KINDS = ["observer_note", "interview_note", "quote", "anomaly", "external_source"] as const;
+export type ManualRecordKind = (typeof MANUAL_RECORD_KINDS)[number];
+
+/**
+ * The additive /2 keys of participant events and manual records:
+ *
+ *   participant   { session_id, pseudonym? } — the random session id (CR-65) and, when the
+ *                 participant's browser made one, its random per-experiment pseudonym
+ *   attribution   { project, experiment, product_version?, link?, channel?, variant? } —
+ *                 inherited from the session (CR-21, CR-73, CR-74), never sent by the page
+ *   target        { role, path } — what was clicked or typed into: an element role and a
+ *                 structural path, never its text (CR-67)
+ *   label         the student's own name for a task or milestone (`task_start`,
+ *                 `task_complete`, `milestone` only), from the page's code
+ *   input_value   typed content, only on `input` and only for a declared field (CR-67)
+ *   note_kind     one of MANUAL_RECORD_KINDS, only on `external_feedback_received`
+ *   locator       where in an external source (a page, a section, a URL), with note_kind
+ *                 `external_source` only
+ */
+export const PARTICIPANT_EVENT_KEYS = ["participant", "attribution", "target", "label", "input_value", "note_kind", "locator"] as const;
+
+/** The keys attribution may carry; the first two are required. */
+export const EVENT_ATTRIBUTION_KEYS = ["project", "experiment", "product_version", "link", "channel", "variant"] as const;
+
+/**
+ * Field names that identify a person. The participant schema has none (CR-65): a page that
+ * sends one is refused by name (`identity_field`), at any depth, and the CR-T60 schema check
+ * runs `identityFieldProblems` over every field the schema allows.
+ */
+const IDENTITY_FIELD = /^(?:name|full_?name|first_?name|last_?name|nick_?name|user_?name|user|user_?id|e_?mail|email_?address|mail|phone|phone_?number|tel|telephone|mobile|address|ip|ip_?address|user_?agent|device_?id|fingerprint|birth_?date|birthday|age)$/i;
+
+/** The identity-like names among `fields` (empty when the schema carries none). */
+export function identityFieldProblems(fields: readonly string[]): string[] {
+  return fields.filter((f) => IDENTITY_FIELD.test(f));
+}
+
+/** Throws `identity_field` when `value` carries an identity-like key at any depth. */
+export function forbidIdentityFields(value: unknown): void {
+  if (Array.isArray(value)) return value.forEach(forbidIdentityFields);
+  if (!value || typeof value !== "object") return;
+  for (const [k, v] of Object.entries(value)) {
+    if (IDENTITY_FIELD.test(k)) throw new Error("identity_field");
+    forbidIdentityFields(v);
+  }
+}
+
+/** Every field a stored participant event may carry: the /1 keys, the /2 keys it uses and the additive ones. */
+export const PARTICIPANT_SCHEMA_FIELDS = [
+  "id", "seq", "task", "at", "kind", "text", "actor", "assistance", "evidence_type", "source_kind", "source_state", "provenance",
+  ...PARTICIPANT_EVENT_KEYS,
+  "session_id", "pseudonym", "role", "path", ...EVENT_ATTRIBUTION_KEYS,
+] as const;

@@ -20,9 +20,11 @@ import browserControlContractProxyMd from "../prompts/_browser-control-contract-
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import browserControlContractSdkMd from "../prompts/_browser-control-contract-sdk.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import curriculumRuntimeBrowserContractMd from "../prompts/_curriculum-runtime-browser-contract.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import runtimeDegradedNoticeMd from "../prompts/_runtime-degraded-notice.md";
-import { BROWSER_TOOLS } from "./browser-tools.ts";
-import { isMinorCohort } from "./moderation.ts";
+import { BROWSER_TOOLS, CR_BROWSER_TOOLS, CR_VERIFY_TOOLS } from "./browser-tools.ts";
+import { curriculumRuntimeAllowed, isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -375,6 +377,15 @@ export type CoachRuntime = "proxy" | "sdk";
  *    here, fail-closed: an unknown tier counts as minor.
  */
 function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
+  const base = baseBrowserContractFor(profile, runtime);
+  // CR-02 — the Experiment Browser tools exist only behind the CR switch, and only
+  // where the runtime already grants browser tools at all.
+  // Never for minors, on either runtime (fail-closed like the SDK grant).
+  if (!base || !curriculumRuntimeAllowed(profile)) return base;
+  return `${base}\n\n${curriculumRuntimeBrowserContractMd as unknown as string}`;
+}
+
+function baseBrowserContractFor(profile: Profile, runtime: CoachRuntime): string {
   if (runtime === "sdk") {
     if (profile.sdk_tools?.browser !== true) return "";
     // Mirrors isMinorTier() in sdkCoachHelpers.ts — keep the tier list in sync.
@@ -597,7 +608,11 @@ export function translate(
   // Static per cohort → cache with the other function tools. Only injected when
   // the profile opts in; the extension host executes them via CDP.
   if (profile.browser_control?.enabled === true) {
-    for (const t of BROWSER_TOOLS) {
+    // CR-02 — the Experiment Browser tools join only behind the Curriculum Runtime switch.
+    // Never for minors: the SDK grant checks the tier, and so does this one.
+    // cr-verify — the AI Verify tools ride the same switch (CR-12–CR-16).
+    const crTools = curriculumRuntimeAllowed(profile) ? [...CR_BROWSER_TOOLS, ...CR_VERIFY_TOOLS] : [];
+    for (const t of [...BROWSER_TOOLS, ...crTools]) {
       tools.push({ name: t.name, description: t.description, input_schema: t.input_schema });
     }
   }

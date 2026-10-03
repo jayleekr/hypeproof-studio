@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
 `;
 const AUTHORING_SCHEMA = readFileSync(new URL("../migrations/0002-chalk-authoring.sql", import.meta.url), "utf8");
 const PLAN_SCHEMA = readFileSync(new URL("../migrations/0031-chalk-plan-files.sql", import.meta.url), "utf8");
+const TIER_DURATION_SCHEMA = readFileSync(new URL("../migrations/0035-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
+const JUDGEMENTS_SCHEMA = readFileSync(new URL("../migrations/0037-chalk-judgements.sql", import.meta.url), "utf8");
 
 // Sample methods (3 biopharm-compatible + 1 excluded)
 const BASE_METHODS = [
@@ -71,6 +73,8 @@ function makeDb({ seedKb = true } = {}) {
   db.exec(KB_SCHEMA);
   db.exec(AUTHORING_SCHEMA);
   db.exec(PLAN_SCHEMA);
+  db.exec(TIER_DURATION_SCHEMA);
+  db.exec(JUDGEMENTS_SCHEMA);
   if (seedKb) {
     db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + 3},'digest0')`).run();
     db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(

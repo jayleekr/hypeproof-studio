@@ -115,6 +115,9 @@ export interface ChatConfig {
   // #1298 — human-readable connection label shown in the instructor band.
   // "내 Claude 구독" | "내 Codex 구독" (local runtime) or "서버" (proxy/worker path).
   instructorConnection?: string;
+  // #1298 — model choices for the instructor band dropdown. Set from localModelSelection
+  // when instructor mode is active; profile is null so cannot use profile.model_selection.
+  instructorModelChoices?: Array<{ id: string; alias: string; label: string }>;
 }
 
 /**
@@ -244,6 +247,8 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
   browser_control?: { enabled: boolean; max_iterations?: number };
+  /** CR-02 — Curriculum Runtime switch (`curriculum_runtime.enabled`), off when absent. */
+  curriculum_runtime?: { enabled: boolean };
   /**
    * #306 — hardened native-browser session for minor cohorts. `mode: "safe"`
    * makes the host enable the locked-down `persist:hp-safe` integrated-browser
@@ -360,6 +365,32 @@ export type WebviewMessage = (
   | { type: 'observationCorrect'; scope: string; text: string }
   | StartRequest
   | { type: "ready" }
+  // CR-09 — the student removes the picked element before sending (CR switch only).
+  | { type: "removeElementContext" }
+  // cr-verify — "Test my product" (CR-12–CR-16; CR switch only, re-checked by the host).
+  | { type: "verifyOpen" }
+  // `requestId`: the panel that asked; only it sends the resulting `sendText` (two chat views receive every post).
+  | { type: "verifyStart"; requestId: string; criteria: Array<{ text: string; proposed_by: "student" | "ai"; confirmed: boolean; adopted_from?: string }> }
+  | { type: "verifyRetest" }
+  | { type: "verifyFix"; requestId: string; criterionId: string; text: string }
+  // cr-publish — "Publish for user test" (CR-17–CR-22, CR-39, CR-73; CR switch only, re-checked by the host).
+  | { type: "publishOpen"; manifest?: string[] }
+  | { type: "publishSubmit"; form: import("./publishView").PublishForm }
+  | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number }
+  | { type: "publishRevoke"; linkId: string }
+  // cr-evidence — the experiment evidence panel (CR-24–CR-27, CR-69; CR switch only, re-checked by the host).
+  | { type: "evidenceOpen"; experimentId?: string }
+  | { type: "evidenceNote"; experimentId: string; note: import("./evidenceView").NoteForm }
+  | { type: "evidenceDraft"; experimentId: string }
+  | { type: "evidenceReview"; experimentId: string; draftId: string; revision: number; actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }> }
+  | { type: "evidenceDelete"; experimentId: string; sessionId?: string }
+  // cr-memory — the Venture Memory panel (CR-35–CR-38, CR-77; CR switch only, re-checked by the host).
+  | { type: "memoryOpen" }
+  | { type: "memoryDiff"; from: string; to: string }
+  | { type: "memoryDecision"; form: import("./memoryView").DecisionForm }
+  // cr-skills — the curriculum skills panel (CR-43–CR-47; CR switch only, re-checked by the host).
+  | { type: "skillsOpen" }
+  | { type: "skillRun"; skill: string; form: import("./skillView").SkillForm }
   | { type: "selectModel"; alias: string }
   // #1298 — instructor-only: free-form model id that bypasses the profile's choices list.
   | { type: "selectModelDirect"; modelId: string }
@@ -412,10 +443,10 @@ export type WebviewMessage = (
   | { type: "artifactApprove" }
   | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
-  | { type: "helpCancel"; key: string }
+  | { type: "helpCancel"; key: string; requestId: string }
   | { type: "helpSend"; key: string; requestId: string; consent: boolean }
   | { type: "helpRetry"; key: string }
-  | { type: "helpDiscard"; key: string }
+  | { type: "helpDiscard"; key: string; requestId: string }
   | { type: "helpConfirm"; key: string; id: string; revision: number }
   | { type: "helpWithdraw"; key: string; id: string }
   | { type: "traceTrialStart"; taskLabel?: string }
@@ -500,6 +531,20 @@ export type HostMessage = (
   // behaviour), so this is announced on the chat panel's inline status line instead
   // of a toast.
   | { type: "pageAttached"; label: string }
+  // CR-09 — the picked element queued for the next turn (null = none): exactly what goes.
+  | { type: "elementAttached"; element: ElementPreview | null }
+  // cr-verify — the "Test my product" panel (null = hidden). `sendText`: the student's own
+  // sentence the panel sends next through the normal send path (the coach context rides
+  // with it, model-only). `error`: why the last action was refused.
+  | { type: "verifyState"; view: import("./verifyView").VerifyView | null; sendText?: string; requestId?: string; error?: string }
+  // cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden). `error`/`errorLines`: why the
+  // last action was refused (the file and line of a refused set); `shareUrl`: the link just made.
+  | { type: "publishState"; view: import("./publishView").PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
+  // cr-evidence — the "실험 증거" panel (null = hidden). `error`: why the last action was refused; `done`: what it did.
+  | { type: "evidenceState"; view: import("./evidenceView").EvidenceView | null; error?: string; done?: string }
+  | { type: "memoryState"; view: import("./memoryView").MemoryView | null; error?: string; done?: string }
+  // cr-skills — the "커리큘럼 스킬" panel (null = hidden); `running` while a skill runs.
+  | { type: "skillsState"; view: import("./skillView").SkillsView | null; running?: boolean; error?: string; done?: string }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
   // Host posts once per session — first webview mount of this run and again
@@ -558,4 +603,17 @@ export interface ActionRequest {
   destructive?: boolean;
   description: string;
   payload: unknown;
+}
+
+/** CR-09 — what the chat panel shows of a picked element before it is sent. */
+export interface ElementPreview {
+  ref: string;
+  tag: string;
+  text: string;
+  /** `file:line`, or "unmapped" when the source could not be located without guessing. */
+  source: string;
+  /** The exact text block the coach will receive. */
+  sentText: string;
+  /** The element crop as it will be sent, or null when the cohort sends no images. */
+  imageDataUrl: string | null;
 }

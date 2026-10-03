@@ -1,6 +1,9 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import type { BrowserToolsForLocal } from './localRuntime';
 import { InstructorModeManager } from './chalk/instructorMode';
+import { decideMode, profileFailureToStatus } from './chalk/modeDecision';
 import { chalkToolsEnabled } from './chalk/tools';
+import { runInstructorTurn, INSTRUCTOR_TOOL_PROFILE } from './chalk/instructorTurn';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -15,12 +18,13 @@ import * as fs from "fs";
 import {createHash} from 'node:crypto';
 import { APPROVAL_PLACEHOLDER, approvalChoices, approvalMessage, approveArtifact } from "./artifactApproval.ts";
 import {NativeObservationRecorder} from './nativeObservationRecorder';
-import {OBSERVATION_FORMATS, validateFindings, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
+import {OBSERVATION_FORMATS, validateFindings, validateObservation, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
 import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
+import { ISSUER_TOKEN_KEY } from "./mintStudentTokenHelpers";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
+import { TOKEN_MISSING_FRIENDLY, buildProxyHeaders, lessonBindingHeader, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { acceptFocus, acceptWork, rehearsalReport, turnLesson, workContext, type LessonFocus, type StepWork } from "./lessonFocus";
 import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
@@ -32,7 +36,12 @@ import {
   withCoachSeatLock,
 } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { curriculumBase, extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { PublishSession } from "./publishSession";
+import { EvidenceSession } from "./evidenceSession";
+import { MemorySession } from "./memorySession";
+import { SkillSession, completeSkillRequest, type SkillCompletion } from "./skillSession";
+import { qrDataUrl } from "./testQr";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
   originOfUrl,
@@ -41,7 +50,49 @@ import {
   isSameBrowserUrl,
   resolveLivePreviewUrl,
   pickRevealTabIndex,
+  browserTabCoverage,
+  toProxyToolResult,
+  isLoopbackUrl,
 } from "./browserControlHelpers";
+import { isCurriculumRuntimeEnabled, isCrVerifyTool, CR_CONTEXT_KEY } from "./curriculumRuntime";
+import { VerifySession, recordChecked, refusalText, verifyContext, verifyToolResult, type VerifyRecorderPort } from "./verifySession";
+import { artifactVersionFor } from "./artifactVersion";
+import type { ElementContext } from "./elementPick";
+import { checkAgentOrigin } from "./experimentBrowser";
+import {
+  crContextKeyValue,
+  ElementQueue,
+  SdkCrResults,
+  withElementText,
+  turnImages,
+  recordProxyCrResult,
+  recordElementCapture,
+  proxyTurnBrowser,
+  crResultHistory,
+  crResultEntries,
+  assessmentBatch,
+  roomGuardedSink,
+  crResultsMenu,
+  clearStoredResults,
+  CR_BYTES_CONTEXT_KEY,
+  CR_BYTES_OWNERS_STATE,
+  CR_PROJECTS_STATE,
+  CrProjectMemory,
+  crAllowedOrigins,
+  crBytesOwner,
+  crBytesOwnersAfter,
+  type BlobSink,
+} from "./crHostWiring";
+import { FileRecordStorage, LOCAL_RECORD_DIR } from "./localRecordFile";
+import { LocalRecord } from "../../../worker/src/lib/measurement-core/local-record";
+import { isMinorTier } from "./sdkCoachHelpers";
+import {
+  toMcpToolResult,
+  BROWSER_OPEN_TOOL_DEF,
+  LIVE_PREVIEW_START_TOOL_DEF,
+  runBrowserOpen,
+  runLivePreviewStart,
+} from "./browserMcp";
 
 // #525 — a plain editor command registered in the core. The browser-only API cannot
 // bring a tab to the front (BrowserTab has no show()/reveal()), so this path is used
@@ -54,6 +105,10 @@ const observationKey = (b: {format?: string; scope: string; program: string}) =>
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
+
+// Instructor-mode browser tool definitions — use the canonical defs from browserMcp.ts
+// so the description and inputSchema stay in sync with the student SDK path.
+const INSTRUCTOR_LOCAL_BROWSER_DEFS = [LIVE_PREVIEW_START_TOOL_DEF, BROWSER_OPEN_TOOL_DEF] as const;
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
 import {
   matchWorldRef,
@@ -80,7 +135,7 @@ import {
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { recoverLearnerPreview, type ArtifactState, type PreviewTabsState } from "./previewRecovery";
-import { BrowserControl, type BrowserToolCall } from "./browserControl";
+import { BrowserControl, type BrowserToolCall, type CrBrowserOptions } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
 import {
@@ -139,6 +194,7 @@ import {
   lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
+  resolveInstructorTokenFromSecrets,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 import {
@@ -240,6 +296,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
     await this.observationWrites;
+    // A re-test runs outside any turn and writes and persists its recorder for seconds. A new
+    // recorder built from the saved batch now would be persisted over by the re-test, or
+    // persist over it: whole snapshots, last write wins. Every writer shares the re-test's
+    // recorder until it ends.
+    if (this.verifyRunRecorder && this.verifySession.retestActive) return (this.nativeObservation = this.verifyRunRecorder);
     this.nativeObservation = null;
     // P1 — both `/1` and `/2` are accepted. Which one is used is the profile's call
     // (design §관측 이벤트와 필드: "the profile's observation.format decides which one is used").
@@ -360,6 +421,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private voiceProbes = new Map<string, (o: import("./voiceCapabilityHelpers").VoiceProbeObservations) => void>();
 
+  isViewVisible(): boolean { return !!this.view?.visible; }
+
   /** The surface the diagnostic command uses. With the webview closed it returns null, leaving it as not measured. */
   async probeVoiceCapability(
     timeoutMs: number,
@@ -425,6 +488,472 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private readonly approvedBrowserOrigins = new Set<string>();
   /** #457 — the CDP executor for the SDK path's inspection tools. Created on first use. */
   private mcpBrowser?: BrowserControl;
+  /** CR-10 — Experiment Browser results the SDK path produced, matched to their tool_result (crHostWiring). */
+  private readonly crSdkResults = new SdkCrResults();
+  /**
+   * CR-10 — the local measurement-core record (`hps-local-record/1`, the store the local
+   * review uses) that holds a browser result's screenshot and trace bytes by digest.
+   * Opened on first use; writes are serialized here and run under the record's file lock.
+   */
+  private crRecord: { store: FileRecordStorage; record: LocalRecord } | null = null;
+  private crBlobWrites: Promise<unknown> = Promise.resolve();
+  private crRecordHandle(): { store: FileRecordStorage; record: LocalRecord } {
+    if (!this.crRecord) {
+      const store = new FileRecordStorage(path.join(this.context.globalStorageUri.fsPath, LOCAL_RECORD_DIR));
+      this.crRecord = { store, record: new LocalRecord(store) };
+    }
+    return this.crRecord;
+  }
+  /**
+   * CR-10 — where one turn's result bytes go, recorded as `owner`'s (crBytesOwner of the
+   * turn's token). Signed out (no owner): nothing is stored, so no bytes exist that nobody
+   * can count or delete.
+   */
+  private crBlobSinkFor(owner: string | null): BlobSink | undefined {
+    if (!owner) return undefined;
+    return (blobs) => {
+      const next = this.crBlobWrites.then(async () => {
+        try {
+          const { store, record } = this.crRecordHandle();
+          // One lock for the result's screenshot and trace together.
+          return await store.exclusive(async () => {
+            const out: Array<string | null> = [];
+            for (const blob of blobs) out.push(await record.putBlob(blob, { owner }).catch(() => null));
+            return out;
+          });
+        } catch {
+          // Busy (a local review in another window holds the lock) or failed: the event
+          // then carries no digest for these bytes, never a dangling one.
+          return blobs.map(() => null);
+        }
+      });
+      this.crBlobWrites = next;
+      void next.then((digests) => { if (digests.some((d) => d !== null)) void this.noteCrBytes(owner, true); });
+      return next;
+    };
+  }
+  /** Remember whether `owner` has bytes stored (CR_BYTES_OWNERS_STATE), then refresh the context key. */
+  private async noteCrBytes(owner: string, has: boolean): Promise<void> {
+    const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+    await this.context.globalState.update(CR_BYTES_OWNERS_STATE, crBytesOwnersAfter(list, owner, has));
+    await this.refreshCrBytesContext();
+  }
+  /**
+   * CR-10 — mirror "the signed-in person has browser-result bytes stored" to
+   * CR_BYTES_CONTEXT_KEY, which shows the delete command whatever the CR switch says
+   * (MC-27). Reads only the owners list in globalState, never the record: it runs at
+   * start-up and on every sign-in for every seat, so it does no disk I/O.
+   */
+  async refreshCrBytesContext(): Promise<void> {
+    const owner = crBytesOwner(await this.context.secrets.get(TOKEN_KEY));
+    const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+    const flagged = !!owner && Array.isArray(list) && list.includes(owner);
+    void vscode.commands.executeCommand("setContext", CR_BYTES_CONTEXT_KEY, flagged);
+  }
+  /**
+   * CR-10 — how many browser-result bytes the signed-in person stored, counted on the record
+   * (keys only, so an unrelated corrupt review record cannot hide them). Corrects the owners
+   * list. null when the record cannot be read: the delete is still offered if the list says
+   * bytes may be stored, so a read failure never makes stored screens undeletable.
+   */
+  private async crStoredCount(owner: string | null): Promise<number | null> {
+    if (!owner) return 0;
+    try {
+      const n = await this.crRecordHandle().record.blobCount({ owner });
+      await this.noteCrBytes(owner, n > 0);
+      return n;
+    } catch {
+      const list = this.context.globalState.get<unknown>(CR_BYTES_OWNERS_STATE);
+      return Array.isArray(list) && list.includes(owner) ? null : 0;
+    }
+  }
+  /** CR-09 — the element the student picked for the NEXT turn, until sent or removed. */
+  private readonly elementQueue = new ElementQueue();
+
+  // ── AI Verify (cr-verify, #1392) ──────────────────────────────────────────
+  /** "Test my product": the session over the record, the preview and the CR executor. */
+  private readonly verifySession = new VerifySession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    recorder: () => this.verifyRecorder(),
+    startUrl: () => this.liveServer.currentUrl() ?? null,
+    allowedOrigins: () => this.crBrowserOptions().allowedOrigins(),
+    executor: () => {
+      this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
+      return this.mcpBrowser.crExecutor();
+    },
+    currentVersion: async () => {
+      const root = this.liveServer.currentRoot();
+      const base = this.liveServer.currentUrl();
+      if (!root || !base) return null;
+      return (await artifactVersionFor(root, new URL(base).pathname || "/")).id;
+    },
+    storeScreenshot: async (base64, mimeType) => {
+      const sink = this.crBlobSinkFor(crBytesOwner(await this.context.secrets.get(TOKEN_KEY)));
+      if (!sink) return null;
+      const [digest] = await sink([{ media_type: mimeType === "image/png" ? "image/png" : "image/jpeg", base64 }]);
+      return digest ?? null;
+    },
+    // CR-68, chat-panel half: the panel shows the run while it acts on the page.
+    onRun: () => void this.postVerifyState(),
+    release: () => { this.verifyRunRecorder = null; },
+  });
+
+  /**
+   * The recorder of the turn now streaming, captured by `handleSend` and cleared when the
+   * turn ends. Other webview handlers may replace `this.nativeObservation` mid-turn
+   * (`prepareObservation`), and the turn later persists its own recorder over the same key,
+   * so verdicts written anywhere else during the turn would be overwritten.
+   */
+  private verifyTurnRecorder: NativeObservationRecorder | null = null;
+  /**
+   * The recorder a re-test writes to, held from its first recorder call until it ends
+   * (`release`). Meanwhile `prepareObservation` hands this one out instead of building
+   * another, so a drawer write during a re-test lands on the same record.
+   */
+  private verifyRunRecorder: NativeObservationRecorder | null = null;
+
+  /**
+   * The record a verify action writes to. Inside a turn this is the turn's own recorder
+   * (`verifyTurnRecorder`), so the turn's later writes never overwrite the verdicts;
+   * outside a turn it is prepared from the saved batch. Learning events need `/2`.
+   */
+  private async verifyRecorder(): Promise<VerifyRecorderPort | null> {
+    // During a re-test every verify action (the panel's view included) uses the re-test's
+    // recorder; outside one, nothing is held.
+    const retest = this.verifySession.retestActive;
+    if (!retest) this.verifyRunRecorder = null;
+    const recorder = (retest ? this.verifyRunRecorder : null) ?? this.verifyTurnRecorder ?? (this.nativeObservation?.batch.format === 'hps-observation/2' ? this.nativeObservation : await this.currentLearningRecorder());
+    if (!recorder) return null;
+    if (retest) this.verifyRunRecorder = recorder;
+    const profile = await this.ensureProfile();
+    const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
+    const context = verifyContext({
+      week: profile?.lesson?.content?.learning?.week,
+      stepId: profile?.lesson?.content?.steps?.[0]?.id,
+      task,
+      moduleVersion: profile?.lesson?.version,
+    });
+    return {
+      events: () => recorder.batch.events,
+      record: (kind, text, extra) => recordChecked(recorder.batch, validateObservation, () => recorder.record(task, kind, text, extra)),
+      recordLearning: (draft) => recordChecked(recorder.batch, validateObservation, () => recorder.recordLearningEvent({ ...draft, context })),
+      persist: () => this.persistObservation(recorder),
+    };
+  }
+
+  /** Post the panel state; `sendText` is the student's sentence the panel sends next. */
+  private async postVerifyState(extra: { sendText?: string; requestId?: string; error?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "verifyState", view: null });
+      return;
+    }
+    await this.post({ type: "verifyState", view: await this.verifySession.view(), ...extra });
+  }
+
+  /** CR-12 — the "Test my product" command: re-checks the served switch, then opens the panel. */
+  async testMyProduct(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice(refusalText("switch_off"));
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postVerifyState();
+  }
+
+  /** One verify action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handleVerifyMessage(msg: { type: "verifyOpen" } | { type: "verifyStart"; requestId: string; criteria: unknown } | { type: "verifyRetest" } | { type: "verifyFix"; requestId: string; criterionId: string; text: string }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "verifyState", view: null, error: refusalText("switch_off") });
+      return;
+    }
+    if (msg.type === "verifyOpen") return this.postVerifyState();
+    // A run or re-test while the coach is answering would share the tab and the record with that turn.
+    if (this.pendingSends > 0 || this.activeStreams.size > 0) return this.postVerifyState({ error: refusalText("turn_running") });
+    if (msg.type === "verifyStart") {
+      const r = await this.verifySession.start(msg.criteria);
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
+    }
+    if (msg.type === "verifyFix") {
+      const r = await this.verifySession.fix(msg.criterionId, msg.text);
+      return this.postVerifyState(r.ok ? { sendText: r.sendText, requestId: String(msg.requestId ?? "") } : { error: refusalText(r.code) });
+    }
+    const pending = this.verifySession.retest();
+    await this.postVerifyState();
+    const r = await pending;
+    await this.postVerifyState(r.ok ? {} : { error: refusalText(r.code) });
+  }
+
+  // ── Publish for User Test (cr-publish, #1393) ─────────────────────────────
+  /** The signed-in person's Project id and test origin, keyed by crBytesOwner (a digest, never the identity). */
+  private readonly crProjectMemory = new CrProjectMemory(
+    {
+      get: () => this.context.workspaceState.get<unknown>(CR_PROJECTS_STATE),
+      update: (value) => this.context.workspaceState.update(CR_PROJECTS_STATE, value),
+    },
+    async () => (await this.context.secrets.get(TOKEN_KEY)) ?? null,
+  );
+  /** "사용자 테스트용으로 공개": the session over the preview's files, the record and the Service. */
+  private readonly publishSession = new PublishSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    root: () => this.liveServer.currentRoot() ?? null,
+    entry: () => {
+      const base = this.liveServer.currentUrl();
+      return base ? new URL(base).pathname || "/" : null;
+    },
+    events: async () => (await this.verifyRecorder())?.events() ?? [],
+    projectId: () => this.crProjectMemory.projectId(),
+    setProjectId: (id) => this.crProjectMemory.set(id ? { id } : { id: undefined, origin: null }),
+    rememberedOrigin: () => this.crProjectMemory.origin(),
+    rememberOrigin: (origin) => this.crProjectMemory.set({ origin }),
+    week: () => {
+      const w = this.cachedProfile?.lesson?.content?.learning?.week;
+      return typeof w === "number" ? w : null;
+    },
+    defaultTitle: () => vscode.workspace.workspaceFolders?.[0]?.name ?? "내 제품",
+    qr: qrDataUrl,
+  });
+
+  /** Post the publish panel state (null hides it with the switch off). */
+  private async postPublishState(extra: { error?: string; errorLines?: string[]; shareUrl?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "publishState", view: await this.publishSession.view(), ...extra });
+  }
+
+  /** CR-17 — the "Publish for user test" command: re-checks the served switch, then opens the panel. */
+  async publishTestVersion(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 사용자 테스트 공개를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postPublishState();
+  }
+
+  /** One publish action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handlePublishMessage(msg: { type: "publishOpen"; manifest?: string[] } | { type: "publishSubmit"; form: import("./publishView").PublishForm } | { type: "publishLink"; experimentId: string; channel?: string; expiresInDays?: number } | { type: "publishRevoke"; linkId: string }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "publishState", view: null, error: "이 수업에서는 사용자 테스트 공개를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "publishOpen") {
+      if (msg.manifest !== undefined) this.publishSession.setManifest(msg.manifest);
+      return this.postPublishState();
+    }
+    if (msg.type === "publishSubmit") {
+      const r = await this.publishSession.submit(msg.form ?? ({} as import("./publishView").PublishForm));
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message, ...(r.lines ? { errorLines: r.lines } : {}) });
+    }
+    if (msg.type === "publishLink") {
+      const r = await this.publishSession.link(String(msg.experimentId ?? ""), { channel: msg.channel, expires_in_days: msg.expiresInDays });
+      return this.postPublishState(r.ok ? { shareUrl: r.share_url } : { error: r.message });
+    }
+    const r = await this.publishSession.revoke(String(msg.linkId ?? ""));
+    return this.postPublishState(r.ok ? {} : { error: r.message });
+  }
+
+  // ── Experiment evidence (cr-evidence, #1394) ──────────────────────────────
+  /** The evidence panel over the same Project the publish panel remembers; reads and writes go to the Service. */
+  private readonly evidenceSession = new EvidenceSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the evidence panel state (null hides it with the switch off). */
+  private async postEvidenceState(extra: { error?: string; done?: string } = {}, select?: string): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "evidenceState", view: await this.evidenceSession.view(select), ...extra });
+  }
+
+  /** CR-24–CR-27 — the "실험 증거 보기" command: re-checks the served switch, then opens the panel. */
+  async experimentEvidence(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 실험 증거를 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postEvidenceState();
+  }
+
+  /** One evidence action from the panel, each behind the served switch (a message can be posted without the panel). */
+  private async handleEvidenceMessage(
+    msg:
+      | { type: "evidenceOpen"; experimentId?: string }
+      | { type: "evidenceNote"; experimentId: string; note: import("./evidenceView").NoteForm }
+      | { type: "evidenceDraft"; experimentId: string }
+      | { type: "evidenceReview"; experimentId: string; draftId: string; revision: number; actions: Array<{ item: string; action: "accept" | "edit" | "reject"; text?: string }> }
+      | { type: "evidenceDelete"; experimentId: string; sessionId?: string },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "evidenceState", view: null, error: "이 수업에서는 실험 증거를 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "evidenceOpen") return this.postEvidenceState({}, msg.experimentId);
+    const exp = String(msg.experimentId ?? "");
+    if (msg.type === "evidenceNote") {
+      const r = await this.evidenceSession.addNote(exp, msg.note ?? ({} as import("./evidenceView").NoteForm));
+      return this.postEvidenceState(r.ok ? { done: "기록을 남겼어요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceDraft") {
+      const r = await this.evidenceSession.makeDraft(exp);
+      return this.postEvidenceState(r.ok ? { done: "기록에서 초안을 만들었어요. 읽어 보고 받아들이거나 고쳐 주세요." } : { error: r.message });
+    }
+    if (msg.type === "evidenceReview") {
+      const r = await this.evidenceSession.review(exp, String(msg.draftId ?? ""), Number(msg.revision), Array.isArray(msg.actions) ? msg.actions : []);
+      return this.postEvidenceState(r.ok ? {} : { error: r.message });
+    }
+    // CR-69 — deleting participant records is the person's explicit act, behind a modal.
+    const what = msg.sessionId ? "이 참가 세션의 기록" : "이 실험의 참가 기록 · 메모 · 초안 전부";
+    const pick = await vscode.window.showWarningMessage(`${what}을 지울까요? 지운 기록은 되돌릴 수 없고, 그 기록을 근거로 쓴 초안도 함께 지워져요.`, { modal: true }, "지우기");
+    if (pick !== "지우기") return this.postEvidenceState();
+    const r = await this.evidenceSession.delete(exp, msg.sessionId ? String(msg.sessionId) : undefined);
+    return this.postEvidenceState(r.ok ? { done: "지웠어요. 지운 기록의 영수증이 남았어요." } : { error: r.message });
+  }
+
+  // ── Venture Memory (cr-memory, #1395) ──────────────────────────────────────
+  /** The memory panel over the same Project the publish panel remembers; it reads the Service only, never chat history (CR-36). */
+  private readonly memorySession = new MemorySession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1")),
+    projectId: () => this.crProjectMemory.projectId(),
+  });
+
+  /** Post the memory panel state (null hides it with the switch off). */
+  private async postMemoryState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "memoryState", view: await this.memorySession.view(), ...extra });
+  }
+
+  /** CR-35/CR-36 — the "프로젝트 기억 보기" command: re-checks the served switch, then opens the panel. */
+  async ventureMemory(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 프로젝트 기억을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postMemoryState();
+  }
+
+  // ── Curriculum skills (cr-skills, #1396) ────────────────────────────────────
+  /**
+   * The skills panel over the same Project the publish panel remembers. The skill list and every
+   * contract come from the Service; the model call goes through the existing coach route with the
+   * run's skill tag and capability (CR-45), never a model id; the Service gates the answer (CR-44).
+   */
+  private readonly skillSession = new SkillSession({
+    switchOn: () => this.isCurriculumRuntimeEnabled(),
+    token: () => this.crProjectMemory.refresh(),
+    base: () => curriculumBase(this.proxyUrl()),
+    projectId: () => this.crProjectMemory.projectId(),
+    complete: (prompt, headers) => this.completeSkill(prompt, headers),
+  });
+
+  private proxyUrl(): string {
+    return vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+  }
+
+  /**
+   * One non-streaming request on the coach route, carrying only the run's metadata headers and no
+   * model. On a lesson seat it names the lesson binding the profile serves, as a coach turn does
+   * (#751 U3), so a switched lesson version admits the request instead of refusing it.
+   */
+  private async completeSkill(prompt: string, headers: Record<string, string>): Promise<SkillCompletion> {
+    const token = await this.crProjectMemory.refresh();
+    if (!token) return { ok: false };
+    const profile = await this.ensureProfile().catch(() => null);
+    const binding = lessonBindingHeader(profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined);
+    return completeSkillRequest(fetch, { proxyUrl: this.proxyUrl(), baseHeaders: buildProxyHeaders({ token }), binding, prompt, headers });
+  }
+
+  /** Post the skills panel state (null hides it with the switch off). */
+  private async postSkillsState(extra: { error?: string; done?: string } = {}): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, ...extra });
+      return;
+    }
+    await this.post({ type: "skillsState", view: await this.skillSession.view(), running: this.skillSession.isRunning(), ...extra });
+  }
+
+  /** CR-43 — the "커리큘럼 스킬" command: re-checks the served switch, then opens the panel. */
+  async curriculumSkills(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("이 수업에서는 커리큘럼 스킬을 쓸 수 없어요.");
+      return;
+    }
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+    await this.postSkillsState();
+  }
+
+  /** One skills action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleSkillsMessage(msg: { type: "skillsOpen" } | { type: "skillRun"; skill: string; form: import("./skillView").SkillForm }): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "skillsState", view: null, error: "이 수업에서는 커리큘럼 스킬을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "skillsOpen") return this.postSkillsState();
+    const f = msg.form ?? {};
+    const form: import("./skillView").SkillForm = {
+      ...(typeof f.experiment_id === "string" ? { experiment_id: f.experiment_id } : {}),
+      ...(typeof f.decision_id === "string" ? { decision_id: f.decision_id } : {}),
+      ...(Array.isArray(f.evidence_refs) ? { evidence_refs: f.evidence_refs.map(String) } : {}),
+      ...(typeof f.text === "string" ? { text: f.text } : {}),
+      ...(typeof f.notes === "string" ? { notes: f.notes } : {}),
+    };
+    void this.post({ type: "skillsState", view: await this.skillSession.view(), running: true });
+    const r = await this.skillSession.run(String(msg.skill ?? ""), form);
+    return this.postSkillsState(r.ok ? { done: "AI의 답이 규칙을 지켰어요." } : { error: r.message });
+  }
+
+  /** One memory action from the panel, behind the served switch (a message can be posted without the panel). */
+  private async handleMemoryMessage(
+    msg: { type: "memoryOpen" } | { type: "memoryDiff"; from: string; to: string } | { type: "memoryDecision"; form: import("./memoryView").DecisionForm },
+  ): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      await this.post({ type: "memoryState", view: null, error: "이 수업에서는 프로젝트 기억을 쓸 수 없어요." });
+      return;
+    }
+    if (msg.type === "memoryOpen") return this.postMemoryState();
+    if (msg.type === "memoryDiff") {
+      const r = await this.memorySession.compare(String(msg.from ?? ""), String(msg.to ?? ""));
+      return this.postMemoryState(r.ok ? {} : { error: r.message });
+    }
+    const f = msg.form ?? ({} as import("./memoryView").DecisionForm);
+    const r = await this.memorySession.decide({
+      statement: String(f.statement ?? ""),
+      evidence_refs: Array.isArray(f.evidence_refs) ? f.evidence_refs.map(String) : [],
+      assumption_refs: Array.isArray(f.assumption_refs) ? f.assumption_refs.map(String) : [],
+      affected_deck_slides: Array.isArray(f.affected_deck_slides) ? f.affected_deck_slides.map(Number) : [],
+      resulting_version_id: typeof f.resulting_version_id === "string" && f.resulting_version_id ? f.resulting_version_id : null,
+    });
+    return this.postMemoryState(r.ok ? { done: "결정을 기록했어요." } : { error: r.message });
+  }
+
+  /** A coach call of a verify tool (both runtimes): the same session, the same answer (CR-03). */
+  private async runVerifyTool(name: string, input: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError: boolean; observation?: undefined }> {
+    const short = name.replace(/^mcp__hypeproof__/, "");
+    const answer = !this.isCurriculumRuntimeEnabled()
+      ? { isError: true, text: `알 수 없는 도구: ${short}` }
+      : short === "verify_criterion"
+        ? await this.verifySession.runTool(input ?? {})
+        : await this.verifySession.propose(input ?? {});
+    void this.postVerifyState();
+    return verifyToolResult(answer);
+  }
+  /** CR-09 — a pick is waiting for the student's click; a second one is refused, not stacked. */
+  private pickInProgress = false;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -445,7 +974,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly liveServer: LiveServer,
     /** #580 — the local session-log spool. Optional: tests and older callers run without recording. */
     private readonly spool?: SessionSpool,
-  ) {}
+  ) {
+    // cr-publish (CR-11 after a restart): know the signed-in person's published origin from
+    // activation on, and follow every change of the stored token.
+    void this.crProjectMemory.refresh().catch(() => undefined);
+    const sub = context.secrets.onDidChange?.((e) => {
+      if (e.key === TOKEN_KEY) void this.crProjectMemory.refresh().catch(() => undefined);
+    });
+    if (sub) context.subscriptions.push(sub);
+  }
 
   /**
    * Public accessor for the #64 report-problem flow. Returns the most recent
@@ -613,6 +1150,240 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     void this.post({ type: "pageAttached", label });
   }
 
+  // ── Curriculum Runtime (cr-browser, #1391) ────────────────────────────────
+
+  /** Is the CR switch on for the served profile (CR-02)? Re-read at every use. */
+  isCurriculumRuntimeEnabled(): boolean {
+    return isCurriculumRuntimeEnabled(this.cachedProfile);
+  }
+
+  /**
+   * CR hooks for the coach's BrowserControl. The switch is read on every tool call, the
+   * allowed origin is the live server's (CR-11), and the artifact version is computed
+   * from the served root (CR-10, recon R4).
+   */
+  private crBrowserOptions(): CrBrowserOptions {
+    return {
+      enabled: () => this.isCurriculumRuntimeEnabled(),
+      // CR-11 — the live preview, plus the published test origin of the student's own Project (cr-publish).
+      allowedOrigins: () => crAllowedOrigins(this.liveServer.currentUrl(), this.publishSession.publishedOrigins()),
+      artifactVersion: async (url: string) => {
+        // cr-publish — a page on the Project's published test origin is the version its link pins.
+        const published = this.publishSession.publishedArtifactVersion(url);
+        if (published) return published;
+        const root = this.liveServer.currentRoot();
+        if (!root) throw new Error("미리보기 서버가 꺼져 있어요");
+        const u = new URL(url);
+        // CR-10 — only a page served from the student's own root has a version; an
+        // external page whose path collides with a local file is not that file.
+        const base = this.liveServer.currentUrl();
+        if (!base || u.origin !== new URL(base).origin) throw new Error(`미리보기 주소가 아니에요: ${u.origin}`);
+        const entry = u.pathname === "/__hp_viewport" ? (u.searchParams.get("path") || "/") : u.pathname;
+        return artifactVersionFor(root, entry.split(/[?#]/)[0] || "/");
+      },
+    };
+  }
+
+  /**
+   * CR-09 — the student picks an element in the Experiment Browser and asks about it.
+   *
+   * Re-checks the served switch (a command runs without its menu), reveals the pinned
+   * preview tab and refuses with a reason when the editor tab state does not show it as
+   * the visible tab of its group (recon R2: a covered tab loses the first pick, and page
+   * visibility cannot tell). Never waits silently.
+   */
+  async pickElement(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("지금 수업에서는 요소 고르기를 쓸 수 없어요.");
+      return;
+    }
+    // Minors: no element crops or DOM snippets to the model, whatever the switch says.
+    if (!this.cachedProfile || isMinorTier(this.cachedProfile)) {
+      this.postPageNotice("지금 수업에서는 요소 고르기를 쓸 수 없어요.");
+      return;
+    }
+    if (this.pickInProgress) {
+      this.postPageNotice("이미 요소를 고르는 중이에요. 미리보기에서 요소를 클릭하세요.");
+      return;
+    }
+    this.pickInProgress = true;
+    try {
+      await this.pickElementOnce();
+    } finally {
+      this.pickInProgress = false;
+    }
+  }
+
+  private async pickElementOnce(): Promise<void> {
+    const base = this.liveServer.currentUrl();
+    const previewOrigin = (() => {
+      try {
+        return base ? new URL(base).origin : null;
+      } catch {
+        return null;
+      }
+    })();
+    const pinned = this.mcpBrowser?.currentTab();
+    const onPreview = (t: vscode.BrowserTab | undefined) => {
+      try {
+        return !!t?.url && !!previewOrigin && new URL(t.url).origin === previewOrigin;
+      } catch {
+        return false;
+      }
+    };
+    const tab = onPreview(pinned) ? pinned : (vscode.window.browserTabs ?? []).find((t) => onPreview(t));
+    if (!tab) {
+      this.postPageNotice("먼저 미리보기를 연 뒤에 요소를 고를 수 있어요.");
+      return;
+    }
+    this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
+    this.mcpBrowser.setTargetTab(tab);
+    await this.revealBrowserTab(tab);
+    const coverage = browserTabCoverage(
+      (vscode.window.tabGroups?.all ?? []).map((g) => ({
+        tabs: g.tabs.map((t, i) => ({ index: i, label: t.label, inputIsUndefined: t.input === undefined, isActive: t.isActive })),
+      })),
+      tab.title,
+    );
+    if (coverage !== "visible") {
+      this.postPageNotice(
+        coverage === "covered"
+          ? "미리보기 탭이 다른 탭에 가려져 있어요. 미리보기 탭을 눌러 앞으로 가져온 뒤 다시 골라 주세요."
+          : "어느 탭이 미리보기인지 확실하지 않아 요소 고르기를 시작하지 않았어요. 미리보기 탭을 눌러 앞으로 가져온 뒤 다시 골라 주세요.",
+      );
+      return;
+    }
+    this.postPageNotice("미리보기에서 물어볼 요소를 클릭하세요.");
+    let ctx: ElementContext;
+    try {
+      ctx = await this.mcpBrowser.pickElement({ root: this.liveServer.currentRoot() ?? null });
+    } catch (err) {
+      this.postPageNotice(`요소를 가져오지 못했어요: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    this.attachElementContext(ctx);
+    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+  }
+
+  /**
+   * CR-10 — the Experiment Browser results stored on this seat's record, read back and
+   * labelled with the version they were taken against: "현재 버전" when the page's files
+   * are still at that version, "이전 버전" when they changed since, "버전 확인 안 됨" when
+   * the preview is off. A result whose screenshot bytes are stored can be attached to the
+   * next message, with a line saying which version it shows.
+   */
+  async showBrowserResults(): Promise<void> {
+    if (!this.isCurriculumRuntimeEnabled()) {
+      this.postPageNotice("지금 수업에서는 실험 브라우저 기록을 볼 수 없어요.");
+      return;
+    }
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    const proxy = vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+    const recorder = this.nativeObservation ?? await this.prepareObservation(proxy, token, await this.ensureProfile());
+    const events = recorder?.snapshot().events ?? [];
+    const root = this.liveServer.currentRoot();
+    const current = new Map<string, string | null>();
+    for (const entry of crResultEntries(events)) {
+      try {
+        current.set(entry, root ? (await artifactVersionFor(root, '/' + entry)).id : null);
+      } catch {
+        current.set(entry, null);
+      }
+    }
+    const items = crResultHistory(events, (entry) => current.get(entry) ?? null);
+    // What the record holds, so stored screenshots are never invisible (MC-27).
+    const owner = crBytesOwner(token);
+    const stored = await this.crStoredCount(owner);
+    const menu = crResultsMenu({ items, stored });
+    if (menu.notice) {
+      this.postPageNotice(menu.notice);
+      return;
+    }
+    type Pick = vscode.QuickPickItem & { item?: (typeof items)[number]; clear?: true };
+    const rows: Pick[] = menu.rows.map((r): Pick =>
+      r.kind === "separator" ? { label: "", kind: vscode.QuickPickItemKind.Separator }
+      : r.kind === "clear" ? { label: r.label, description: r.description, detail: r.detail, clear: true }
+      : { label: r.label, description: r.description, detail: r.detail, item: r.item });
+    const picked = await vscode.window.showQuickPick(rows, { title: "실험 브라우저 결과 기록", placeHolder: "결과마다 어느 버전에서 본 것인지 함께 보여 줘요" });
+    if (picked?.clear) {
+      if (owner) await this.clearBrowserResultBytes(owner, stored);
+      return;
+    }
+    if (!picked?.item?.screenshot_digest) return;
+    if (!this.isImagePasteEnabled()) {
+      this.postPageNotice("이 수업에서는 기록된 화면을 코치에게 보낼 수 없어요.");
+      return;
+    }
+    let blob: Awaited<ReturnType<LocalRecord['getBlob']>> = null;
+    try {
+      blob = await this.crRecordHandle().record.getBlob(picked.item.screenshot_digest);
+    } catch {
+      blob = null;
+    }
+    if (!blob) {
+      this.postPageNotice("기록된 화면을 찾지 못했어요.");
+      return;
+    }
+    this.pendingPageImage = `data:${blob.media_type};base64,${Buffer.from(blob.bytes).toString('base64')}`;
+    this.pendingPageContext =
+      `[실험 브라우저 기록] 붙인 화면은 ${picked.item.label}에서 찍은 것이다 (${picked.item.description}). ` +
+      (picked.item.state === "current" ? "지금 파일과 같은 버전이다." : "지금 파일과 다를 수 있다. 지금 화면처럼 말하지 마라.");
+    this.postPageNotice(`${picked.item.label} 화면을 다음 메시지에 붙였어요.`);
+  }
+
+  /**
+   * CR-10 — the delete command (CR_BYTES_CLEAR_COMMAND). Deliberately NOT gated on the CR
+   * switch: it deletes what an earlier switch-on stored, so it must work after the switch
+   * goes off (cohort or tier change). It shows nothing of the results, only the count.
+   */
+  async clearStoredBrowserResults(): Promise<void> {
+    const owner = crBytesOwner(await this.context.secrets.get(TOKEN_KEY));
+    const stored = await this.crStoredCount(owner);
+    if (!owner || stored === 0) {
+      this.postPageNotice("이 컴퓨터에 저장된 내 실험 브라우저 화면이 없어요.");
+      return;
+    }
+    await this.clearBrowserResultBytes(owner, stored);
+  }
+
+  /**
+   * CR-10 — the student deletes the browser-result bytes (screenshots, action traces) THEY
+   * stored; another student's on the same PC are neither counted nor deleted.
+   */
+  private async clearBrowserResultBytes(owner: string, stored: number | null): Promise<void> {
+    try {
+      const out = await clearStoredResults(
+        stored,
+        (message) => Promise.resolve(vscode.window.showWarningMessage(message, { modal: true }, "지우기")),
+        async () => {
+          await this.crBlobWrites.catch(() => undefined);
+          const { store, record } = this.crRecordHandle();
+          return store.exclusive(() => record.deleteBlobs({ by: "user", at: Date.now(), owner }));
+        },
+      );
+      if (out) this.postPageNotice(`저장된 화면·동작 기록 ${out.removed}개를 지웠어요.`);
+    } catch {
+      this.postPageNotice("기록을 지우지 못했어요. 다른 창에서 기록을 쓰는 중이면 잠시 뒤에 다시 해 주세요.");
+    }
+    await this.crStoredCount(owner);
+  }
+
+  /** Queue a picked element for the NEXT turn and show the student exactly what goes. */
+  attachElementContext(ctx: ElementContext): void {
+    // The crop rides the page-image conduit when the cohort accepts images (recon R2).
+    this.elementQueue.attach(ctx, { imagesAllowed: this.isImagePasteEnabled() });
+    this.postElementPreview();
+  }
+
+  /** The student removed the element before sending: nothing of it is sent. */
+  clearElementContext(): void {
+    if (this.elementQueue.clear()) this.postElementPreview();
+  }
+
+  private postElementPreview(): void {
+    void this.post({ type: "elementAttached", element: this.elementQueue.preview() });
+  }
+
   /**
    * Public accessor for #64. Returns the persisted chat history (workspaceState).
    * The report flow takes only the tail (last 3) and only when the user
@@ -740,7 +1511,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
   /** #751 native help — set by extension.ts. The provider only relays; the host adapter re-checks the learner on every call. */
   helpSource: import("./classroomHelpHost").ClassroomHelpHost | null = null;
-  postHelp(help: import("./classroomHelp").HelpView): void { void this.post({ type: "helpState", help }); }
+  // #1298 — called when the auto-read whoami path gets a rejected result (401/403).
+  // Extension sets this to delete the issuer token and show the student start page once.
+  onIssuerAutoRejected?: () => void;
+  postHelp(help: import("./classroomHelp").HelpView): void {
+    // #1298 — instructor has no student help-request surface; suppress even if ClassroomHelpHost pushes.
+    if (this._instructorMode.isInstructor) return;
+    void this.post({ type: "helpState", help });
+  }
   /** Shared with the start page: one rule for what a click on an instructor link may do. */
   async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
     const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
@@ -822,7 +1600,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       close: async (tab) => { await tab.close(); },
       open: async (url) => {
         const opened = await vscode.window.openBrowserTab(url, { viewColumn: column(), preserveFocus: true });
-        this.mcpBrowser ??= new BrowserControl(); this.mcpBrowser.setTargetTab(opened);
+        this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions()); this.mcpBrowser.setTargetTab(opened);
         return opened;
       },
     }, driven);
@@ -834,11 +1612,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
   hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0 || !!this.worldOpening || !!this.observationAssessment || (this.pendingApprovals?.size ?? 0) > 0; }
 
-  refreshConfig() {
-    void (async () => {
+  refreshConfig(): Promise<void> {
+    return (async () => {
       await this.postConfig();
       await this.postHistory();
     })();
+  }
+
+  get isInstructor(): boolean | null {
+    return this._instructorMode.isInstructor;
+  }
+
+  get lastWhoamiStatus() {
+    return this._instructorMode.lastWhoamiStatus;
   }
 
   private clearingHistory = false;
@@ -923,6 +1709,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
+    // CR-10 — the token changed: the delete command follows the new identity.
+    void this.refreshCrBytesContext();
     // #1298 — re-check instructor status + brief after token change.
     this._instructorMode.reset();
   }
@@ -1027,6 +1815,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           "hypeproof-chat.pageContextEnabled",
           p?.input?.page_context === true,
         );
+        // CR-02 (recon R3) — mirror the Curriculum Runtime switch; CR commands are gated on it.
+        void vscode.commands.executeCommand("setContext", CR_CONTEXT_KEY, crContextKeyValue(p));
+        if (!isCurriculumRuntimeEnabled(p)) this.clearElementContext();
+        // CR-10 — the delete command follows whoever is signed in now (no disk I/O).
+        void this.refreshCrBytesContext();
         // #306 — mirror the cohort's browser_session onto the hardened-session
         // settings the fork core patch reads (minor cohorts → persist:hp-safe).
         await this.applyBrowserSafety(p);
@@ -1795,7 +2588,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return null;
     try {
-      const url = await this.liveServer.ensure(root);
+      const base = await this.liveServer.ensure(root);
       // Avoid stacking preview tabs on the right. The live server binds a fresh
       // random port on each (re)start (app relaunch, root change), so the URL
       // can differ from a previously-opened tab — an exact-URL match alone then
@@ -1806,12 +2599,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const tabs = vscode.window.browserTabs ?? [];
       const isPreviewTab = (u?: string): boolean =>
         !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
-      const current = tabs.find((t) => t.url?.startsWith(url));
+      const current = tabs.find((t) => t.url?.startsWith(base));
       // #519 — below, the preview tab is pinned as the coach's drive target. Leaving
       // it as `?.` means that when live_preview_start is the first tool call (no
       // instance yet) the pin is silently lost and the screenshot that follows falls
       // back to depending on activeBrowserTab.
-      this.mcpBrowser ??= new BrowserControl();
+      this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
       if (current) {
         this.liveServer.reload();
         // #519 — pin this tab so that it is the target when the coach calls
@@ -1838,13 +2631,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // would open the preview next to that empty group, leaving a blank pane
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
-        const opened = await vscode.window.openBrowserTab(url, {
+        const opened = await vscode.window.openBrowserTab(base, {
           viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
       }
-      return url;
+      return base;
     } catch {
       return null;
     }
@@ -1966,6 +2759,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // reference) and navigated with CDP: neither tabs nor columns multiply, the
         // page history (browser_back) survives, and the other slot the participant was
         // looking at is left alone.
+        // CR-11 — with the switch on, the coach opens only the student's own preview.
+        const crOn = this.isCurriculumRuntimeEnabled();
+        if (crOn) {
+          const v = checkAgentOrigin(url, this.crBrowserOptions().allowedOrigins());
+          if (!v.ok) throw new Error(v.reason);
+        }
         const tabs = vscode.window.browserTabs ?? [];
         const plan = planCoachBrowserTabs(tabs.map((t) => t.url), url);
         // Clean up only the surplus tabs already stacked in the same slot (the legacy pile-up).
@@ -1976,7 +2775,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             /* a tab we cannot close must not block the navigation */
           }
         }
-        this.mcpBrowser ??= new BrowserControl();
+        this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
         if (plan.reuse !== null) {
           // #526 — grab what this tab was showing **before** navigating. Read it after
           // the navigation and it is already the new address, so there is no way to
@@ -1999,6 +2798,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             if (reused) await this.revealBrowserTab(reused);
             return { replaced };
           }
+          // CR-11 — with the switch on the CR executor's refusal is the answer; opening a
+          // new tab here would take a path that ignores its scope.
+          if (crOn) throw new Error(r.content.map((b) => (b.type === "text" ? b.text : "")).join(" ").trim() || "미리보기를 열지 못했어요.");
           // A failed navigation (the tab was just closed, say) falls back to opening a
           // new one — to the student it must never become "it did not open".
           this.mcpBrowser.setTargetTab(undefined);
@@ -2042,6 +2844,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // CR-02/CR-11 — the served switch and the agent scope, read per call.
+      crEnabled: () => this.isCurriculumRuntimeEnabled(),
+      // cr-verify — the same session the proxy path runs (CR-03).
+      verify: async (name: string, input: Record<string, unknown>) => toMcpToolResult(await this.runVerifyTool(name, input)),
+      crScope: (url: string) => checkAgentOrigin(url, this.crBrowserOptions().allowedOrigins()),
       // #507 — the address of the live server currently up. It does not start one
       // (giving a lookup a side effect would mean "what is the address?" turns the
       // server on). This is the only truth, and anything that does not read it is
@@ -2082,7 +2889,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           (t) => !!t.url && isSameBrowserUrl(t.url, url),
         );
         if (!tab?.url) return null;
-        this.mcpBrowser ??= new BrowserControl();
+        this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
         this.mcpBrowser.setTargetTab(tab);
         await this.revealBrowserTab(tab);
         return { url: tab.url, title: tab.title };
@@ -2092,23 +2899,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // implementing the same behaviour twice produces the bug where only one of the
       // two gets fixed. The instance is made lazily here and the panel cleanup path
       // owns its dispose.
+      fetchHead: async (url: string) => {
+        try {
+          const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+          return { ok: res.ok, status: res.status };
+        } catch {
+          return { ok: false, status: 0 };
+        }
+      },
       inspect: async (name, input) => {
         try {
-          this.mcpBrowser ??= new BrowserControl();
+          this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions());
           const r = await this.mcpBrowser.execute({ id: `mcp-${name}`, name, input });
-          // BrowserToolResult(content: text | image_url) → McpToolResult(text | image)
-          return {
-            content: r.content.map((b) =>
-              b.type === "text"
-                ? { type: "text" as const, text: b.text }
-                : {
-                    type: "image" as const,
-                    data: b.image_url.url.replace(/^data:[^,]*,/, ""),
-                    mimeType: "image/jpeg",
-                  },
-            ),
-            ...(r.isError ? { isError: true } : {}),
-          };
+          // CR-10 — a CR result is recorded against its artifact version when the SDK
+          // reports this call's tool_result (onActivity takes it from this queue).
+          this.crSdkResults.onInspect(name, input, r.observation);
+          // BrowserToolResult(content: text | image_url) → McpToolResult(text | image), the
+          // same conversion the CR-03 adapter parity check runs.
+          return toMcpToolResult(r);
         } catch (e) {
           return {
             content: [{ type: "text" as const, text: `브라우저 조작 실패: ${String(e)}` }],
@@ -2210,7 +3018,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if(JSON.stringify(msg.eventIds)!==JSON.stringify(snapshot.events.map(e=>e.id))){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'새 작업 기록이 추가됐습니다. 보낼 내용을 다시 확인해 주세요.'});return;}
         const controller=new AbortController();this.observationAssessment=controller;
         try{
-          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
+          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(assessmentBatch(snapshot)),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
           if(!response.ok){const failure=await response.json() as {error?:{code?:string}};throw Error(/^[a-z_0-9]{1,80}$/.test(failure.error?.code??'')?failure.error!.code:'assessment_failed');}
           const result=await response.json() as {findings:unknown;capability_model?:unknown};
           // Against the model the SERVICE says it wrote them in, not a constant. The
@@ -2287,10 +3095,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
-      case "helpCancel": await this.helpSource?.cancel(msg.key); return;
+      case "helpCancel": await this.helpSource?.cancel(msg.key, msg.requestId); return;
       case "helpSend": await this.helpSource?.send(msg.key, msg.requestId, msg.consent === true); return;
       case "helpRetry": await this.helpSource?.retry(msg.key); return;
-      case "helpDiscard": await this.helpSource?.discard(msg.key); return;
+      case "helpDiscard": await this.helpSource?.discard(msg.key, msg.requestId); return;
       case "helpConfirm": await this.helpSource?.confirm(msg.key, msg.id, msg.revision); return;
       case "helpWithdraw": await this.helpSource?.withdraw(msg.key, msg.id); return;
       case "ready":
@@ -2306,6 +3114,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (this.pendingPageNotice) {
           void this.post({ type: "pageAttached", label: this.pendingPageNotice });
         }
+        // CR-09 — a remount must still show the picked element that is queued to go.
+        if (this.elementQueue.queued) this.postElementPreview();
         // #320 — AI disclosure at session start (REQ-C14). First "ready" of
         // a session shows the notice; hide/show remounts within the same
         // session return null here and stay silent. A history clear resets
@@ -2434,6 +3244,43 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "saveCoach":
         await this.saveCoachFromWebview(msg.name, msg.personality);
         return;
+      case "removeElementContext":
+        // CR-09 — the student removed the picked element; a CR-only message (CR-T02 inventory).
+        this.clearElementContext();
+        break;
+      case "verifyOpen":
+      case "verifyStart":
+      case "verifyRetest":
+      case "verifyFix":
+        // cr-verify — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleVerifyMessage(msg);
+        break;
+      case "publishOpen":
+      case "publishSubmit":
+      case "publishLink":
+      case "publishRevoke":
+        // cr-publish — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handlePublishMessage(msg);
+        break;
+      case "evidenceOpen":
+      case "evidenceNote":
+      case "evidenceDraft":
+      case "evidenceReview":
+      case "evidenceDelete":
+        // cr-evidence — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleEvidenceMessage(msg);
+        break;
+      case "memoryOpen":
+      case "memoryDiff":
+      case "memoryDecision":
+        // cr-memory — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleMemoryMessage(msg);
+        break;
+      case "skillsOpen":
+      case "skillRun":
+        // cr-skills — CR-only messages (CR-T02 inventory); the handler re-checks the switch first.
+        await this.handleSkillsMessage(msg);
+        break;
       case "clearHistory":
         void this.clearHistory();
         return;
@@ -2561,12 +3408,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     images?: string[],
     instructorPromptRefs?: Array<{ object_id: string; revision: number }>,
   ): Promise<void> {
+    // cr-verify — a re-test is driving the tab and writing the record: the turn waits for it.
+    if (this.verifySession?.running) {
+      await this.post({type:"inputRejected",text,images});
+      await this.post({type:"streamError",streamId:"activity",error:"제품 테스트가 끝난 뒤에 보내 주세요."});
+      return;
+    }
     this.pendingSends++;
     let releaseActivity: (()=>void) | undefined;
     let preflightComplete=false;
     try {
     const connections=activityConnections(this.context);
-    if (connections) {
+    // Instructor mode has no student activity connection — skip the acquire/verify gate.
+    if (connections && !this._instructorMode.isInstructor) {
       releaseActivity=connections.acquire();
       const token=await connections.token();
       await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
@@ -2674,7 +3528,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #308 — the notice describes the queued context; once consumed, stop
     // resurrecting it on webview remounts (webview clears its copy on userSent).
     this.pendingPageNotice = null;
-    let userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    // CR-09 — the picked element goes with this turn only, and only while the switch is on.
+    const element = this.elementQueue.take(this.isCurriculumRuntimeEnabled());
+    let userTextForModel = withElementText(pageContext ? `${pageContext}\n\n${text}` : text, element);
+    // cr-verify — a test run or fix request rides with the student's own sentence, model-only, while the switch is on.
+    const verifyContextText = this.verifySession.takeCoachContext();
+    if (verifyContextText && this.isCurriculumRuntimeEnabled()) userTextForModel = `${verifyContextText}\n\n${userTextForModel}`;
     // #751 G2 — what the learner saved on this step's work surface travels with the turn (their words, labelled).
     if (profile?.lesson && turnFocus.step) {
       const step = profile.lesson.content.steps.find((x) => x.id === turnFocus.step);
@@ -2725,9 +3584,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (notice) userTextForModel = `${notice}\n\n${userTextForModel}`;
     }
     // #278 Phase 2 — fold any queued page screenshot into this turn's images.
+    // CR-09 — a picked element's crop joins the queued page screenshot; neither replaces the other.
     const pageImage = this.pendingPageImage;
     this.pendingPageImage = null;
-    const effectiveImages = pageImage ? [...(images ?? []), pageImage] : images;
+    const effectiveImages = turnImages(images, pageImage, element);
 
     // #580 — streamId becomes the spool's turn_id, and the later spool-then-forward
     // has to be able to resend it to the worker's trace. The worker validates turn_id
@@ -2739,6 +3599,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       void this.postConfig();
     }
     const observation = await this.prepareObservation(proxyUrl, token, profile);
+    // cr-verify — the coach's verify calls in this turn write to this turn's recorder.
+    this.verifyTurnRecorder = observation?.batch.format === 'hps-observation/2' ? observation : null;
     const recordObservation = (kind: import('./nativeObservationContract').ObservationKind, value: string, extra: Partial<import('./nativeObservationContract').ObservationEvent> = {}) => {
       if (!observation) return;
       try { observation.record(streamId,kind,value,extra);this.persistObservation(observation); }
@@ -2747,6 +3609,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     recordObservation('user',text);
     const observationFiles = new Map<string,string>();
     const observationCaptures: Promise<void>[] = [];
+    // CR-10 — the element capture is a browser result bound to its artifact version; its
+    // bytes are stored first, and the turn's end waits for it (observationCaptures).
+    // Bytes are stored only when a recorder will write the event that names them.
+    const turnBlobSink = roomGuardedSink(this.crBlobSinkFor(crBytesOwner(token)), observation ? (n) => observation.hasRoom(n) : undefined);
+    if (element) observationCaptures.push(recordElementCapture(recordObservation, `pick-${crypto.randomUUID()}`, element, turnBlobSink));
     const messageId = randomId();
     const ctrl = new AbortController();
     this.activeStreams.set(streamId, ctrl);
@@ -2906,7 +3773,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           state: "done",
         });
       };
+      // CR-10 — SDK tool ids of the delegated browser tools whose results carry an observation.
+      this.crSdkResults.reset(turnBlobSink);
+      this.mcpBrowser?.crNewTurn();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        if (a.kind==='tool_use') this.crSdkResults.onToolUse(a.id, a.name, this.isCurriculumRuntimeEnabled());
         if (observation && (a.kind==='tool_use' || a.kind==='approval')) {
           try { observation.toolRequest(streamId,a.id,`${a.name}(${summarizeToolInput(a.name,a.input,300,this.resolveCoachCwd())})`); this.persistObservation(observation); }
           catch { observation.batch.incomplete=true;this.persistObservation(observation);this.nativeObservationError='도구 요청 기록이 불완전합니다.'; }
@@ -2917,7 +3788,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           }
         }
         if (a.kind==='approval') recordObservation('approval',a.actor==='user'?'사용자가 승인 창에서 선택했습니다.':'런타임 정책이 처리했습니다.',{tool_id:a.id,actor:a.actor,outcome:a.allowed?'allowed':'denied'});
-        if (a.kind==='tool_result') recordObservation('tool_result',a.isError?(a.reason??'도구 실패'):(toolLabels.get(a.id)??'도구 실행 완료'),{tool_id:a.id,outcome:a.isError?'error':'success'});
+        if (a.kind==='tool_result') {
+          const recordDefault = () => recordObservation('tool_result',a.isError?(a.reason??'도구 실패'):(toolLabels.get(a.id)??'도구 실행 완료'),{tool_id:a.id,outcome:a.isError?'error':'success'});
+          const crResult = this.crSdkResults.onToolResult(a.id, a.isError);
+          if (crResult) observationCaptures.push(crResult.then((r) => recordObservation('tool_result', r.text, { ...r.refs, tool_id: a.id, outcome: 'success' }), recordDefault));
+          else recordDefault();
+        }
         if (a.kind==='tool_result' && !a.isError && observationFiles.has(a.id)) {
           const file=observationFiles.get(a.id)!;
           observationCaptures.push((async()=>{
@@ -3006,11 +3882,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
               // before MultiEdit existed) stacks five "미리보기를 열었어요" lines and
               // reopens the live server just as many times. Open once, after the last
               // save (debounce).
-              if (this.revealTimer) clearTimeout(this.revealTimer);
-              this.revealTimer = setTimeout(() => {
-                this.revealTimer = undefined;
-                void this.revealWrittenHtml(fp, streamId);
-              }, 900);
+              // Instructor mode uses live_preview_start + browser_open; skip
+              // the student auto-preview when the instructor writes an HTML file.
+              if (!this._instructorMode.isInstructor) {
+                if (this.revealTimer) clearTimeout(this.revealTimer);
+                this.revealTimer = setTimeout(() => {
+                  this.revealTimer = undefined;
+                  void this.revealWrittenHtml(fp, streamId);
+                }, 900);
+              }
             }
             break;
         }
@@ -3058,6 +3938,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             coachPersonality: effectiveCoachPersonality,
             onDelta,
             onCitations,
+            recordObservation,
+            blobSink: turnBlobSink,
+            trackObservation: (q) => observationCaptures.push(q),
           });
         } else {
           await runProxy();
@@ -3111,26 +3994,89 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
       const local = localRuntimeConfig(vscode.env.appName, proxyUrl);
       if (local) {
-        if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
-        if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
-        const cwd=this.resolveCoachCwd();
-        if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
-        // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
-        // #1298 (E4-3): final gate is server-verified whoami (isInstructor === true).
-        const chalkCtx = (await chalkToolsEnabled(this.context.secrets) && this._instructorMode.isInstructor === true)
-          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
-          : undefined;
-        const result=await runLocalCoach({config:local,profile,cwd,
-          history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
-          signal:ctrl.signal,onDelta,onActivity,chalkCtx,
-          // #1298 — pass instructor brief as system prompt override when in instructor mode.
-          ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
-          requestApproval:async action=>{
-            let prompted=false;
-            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
-            return {approved,actor:prompted?'user':'policy'};
-          }});
-        sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        if (this._instructorMode.isInstructor === true) {
+          // Instructor path — bypasses student token, ensureProfile, lesson gates, spool
+          // (chalk-po condition 1). Uses INSTRUCTOR_TOOL_PROFILE (read + write + browser).
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          // #1297 (E4-2): chalkToolsEnabled is a first-pass filter (button display).
+          // #1295 (E2-6): cwd and requestConfirmation added for file I/O and overwrite confirm.
+          const chalkCtx = (await chalkToolsEnabled(this.context.secrets))
+            ? {
+                serverUrl: proxyUrl,
+                secrets: this.context.secrets,
+                cwd,
+                currentModel: local.model,
+                requestConfirmation: async (message: string): Promise<boolean> => {
+                  const answer = await vscode.window.showWarningMessage(
+                    message, { modal: true }, "계속", "취소",
+                  );
+                  return answer === "계속";
+                },
+              }
+            : undefined;
+          // Browser tools for the local runtime: live_preview_start + browser_open.
+          // Reuses INSTRUCTOR_TOOL_PROFILE.sdk_tools.browser to stay in sync with the policy.
+          // Delegates to runBrowserOpen / runLivePreviewStart via the same BrowserMcpHost the
+          // student SDK path uses (buildBrowserMcpHost). That gives the instructor the full
+          // #507 port correction (livePreviewUrl), #415 duplicate suppression (openPages /
+          // currentPage), and #526 slot-displaced notice. The host's crEnabled / crScope
+          // are fine for the instructor: with CR off they are no-ops; with CR on the
+          // instructor is subject to the same scope rules as a student.
+          const browserTools: BrowserToolsForLocal | undefined =
+            INSTRUCTOR_TOOL_PROFILE.sdk_tools?.browser
+              ? (() => {
+                  const host = this.buildBrowserMcpHost();
+                  return {
+                    definitions: [...INSTRUCTOR_LOCAL_BROWSER_DEFS],
+                    call: async (name: string, input: unknown) => {
+                      const r =
+                        name === "live_preview_start"
+                          ? await runLivePreviewStart(host)
+                          : name === "browser_open"
+                            ? await runBrowserOpen(host, typeof (input as Record<string, unknown>)?.url === "string" ? (input as Record<string, unknown>).url as string : "")
+                            : null;
+                      if (!r) throw new Error(`알 수 없는 브라우저 도구: ${name}`);
+                      // isError mirrors the workspace/chalk tool convention: throw so the
+                      // local runtime marks the tool result as a failure.
+                      const text = r.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+                      if (r.isError) throw new Error(text);
+                      return text;
+                    },
+                  };
+                })()
+              : undefined;
+          const result=await runInstructorTurn({
+            local,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            brief:this._instructorMode.brief,
+            chalkCtx,
+            browserTools,
+            signal:ctrl.signal,onDelta,onActivity,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        } else {
+          if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
+          if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
+          const cwd=this.resolveCoachCwd();
+          if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+          const chalkCtx = undefined; // student local path never has instructor chalkCtx
+          const result=await runLocalCoach({config:local,profile,cwd,
+            history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+            signal:ctrl.signal,onDelta,onActivity,chalkCtx,
+            requestApproval:async action=>{
+              let prompted=false;
+              const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+              return {approved,actor:prompted?'user':'policy'};
+            }});
+          sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+        }
+      } else if (this._instructorMode.isInstructor === true) {
+        throw new Error('강사 채팅은 지금 내 Claude 구독 연결에서만 됩니다.');
       } else if (runtime === "agent-sdk") {
         if (!profile) {
           throw new Error(profileNotReadyNotice(this.coachDisplayName()));
@@ -3352,6 +4298,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
       if (this.effortTurn?.id === streamId) void this.refreshEffortResult().catch(() => { /* panel may have closed */ });
       this.activeStreams.delete(streamId);
+      // cr-verify — the run this turn carried takes no more coach calls once the turn ends.
+      this.verifySession?.endTurn();
+      this.verifyTurnRecorder = null;
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
@@ -3453,8 +4402,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     onCitations: (cites: import("./protocol").Citation[]) => void;
     /** #897 H-13 — even when several requests go out within one turn the notice appears once (the recorder blocks the rest). */
     modelEcho?: ModelEchoContext;
+    /** CR-10 — the turn's observation recorder; browser results are recorded only with the CR switch on. */
+    recordObservation?: (
+      kind: import("./nativeObservationContract").ObservationKind,
+      value: string,
+      extra?: Partial<import("./nativeObservationContract").ObservationEvent>,
+    ) => void;
+    /** CR-10 — the turn's end waits for these recordings (their bytes are stored first). */
+    trackObservation?: (p: Promise<void>) => void;
+    /** CR-10 — where a result's bytes go; absent when the turn has no recorder, so none are stored. */
+    blobSink?: BlobSink;
   }): Promise<void> {
-    const browser = new BrowserControl();
+    // CR-11/CR-09 — with the switch on the turn drives the long-lived control, so the scope
+    // guard and the picked element's refs outlive the turn (proxyTurnBrowser).
+    const turnBrowser = proxyTurnBrowser(
+      this.isCurriculumRuntimeEnabled(),
+      () => (this.mcpBrowser ??= new BrowserControl(this.crBrowserOptions())),
+      () => new BrowserControl(this.crBrowserOptions()),
+    );
+    const browser = turnBrowser.browser;
+    // CR-08 — step numbers in results count this request's actions, not the control's lifetime.
+    browser.crNewTurn();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
     const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
     try {
@@ -3532,23 +4500,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const fixed = this.retargetLoopbackNavigation(call);
           const line = browserToolLogLine(fixed.call.name, fixed.call.input);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
-          const tr = await browser.execute(fixed.call);
+          // cr-verify — the verify tools go to the session (its runner drives the same control), switch on only.
+          const tr = isCrVerifyTool(fixed.call.name) && this.isCurriculumRuntimeEnabled()
+            ? await this.runVerifyTool(fixed.call.name, (fixed.call.input ?? {}) as Record<string, unknown>)
+            : await browser.execute(fixed.call);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: tr.isError ? "error" : "done" });
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: call.id,
-            // If it was corrected, tell the model too — fix it silently and it
-            // guesses again next turn.
-            content: fixed.note
-              ? [...tr.content, { type: "text" as const, text: fixed.note }]
-              : tr.content,
-            ...(tr.isError ? { is_error: true } : {}),
-          });
+          // If it was corrected, tell the model too — fix it silently and it guesses
+          // again next turn. One mapping shared with the CR-T03 adapter parity check.
+          toolResults.push(toProxyToolResult(call.id, tr, fixed.note));
+          // CR-10 — with the switch on, the result is recorded against its artifact version.
+          if (tr.observation && p.recordObservation) {
+            const recording = recordProxyCrResult(p.recordObservation, call.id, fixed.call.name, fixed.call.input ?? {}, tr.observation, p.blobSink);
+            if (p.trackObservation) p.trackObservation(recording);
+            else void recording;
+          }
         }
         scratch.push({ role: "user", content: toolResults });
       }
     } finally {
-      await browser.dispose();
+      await turnBrowser.release();
     }
   }
 
@@ -3854,9 +4824,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const isInstructor = await this._instructorMode.checkInstructorMode(token, proxyUrl);
-    const instructorBrief = (isInstructor && token)
-      ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
+    // #1298 A-01 — student slot takes priority. If the student token is active
+    // (present, not expired, not hard-rejected), skip the instructor check entirely
+    // to prevent the instructor panel from flashing during a rehearsal.
+    // profileFetched: ensureProfile() completed and recorded an answer (ok or failure).
+    // Distinct from "token exists" to handle the connections.matchesService=false early-return.
+    const profileFetched = !!token && (profile !== null || this.lastProfileFailure !== null);
+    const studentProfileStatus = profileFailureToStatus(
+      this.lastProfileFailure,
+      !!token,
+      profileFetched,
+    );
+    const panelMode = decideMode({ studentToken: token ?? undefined, studentProfileStatus });
+    // Instructor auth always uses the issuer token slot, never the student token.
+    const issuerToken = await resolveInstructorTokenFromSecrets(this.context.secrets);
+    let isInstructor: boolean;
+    if (panelMode === "instructor") {
+      isInstructor = await this._instructorMode.checkInstructorMode(issuerToken, proxyUrl);
+    } else {
+      // Student slot active: clear any cached instructor state so that handleSend and other
+      // callers checking this._instructorMode.isInstructor === true see false, not a stale true.
+      this._instructorMode.reset();
+      isInstructor = false;
+    }
+    // #1298 — on the auto-read path (postConfig/refresh), act on the whoami result.
+    // The setInstructorToken command has its own rejection handler; this covers the background refresh path.
+    if (issuerToken) {
+      const action = this._instructorMode.handleAutoReadResult();
+      if (action === "rejected_delete_and_show") {
+        this.onIssuerAutoRejected?.();
+      }
+    }
+    const instructorBrief = (isInstructor && issuerToken)
+      ? await this._instructorMode.fetchInstructorBrief(issuerToken, proxyUrl)
       : undefined;
     const instructorConnection = isInstructor
       ? (local?.provider === "claude" ? "내 Claude 구독"
@@ -3879,6 +4879,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         ...(isInstructor ? { isInstructor: true } : {}),
         ...(instructorBrief ? { instructorBrief } : {}),
         ...(instructorConnection ? { instructorConnection } : {}),
+        ...(isInstructor && local ? { instructorModelChoices: localModelSelection(local).choices } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight

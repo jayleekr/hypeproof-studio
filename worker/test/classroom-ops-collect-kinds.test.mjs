@@ -59,6 +59,85 @@ try {
   }; };
   const collect = async (kinds, extra = {}) => { const made = await post({ targets: ['A1'], mode: 'collect_only', kinds, ...extra }); assert.equal(made.status, 201, made.raw); return made.json.batch.id; };
 
+  await check('#1409 approved pages must arrive, and matching damaged record bytes remain damaged', async () => {
+    const owner = { student: ident.u, cohort: ident.c, profile: ident.p, class_run_id: scope.class_run_id, batch_id: 'synthetic-batch', seat_id: 'A1', ...NOTICE, activity: scope.activity, run_starts_at: run.starts_at, upload_until: run.ends_at + 86_400_000 };
+    const verify = async (lines, kinds, mutate = () => {}) => {
+      const raws = lines.map((e) => typeof e === 'string' ? e : JSON.stringify(e));
+      const index = raws.map((raw) => { let e; try { e = JSON.parse(raw); } catch {} return { seq: e?.seq ?? null, ts: e?.ts ?? null, type: e?.type ?? null, sha256: h(raw), ...(e?.artifact_sha256 ? { artifact_sha256: e.artifact_sha256, approved: e.approved === true } : {}), ...(e?.type === 'artifact_snapshot' ? { artifact_sha256: e.sha256 } : {}), ...(!e ? { malformed: true } : {}) }; });
+      mutate(index);
+      const indexed = index.map(JSON.stringify), ts = new Date(run.starts_at + 1000).toISOString();
+      const binding = { ...owner, student: ident, consent: NOTICE, kinds, parts: [{ part: 1, spool_session_id: 'synthetic-session', current: true, lines: raws.length, included: raws.length, from_ts: ts, to_ts: ts, first_seq: 1, last_seq: raws.length, session_last_seq: raws.length, final_index_sha256: h(indexed.at(-1)), torn_tail: false }], omitted: { unreadable: 0, over_limit: 0 } };
+      return Svc.verifyCollection(new Map([['p1.meta.json', JSON.stringify({ user: ident, session_id: 'synthetic-session' })], ['p1.index.jsonl', indexed.join('\n') + '\n'], ['p1.events.jsonl', raws.join('\n') + '\n']]), binding, { ...owner, kinds });
+    };
+    const approval = { type: 'artifact_approval', seq: 1, artifact_sha256: h(APPROVED), approved: true };
+    for (const kinds of [['record'], ['artifacts']]) {
+      const absent = await verify([approval], kinds); assert.equal(absent.coverage, 'gaps'); assert.ok(absent.reasons.includes('approved_artifact_missing'));
+      assert.equal((await verify([approval, { type: 'artifact_snapshot', seq: 2, sha256: h(APPROVED), content: APPROVED }], kinds)).coverage, 'complete');
+      assert.equal((await verify([{ ...approval, approved: false }], kinds)).coverage, 'complete', 'withdrawn page is not required');
+    }
+    const damaged = await verify(['{broken', { type: 'prompt', seq: 2, text: 'readable' }], ['record']);
+    assert.equal(damaged.coverage, 'damaged'); assert.ok(damaged.reasons.includes('damaged_line')); assert.equal(damaged.extent.received.prompt, 1);
+    assert.deepEqual(await verify(['{broken'], ['record'], (idx) => { delete idx[0].malformed; }), { problem: 'index_mismatch' });
+    assert.deepEqual(await verify(['{broken'], ['record'], (idx) => { idx[0].sha256 = '0'.repeat(64); }), { problem: 'index_mismatch' });
+    assert.deepEqual(await verify(['{broken'], ['prompts']), { problem: 'index_mismatch' });
+  });
+
+  await check('#1409 unlisted uploads are removed; late PUT and concurrent filename writes cannot alter a sealed ledger', async () => {
+    const prepare = async () => { const b = await collect(['prompts']), fr = App.freezeCollection(await s2.readForCollection(since, ident), scope, b, NOTICE, ['prompts'], Date.now()); assert.ok(fr.ok); const d = device(['prompts']); for (const file of fr.files) assert.equal((await d.put(b, 1, file.name, file.data)).status, 201); return { b, fr, d, manifest: { schema: App.SNAPSHOT_SCHEMA_V3, files: fr.files.map((file) => ({ name: file.name, bytes: file.data.byteLength, sha256: h(file.data) })), collection: fr.binding } }; };
+    const seal = ({ b, manifest }) => f.request(`/v1/classroom/ops/collect/snapshots/${b}/1/seal`, 'POST', manifest, a1.credential);
+    const extra = await prepare(); assert.equal((await extra.d.put(extra.b, 1, 'p8.events.jsonl', new TextEncoder().encode('UNLISTED-SECRET'))).status, 201);
+    assert.equal((await seal(extra)).json.reason, 'manifest_unlisted_file'); assert.equal(keysOf('student-a').filter((k) => k.includes('/' + extra.b + '/')).length, 0);
+    const retry = await prepare(), originalDelete = f.env.HPS_TRACES.delete;
+    assert.equal((await retry.d.put(retry.b, 1, 'p8.events.jsonl', new TextEncoder().encode('DELETE-RETRY-SECRET'))).status, 201);
+    let deletions = 0;
+    f.env.HPS_TRACES.delete = async (key) => { if (key.includes(retry.b) && ++deletions === 2) throw Error('synthetic delete failure'); return originalDelete(key); };
+    try {
+      assert.equal((await seal(retry)).status, 500);
+      const held = f.db.prepare('SELECT state,files_json FROM classroom_snapshots WHERE batch_id=?').get(retry.b);
+      assert.equal(held.state, 'quarantined'); assert.ok(JSON.parse(held.files_json).length > 1, 'ledger retained for retry');
+      const remaining = keysOf('student-a').filter((key) => key.includes('/' + retry.b + '/')).length;
+      assert.ok(remaining > 0); assert.equal((await f.request(f.base + '/report-batches/' + retry.b + '/reconcile', 'POST', {})).json.r2_orphans, remaining, 'rejected bytes are unclaimed even when referenced by cleanup ledger');
+    } finally { f.env.HPS_TRACES.delete = originalDelete; }
+    assert.equal((await seal(retry)).status, 422); assert.equal(keysOf('student-a').filter((key) => key.includes('/' + retry.b + '/')).length, 0);
+    assert.equal(f.db.prepare('SELECT files_json FROM classroom_snapshots WHERE batch_id=?').get(retry.b).files_json, '[]');
+    assert.equal((await seal(retry)).status, 422, 'cleanup retry is idempotent');
+    const late = await prepare(), originalPut = f.env.HPS_TRACES.put;
+    let entered, resume; const waiting = new Promise((r) => { entered = r; }), released = new Promise((r) => { resume = r; });
+    f.env.HPS_TRACES.put = async (key, ...args) => { if (key.includes(late.b) && key.endsWith('p8.events.jsonl')) { entered(); await released; } return originalPut(key, ...args); };
+    try {
+      const pending = late.d.put(late.b, 1, 'p8.events.jsonl', new TextEncoder().encode('LATE-SECRET')); await waiting;
+      assert.equal((await seal(late)).status, 201); const before = f.db.prepare('SELECT files_json FROM classroom_snapshots WHERE batch_id=?').get(late.b).files_json;
+      resume(); assert.equal((await pending).status, 409); assert.equal(f.db.prepare('SELECT files_json FROM classroom_snapshots WHERE batch_id=?').get(late.b).files_json, before);
+      assert.ok(!keysOf('student-a').some((k) => k.includes(late.b) && k.endsWith('p8.events.jsonl'))); assert.equal((await seal(late)).status, 200);
+    } finally { resume(); f.env.HPS_TRACES.put = originalPut; }
+    // A new filename committed after the verifier read the ledger invalidates that seal's CAS.
+    const changing = await prepare(), originalGet = f.env.HPS_TRACES.get; let inserted = false;
+    f.env.HPS_TRACES.get = async (key) => {
+      if (!inserted && key.includes(changing.b)) { inserted = true; assert.equal((await changing.d.put(changing.b, 1, 'p8.events.jsonl', new TextEncoder().encode('MID-SEAL-SECRET'))).status, 201); }
+      return originalGet(key);
+    };
+    try {
+      assert.equal((await seal(changing)).status, 409);
+      assert.equal(f.db.prepare('SELECT state FROM classroom_snapshots WHERE batch_id=?').get(changing.b).state, 'uploading');
+      assert.equal((await seal(changing)).json.reason, 'manifest_unlisted_file');
+      assert.equal(keysOf('student-a').filter((k) => k.includes('/' + changing.b + '/')).length, 0);
+    } finally { f.env.HPS_TRACES.get = originalGet; }
+    const b = await collect(['prompts']), d = device(['prompts']);
+    assert.deepEqual((await Promise.all(['p7.events.jsonl', 'p8.events.jsonl'].map((name) => d.put(b, 1, name, new TextEncoder().encode(name))))).map((r) => r.status), [201, 201]);
+    assert.equal(JSON.parse(f.db.prepare('SELECT files_json FROM classroom_snapshots WHERE batch_id=?').get(b).files_json).length, 2);
+    // Model R2's atomic conditional write for same-name races; the ordinary in-memory fixture has no preconditions.
+    f.env.HPS_TRACES.put = async (key, bytes, options) => { assert.equal(options.onlyIf.etagDoesNotMatch, '*'); if (f.r2.has(key)) return null; await originalPut(key, bytes); return {}; };
+    try {
+      const same = await collect(['prompts']);
+      assert.deepEqual((await Promise.all(['winner', 'loser'].map((text) => d.put(same, 1, 'p1.events.jsonl', new TextEncoder().encode(text))))).map((r) => r.status), [201, 409]);
+      const held = JSON.parse(f.db.prepare('SELECT files_json FROM classroom_snapshots WHERE batch_id=?').get(same).files_json);
+      assert.equal(held.length, 1); assert.equal(held[0].sha256, h('winner')); assert.ok(stored().some(([key, text]) => key.includes(same) && text === 'winner'));
+      const duplicates = await collect(['prompts']);
+      assert.deepEqual((await Promise.all([1, 2].map(() => d.put(duplicates, 1, 'p1.events.jsonl', new TextEncoder().encode('identical'))))).map((r) => r.status).sort(), [200, 201]);
+    } finally { f.env.HPS_TRACES.put = originalPut; }
+
+  });
+
   await check('AT-48 contract: kinds are ["record"], one of or both "prompts"/"artifacts"; never on the wrap-up; part of the request identity', async () => {
     for (const [k, ok] of [[['record'], 1], [['prompts'], 1], [['artifacts'], 1], [['prompts', 'artifacts'], 1], [['record', 'prompts'], 0], [[], 0], [['prompts', 'prompts'], 0], [['files'], 0], ['record', 0]]) {
       assert.equal(!!Svc.normalizeKinds(k), !!ok, 'service ' + JSON.stringify(k)); assert.equal(!!App.normalizeKinds(k), !!ok, 'app ' + JSON.stringify(k));

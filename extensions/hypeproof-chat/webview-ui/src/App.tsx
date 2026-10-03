@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, useRef } from "react";
-import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import type { ChatConfig, ChatMessage, Citation, ElementPreview, HostMessage } from "../../src/protocol";
 import {
   emptyTimeline,
   timelineCitations,
@@ -16,6 +16,16 @@ import { runVoiceCapabilityProbe } from "./voiceProbe";
 import { ChatPanel } from "./ChatPanel";
 import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
+import { VerifyPanel } from "./VerifyPanel";
+import { PublishPanel } from "./PublishPanel";
+import { EvidencePanel } from "./EvidencePanel";
+import { MemoryPanel } from "./MemoryPanel";
+import { SkillsPanel } from "./SkillsPanel";
+import type { SkillsView } from "../../src/skillView";
+import type { MemoryView } from "../../src/memoryView";
+import type { EvidenceView } from "../../src/evidenceView";
+import type { PublishView } from "../../src/publishView";
+import type { VerifyView } from "../../src/verifyView";
 
 interface State {
   config: ChatConfig | null;
@@ -29,6 +39,21 @@ interface State {
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
+  /** CR-09 — the picked element queued for the next turn; the student can remove it. */
+  elementPreview: ElementPreview | null;
+  /** cr-verify — the "내 제품 테스트" panel as the host computed it; null = hidden. */
+  verify: VerifyView | null;
+  verifyError: string | null;
+  /** The student's own sentence the panel sends next (a run start or a fix request). */
+  verifySend: string | null;
+  /** cr-publish — the "사용자 테스트용으로 공개" panel (null = hidden) and its last answer. */
+  testPublish: { view: PublishView; error: string | null; errorLines: string[]; shareUrl: string | null } | null;
+  /** cr-evidence — the "실험 증거" panel (null = hidden). */
+  evidence: { view: EvidenceView; error: string | null; done: string | null } | null;
+  /** cr-memory — the "프로젝트 기억" panel (null = hidden). */
+  memory: { view: MemoryView; error: string | null; done: string | null } | null;
+  /** cr-skills — the "커리큘럼 스킬" panel (null = hidden). */
+  skills: { view: SkillsView; running: boolean; error: string | null; done: string | null } | null;
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
   /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
@@ -50,6 +75,18 @@ type Action =
   | { type: "streamCitations"; citations: Citation[] }
   | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
+  | { type: "elementAttached"; element: ElementPreview | null }
+  | { type: "verifyState"; view: VerifyView | null; sendText?: string; error?: string }
+  | { type: "verifyClose" }
+  | { type: "testPublishState"; view: PublishView | null; error?: string; errorLines?: string[]; shareUrl?: string }
+  | { type: "testPublishClose" }
+  | { type: "evidenceState"; view: EvidenceView | null; error?: string; done?: string }
+  | { type: "evidenceClose" }
+  | { type: "memoryState"; view: MemoryView | null; error?: string; done?: string }
+  | { type: "memoryClose" }
+  | { type: "skillsState"; view: SkillsView | null; running?: boolean; error?: string; done?: string }
+  | { type: "skillsClose" }
+  | { type: "verifySent" }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamStopped"; by?: "instructor" }
@@ -73,6 +110,14 @@ const initialState: State = {
   errorRequestId: null,
   errorRunbookUrl: null,
   pageNotice: null,
+  elementPreview: null,
+  verify: null,
+  testPublish: null,
+  evidence: null,
+  memory: null,
+  skills: null,
+  verifyError: null,
+  verifySend: null,
   aiNotice: null,
   stopNotice: null,
   openWorldId: null,
@@ -109,6 +154,30 @@ function reducer(state: State, action: Action): State {
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
+    case "elementAttached":
+      return { ...state, elementPreview: action.element };
+    case "verifyState":
+      return { ...state, verify: action.view, verifyError: action.error ?? null, verifySend: action.sendText ?? state.verifySend };
+    case "verifyClose":
+      return { ...state, verify: null, verifyError: null };
+    case "testPublishState":
+      return { ...state, testPublish: action.view ? { view: action.view, error: action.error ?? null, errorLines: action.errorLines ?? [], shareUrl: action.shareUrl ?? null } : null };
+    case "testPublishClose":
+      return { ...state, testPublish: null };
+    case "evidenceState":
+      return { ...state, evidence: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
+    case "evidenceClose":
+      return { ...state, evidence: null };
+    case "memoryState":
+      return { ...state, memory: action.view ? { view: action.view, error: action.error ?? null, done: action.done ?? null } : null };
+    case "memoryClose":
+      return { ...state, memory: null };
+    case "skillsState":
+      return { ...state, skills: action.view ? { view: action.view, running: action.running === true, error: action.error ?? null, done: action.done ?? null } : null };
+    case "skillsClose":
+      return { ...state, skills: null };
+    case "verifySent":
+      return { ...state, verifySend: null };
     case "worldOpened":
       // 세상이 바뀌면 직전 발행 결과는 더 이상 이 세상 얘기가 아니다 — 지운다.
       // (안 지우면 초코 세상을 열었는데 뽀로 세상의 "올렸어요" 링크가 남는다.)
@@ -162,6 +231,7 @@ function reducer(state: State, action: Action): State {
       return {
         ...state,
         pageNotice: null,   // #308 — clear the "붙였어요" notice once the user sends
+        elementPreview: null, // CR-09 — the picked element went with this turn
         stopNotice: null,   // #497 — 다시 입력했으면 중지 안내는 역할을 다했다
         timeline: {
           ...state.timeline,
@@ -184,6 +254,13 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const scope = useRef<string | undefined>();
   const [shouldCrash, setShouldCrash] = useState(false);
+  // cr-verify — the verify requests THIS view made; the host echoes the id with the sentence to send.
+  const verifyRequests = useRef(new Set<string>());
+  const verifyRequest = () => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    verifyRequests.current.add(id);
+    return id;
+  };
   // #384 — image handed over from the host (an image opened in an editor tab).
   // nonce forces ChatPanel's effect to re-run even for the same dataUrl.
   const [incomingImage, setIncomingImage] = useState<{ dataUrl: string; nonce: number } | null>(null);
@@ -214,6 +291,13 @@ export function App() {
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
+        case "elementAttached": dispatch({ type: "elementAttached", element: msg.element }); break;
+        // Every chat view gets the post; only the one whose panel asked sends the sentence.
+        case "verifyState": dispatch({ type: "verifyState", view: msg.view, sendText: msg.sendText && msg.requestId && verifyRequests.current.delete(msg.requestId) ? msg.sendText : undefined, error: msg.error }); break;
+        case "publishState": dispatch({ type: "testPublishState", view: msg.view, error: msg.error, errorLines: msg.errorLines, shareUrl: msg.shareUrl }); break;
+        case "evidenceState": dispatch({ type: "evidenceState", view: msg.view, error: msg.error, done: msg.done }); break;
+        case "memoryState": dispatch({ type: "memoryState", view: msg.view, error: msg.error, done: msg.done }); break;
+        case "skillsState": dispatch({ type: "skillsState", view: msg.view, running: msg.running, error: msg.error, done: msg.done }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
@@ -244,6 +328,82 @@ export function App() {
     dispatch({ type: "userSent", text: trimmed, images });
     postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images, ...(imports?.length ? { imports } : {}) });
   };
+
+  // cr-verify — the host recorded the start or fix request; the student's own sentence goes
+  // out through the ordinary send path (the host attaches the coach context, model-only).
+  useEffect(() => {
+    if (!state.verifySend || state.streamId) return;
+    const text = state.verifySend;
+    dispatch({ type: "verifySent" });
+    send(text);
+  }, [state.verifySend, state.streamId]);
+
+  const verifyPanel = state.verify ? (
+    <VerifyPanel
+      view={state.verify}
+      error={state.verifyError}
+      busy={!!state.streamId}
+      onStart={(criteria) => postToHost({ type: "verifyStart", requestId: verifyRequest(), criteria })}
+      onRetest={() => postToHost({ type: "verifyRetest" })}
+      onFix={(criterionId, text) => postToHost({ type: "verifyFix", requestId: verifyRequest(), criterionId, text })}
+      onClose={() => dispatch({ type: "verifyClose" })}
+    />
+  ) : null;
+
+  const publishPanel = state.testPublish ? (
+    <PublishPanel
+      view={state.testPublish.view}
+      error={state.testPublish.error}
+      errorLines={state.testPublish.errorLines}
+      shareUrl={state.testPublish.shareUrl}
+      busy={!!state.streamId}
+      onManifest={(manifest) => postToHost({ type: "publishOpen", manifest })}
+      onSubmit={(form) => postToHost({ type: "publishSubmit", form })}
+      onLink={(experimentId, channel, expiresInDays) => postToHost({ type: "publishLink", experimentId, channel, expiresInDays })}
+      onRevoke={(linkId) => postToHost({ type: "publishRevoke", linkId })}
+      onClose={() => dispatch({ type: "testPublishClose" })}
+    />
+  ) : null;
+
+  const evidencePanel = state.evidence ? (
+    <EvidencePanel
+      view={state.evidence.view}
+      error={state.evidence.error}
+      done={state.evidence.done}
+      busy={!!state.streamId}
+      onSelect={(experimentId) => postToHost({ type: "evidenceOpen", experimentId })}
+      onNote={(experimentId, note) => postToHost({ type: "evidenceNote", experimentId, note })}
+      onDraft={(experimentId) => postToHost({ type: "evidenceDraft", experimentId })}
+      onReview={(experimentId, draftId, revision, actions) => postToHost({ type: "evidenceReview", experimentId, draftId, revision, actions })}
+      onDelete={(experimentId, sessionId) => postToHost({ type: "evidenceDelete", experimentId, ...(sessionId ? { sessionId } : {}) })}
+      onClose={() => dispatch({ type: "evidenceClose" })}
+    />
+  ) : null;
+
+  const memoryPanel = state.memory ? (
+    <MemoryPanel
+      view={state.memory.view}
+      error={state.memory.error}
+      done={state.memory.done}
+      busy={!!state.streamId}
+      onRefresh={() => postToHost({ type: "memoryOpen" })}
+      onDiff={(from, to) => postToHost({ type: "memoryDiff", from, to })}
+      onDecide={(form) => postToHost({ type: "memoryDecision", form })}
+      onClose={() => dispatch({ type: "memoryClose" })}
+    />
+  ) : null;
+
+  const skillsPanel = state.skills ? (
+    <SkillsPanel
+      view={state.skills.view}
+      error={state.skills.error}
+      done={state.skills.done}
+      running={state.skills.running}
+      onRefresh={() => postToHost({ type: "skillsOpen" })}
+      onRun={(skill, form) => postToHost({ type: "skillRun", skill, form })}
+      onClose={() => dispatch({ type: "skillsClose" })}
+    />
+  ) : null;
 
   const retry = (prompt: string) => {
     if (state.streamId) return;
@@ -331,6 +491,13 @@ export function App() {
         config={state.config}
         messages={messages}
         pageNotice={state.pageNotice}
+        elementPreview={state.elementPreview}
+        verifyPanel={verifyPanel || publishPanel || evidencePanel || memoryPanel || skillsPanel ? <>{verifyPanel}{publishPanel}{evidencePanel}{memoryPanel}{skillsPanel}</> : null}
+        sendLocked={!!state.verify?.running}
+        onRemoveElement={() => {
+          dispatch({ type: "elementAttached", element: null });
+          postToHost({ type: "removeElementContext" });
+        }}
         aiNotice={state.aiNotice}
         stopNotice={state.stopNotice}
         openWorldId={state.openWorldId}

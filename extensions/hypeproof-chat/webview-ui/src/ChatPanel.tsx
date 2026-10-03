@@ -47,6 +47,13 @@ interface Props {
    */
   messages: ChatMessage[];
   pageNotice: string | null;           // #308 — inline notice for "페이지를 코치에게"
+  /** CR-09 — the picked element queued for the next turn (Curriculum Runtime only). */
+  elementPreview?: import("../../src/protocol").ElementPreview | null;
+  onRemoveElement?: () => void;
+  /** cr-verify — the "내 제품 테스트" panel, drawn above the composer when the host shows it. */
+  verifyPanel?: import("react").ReactNode;
+  /** cr-verify — a product test is driving the browser: nothing is sent until it ends. */
+  sendLocked?: boolean;
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
   /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
@@ -86,6 +93,8 @@ interface Props {
   onReportProblem: () => void;                          // #64
   onInstallUpdate: () => void;                          // #72
   onDismissUpdate: (version: string) => void;           // #72
+  // #1298 — when true, student-only surfaces (MissionHeader, HelpRequest, artifact approval) are hidden.
+  instructor?: boolean;
 }
 
 function extractRenderableHtml(text: string): string | null {
@@ -400,7 +409,7 @@ export function ChatPanel(props: Props) {
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
-    if ((!value && pendingImages.length === 0) || streaming || unavailable) return;
+    if ((!value && pendingImages.length === 0) || streaming || unavailable || props.sendLocked) return;
     // `text` given = the PARKED message going out when the turn ended (#416). It is its own message: it never contained the
     // prompt the learner imported into the draft meanwhile, so it carries no import reference — and the draft typed while
     // waiting is not thrown away with it (observed in the browser run: the parked send took the draft's provenance and
@@ -422,6 +431,8 @@ export function ChatPanel(props: Props) {
     // #751 U4 — a turn the instructor cut off hands the parked message back, exactly like the learner's own Stop. Never sent.
     if (shouldRestoreQueue(prev, streaming, queued, !!props.stopNotice)) { restoreQueuedToDraft(); return; }
     if (unavailable || !shouldFlushQueue(prev, streaming, queued, !!props.stopNotice)) return;
+    // cr-verify — a product test holds the tab: the parked message goes back to the draft, never lost.
+    if (props.sendLocked) { restoreQueuedToDraft(); return; }
     const text = queued as string;
     setQueued(null);
     submit(text);
@@ -546,7 +557,10 @@ export function ChatPanel(props: Props) {
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
   ) : null;
-  if (!config?.profile && !config?.activity) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  // #1298 — config null means postConfig not yet received; show loading regardless of instructor role.
+  // Once config arrives, an instructor may render without a profile or activity.
+  if (!config) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  if (!config.profile && !config.activity && !props.instructor) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <>
@@ -712,10 +726,8 @@ export function ChatPanel(props: Props) {
         </div>
       </header>
 
-      {/* Region A — Mission header. Replaces both the old `hps-activity-header` and the
-          `details.hps-lesson` summary (design §정보 구조, region A). The activity name
-          moved down to a small line inside the header. */}
-      <MissionHeader
+      {/* Region A — Mission header. Student-only surface; #1298 hides it for instructor mode. */}
+      {!props.instructor && <MissionHeader
         lesson={config?.profile?.lesson ?? null}
         currentStepId={currentStepId}
         onSelectStep={setCurrentStepId}
@@ -737,7 +749,7 @@ export function ChatPanel(props: Props) {
           name: config.activity.name,
           verified: !!config.activity.verified,
         } : null}
-      />
+      />}
       {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
 
@@ -774,10 +786,12 @@ export function ChatPanel(props: Props) {
           (SX-05), closed by default, no Primary (SX-04). Drawn with or without a lesson. */}
       <InstructorInbox inbox={inbox} post={postToHost} promptImport={{ onImport: importPrompt, onUndo: undoImport, disabled: frozen, draft, last: lastImport, note: importNote }} />
       {/* #751 native help — the learner's own request to the instructor of this class. Same rail, closed by default, no Primary. */}
-      <HelpRequest view={help} post={postToHost} />
+      {/* #1298 — hidden for instructor mode; instructor has no student help-request surface. */}
+      {!props.instructor && <HelpRequest view={help} post={postToHost} />}
       {/* #751 U1b — the learner's approval of their page as the class result, next to help (drawn only for a learner in class).
           Closed by default, no Primary; the button opens the host's question, which shows the exact version first. */}
-      {help && <details className="hp-inbox hp-rail-lesson" data-artifact-approval="">
+      {/* #1298 — hidden for instructor mode. */}
+      {!props.instructor && help && <details className="hp-inbox hp-rail-lesson" data-artifact-approval="">
         <summary>수업 결과물 승인</summary>
         <p className="hp-rail-lesson-note">작업 폴더의 index.html 지금 판을 수업 결과물로 승인하거나 승인을 취소합니다. 누르면 그 판의 지문을 먼저 보여 주고 고르게 합니다. 승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어가며, 이 버튼은 아무것도 보내지 않습니다. 고치면 새 판은 다시 승인해야 합니다.</p>
         <button type="button" className="hp-cta-quiet" data-artifact-approve="" onClick={() => postToHost({ type: "artifactApprove" })}>지금 결과물 확인하고 승인·취소</button>
@@ -894,6 +908,34 @@ export function ChatPanel(props: Props) {
             {props.pageNotice}
           </div>
         )}
+
+        {/* CR-09 — exactly what goes to the coach with the next message, removable before sending. */}
+        {props.elementPreview && (
+          <div className="hps-element-context" role="group" aria-label="코치에게 함께 보낼 화면 요소" data-testid="element-context">
+            {props.elementPreview.imageDataUrl && (
+              <img className="hps-element-crop" src={props.elementPreview.imageDataUrl} alt="고른 요소의 모습" />
+            )}
+            <div className="hps-element-meta">
+              <div>
+                <strong>함께 보낼 요소</strong> &lt;{props.elementPreview.tag}&gt;{" "}
+                {props.elementPreview.text && `“${props.elementPreview.text.slice(0, 40)}”`} · {props.elementPreview.ref}
+              </div>
+              <div className="hps-element-source">
+                {props.elementPreview.source === "unmapped" ? "소스 위치: 찾지 못함" : `소스 위치: ${props.elementPreview.source}`}
+                {!props.elementPreview.imageDataUrl && " · 이미지는 보내지 않아요"}
+              </div>
+              <details>
+                <summary>코치에게 보낼 내용 보기</summary>
+                <pre data-testid="element-context-sent">{props.elementPreview.sentText}</pre>
+              </details>
+            </div>
+            <button type="button" className="hps-element-remove" aria-label="이 요소 빼기" onClick={props.onRemoveElement}>
+              ✕
+            </button>
+          </div>
+        )}
+
+        {props.verifyPanel}
 
         {/* #497 — the notice right after Stop. It is not an error, so it is announced as
             a quiet inline status line rather than an error banner. It goes away on the
@@ -1115,7 +1157,7 @@ export function ChatPanel(props: Props) {
             ) : (
               <button
                 onClick={() => submit()}
-                disabled={!draft.trim() && pendingImages.length === 0}
+                disabled={(!draft.trim() && pendingImages.length === 0) || props.sendLocked}
                 className="hps-btn-send"
               >
                 Send

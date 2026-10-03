@@ -150,7 +150,7 @@ classroomCollectApp.post('/consent', async (c) => {
   return c.json({ consent: true, consent_id: id }, 201);
 });
 
-async function ownItem(c: any, g: Grant, batchId: string, now: number) {
+async function ownItem(c: any, g: Grant, batchId: string, now: number, allowQuarantined = false) {
   if (!UUIDISH_RE.test(batchId)) return c.json({ error: 'invalid batch' }, 400);
   const db: Db = c.env.HPS_DB;
   const item = await db.prepare('SELECT i.*,b.purpose,b.notice_version,b.upload_until,b.dry_run FROM classroom_collect_items i JOIN classroom_collect_batches b ON b.id=i.batch_id WHERE i.batch_id=? AND i.student_id=? AND i.seat_revision=? AND b.class_run_id=?').bind(batchId, g.student_id, g.seat_revision, g.class_run_id).first<Record<string, any>>();
@@ -158,7 +158,7 @@ async function ownItem(c: any, g: Grant, batchId: string, now: number) {
   // A learner held out of the batch when it was created (no consent then, not connected, withdrawn) was never asked.
   // Consent given later applies to the next batch; it does not reopen this one.
   if (item?.state === 'withdrawn') return c.json({ error: 'collection was withdrawn', reason: 'withdrawn' }, 403);
-  if (!item || !['requested', 'uploading', 'incomplete', 'verified'].includes(item.state)) return c.json({ error: 'no collection was requested from this learner', reason: 'not_requested' }, 404);
+  if (!item || !['requested', 'uploading', 'incomplete', 'verified', ...(allowQuarantined ? ['quarantined'] : [])].includes(item.state)) return c.json({ error: 'no collection was requested from this learner', reason: 'not_requested' }, 404);
   if (await db.prepare('SELECT 1 FROM classroom_collect_tombstones WHERE class_run_id=? AND student_id=?').bind(g.class_run_id, g.student_id).first()) return c.json({ error: 'collection was withdrawn', reason: 'withdrawn' }, 403);
   if (now > item.upload_until) return c.json({ error: 'the upload window has closed', reason: 'upload_window_closed' }, 403);
   if (item.dry_run) return c.json({ error: 'dry-run batch stores nothing', reason: 'dry_run' }, 409);
@@ -176,7 +176,7 @@ classroomCollectApp.put('/snapshots/:batch/:revision/:filename', bodyLimit({ max
   const body = await c.req.arrayBuffer();
   if (!body.byteLength || body.byteLength > spec.maxBytes) return c.json({ error: 'empty or oversized file' }, 413);
   const sha = await sha256Bytes(body), snap = await db.prepare('SELECT state,files_json FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<{ state: string; files_json: string }>();
-  if (snap?.state === 'sealed') return c.json({ error: 'this revision is sealed; changed bytes need a new revision', reason: 'revision_sealed' }, 409);
+  if (snap && snap.state !== 'uploading') return c.json({ error: 'this revision is sealed; changed bytes need a new revision', reason: 'revision_sealed' }, 409);
   const files: Array<{ name: string; bytes: number; sha256: string }> = snap ? JSON.parse(snap.files_json) : [], prior = files.find((f) => f.name === filename);
   // Write-once per (revision, file): the same bytes again is an idempotent retry, different bytes is refused.
   if (prior) {
@@ -187,20 +187,36 @@ classroomCollectApp.put('/snapshots/:batch/:revision/:filename', bodyLimit({ max
     await db.prepare("UPDATE classroom_collect_items SET updated_at=? WHERE batch_id=? AND seat_id=? AND state='uploading'").bind(now, item.batch_id, item.seat_id).run().catch(() => undefined);
     return c.json({ stored: true, sha256: sha, bytes: body.byteLength, retry: true });
   }
-  await c.env.HPS_TRACES.put(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, filename), body, { httpMetadata: { contentType: spec.contentType } });
+  const objectKey = snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, filename);
+  // R2 enforces write-once even when two PUTs both read the ledger before either registers its filename.
+  const written = await c.env.HPS_TRACES.put(objectKey, body, { onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: spec.contentType } });
+  if (written === null) {
+    const existing = await c.env.HPS_TRACES.get(objectKey);
+    if (!existing || await sha256Bytes(await existing.arrayBuffer()) !== sha) return c.json({ error: 'this revision already holds different bytes; use a new revision', reason: 'revision_immutable' }, 409);
+  }
   files.push({ name: filename, bytes: body.byteLength, sha256: sha });
   // The object exists before this row does. If this write fails the object is an orphan that reconcile() reports — not a "complete" upload.
-  await db.batch([
-    db.prepare("INSERT INTO classroom_snapshots(batch_id,student_id,revision,state,files_json,created_at) VALUES(?,?,?,'uploading',?,?) ON CONFLICT(batch_id,student_id,revision) DO UPDATE SET files_json=excluded.files_json").bind(item.batch_id, g.student_id, revision, JSON.stringify(files), now),
+  const stored = await db.batch([
+    // Append against the current ledger, not the pre-PUT copy: concurrent filenames cannot erase each other.
+    // A PUT that lost a race to seal/quarantine cannot append to that immutable revision.
+    db.prepare(`INSERT INTO classroom_snapshots(batch_id,student_id,revision,state,files_json,created_at) VALUES(?,?,?,'uploading',?,?) ON CONFLICT(batch_id,student_id,revision) DO UPDATE SET files_json=json_insert(classroom_snapshots.files_json,'$[#]',json(?)) WHERE classroom_snapshots.state='uploading' AND NOT EXISTS (SELECT 1 FROM json_each(classroom_snapshots.files_json) WHERE json_extract(value,'$.name')=?)`).bind(item.batch_id, g.student_id, revision, JSON.stringify([files.at(-1)!]), now, JSON.stringify(files.at(-1)!), filename),
     db.prepare("UPDATE classroom_collect_items SET state='uploading',updated_at=? WHERE batch_id=? AND seat_id=? AND state IN ('requested','uploading','incomplete')").bind(now, item.batch_id, item.seat_id),
   ]);
+  if (!(stored[0] as any)?.meta?.changes) {
+    const live = await db.prepare('SELECT state,files_json FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<{ state: string; files_json: string }>();
+    const held = live ? (JSON.parse(live.files_json) as typeof files).find((f) => f.name === filename) : undefined;
+    if (live?.state === 'uploading' && held?.sha256 === sha) return c.json({ stored: true, sha256: sha, bytes: body.byteLength, retry: true });
+    // Only this unlisted late object is ours to remove. Never delete a winner's sealed file.
+    if (!held || live?.state === 'quarantined') await c.env.HPS_TRACES.delete(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, filename));
+    return c.json({ error: 'the revision changed while this file was uploading', reason: 'revision_sealed' }, 409);
+  }
   // Stored. Not verified, not complete.
   return c.json({ stored: true, sha256: sha, bytes: body.byteLength }, 201);
 });
 
 classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   const g = c.get('grant'), now = Date.now(), db = c.env.HPS_DB, revision = Number(c.req.param('revision'));
-  const item = await ownItem(c, g, c.req.param('batch'), now); if (item instanceof Response) return item;
+  const item = await ownItem(c, g, c.req.param('batch'), now, true); if (item instanceof Response) return item;
   const m = validateManifest(await json(c)); if (!m.ok) return c.json({ error: m.error, reason: 'manifest_invalid' }, 400);
   // U1b — a kinds batch is sealed only as schema /3 and an older batch only as /1–/2: a manifest never widens or narrows what was asked.
   let asked: BatchScope; try { asked = await batchScope(db, item.batch_id); } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
@@ -211,6 +227,24 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   // The binding is part of what was sealed: the same bytes under another binding are another manifest.
   const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), (v3 ? m.value.collection : m.value.binding) ?? null]));
   if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, ...(item.state === 'verified' && item.receipt_id === snap.receipt_id && item.reason ? { coverage_reason: item.reason } : {}), replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
+  if (snap.state === 'quarantined') {
+    // A failed deletion leaves the rejected ledger intact so the same seal can finish cleanup on retry.
+    for (const f of JSON.parse(snap.files_json ?? '[]') as Array<{ name: string }>) await c.env.HPS_TRACES.delete(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, f.name));
+    await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='quarantined'").bind(item.batch_id, g.student_id, revision).run();
+    return c.json({ error: 'this rejected revision has been removed', reason: item.reason || 'manifest_unlisted_file', state: 'quarantined' }, 422);
+  }
+  if (item.state === 'quarantined') return c.json({ error: 'no collection was requested from this learner', reason: 'not_requested' }, 404);
+  if (snap.state !== 'uploading') return c.json({ error: 'this revision was rejected; use a new revision', reason: 'revision_sealed' }, 409);
+  const uploaded: Array<{ name: string }> = JSON.parse(snap.files_json ?? '[]');
+  if (uploaded.some((f) => !m.value.files.some((listed) => listed.name === f.name))) {
+    // Claim this exact ledger before removing anything. A concurrent successful seal must retain its bytes.
+    const rejected = await db.prepare("UPDATE classroom_snapshots SET state='quarantined' WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND files_json=?").bind(item.batch_id, g.student_id, revision, snap.files_json).run();
+    if (!(rejected as any).meta?.changes) return sealNotCommitted(c, g, item, revision, digest);
+    await db.prepare("UPDATE classroom_collect_items SET state='quarantined',reason='manifest_unlisted_file',updated_at=? WHERE batch_id=? AND seat_id=? AND state NOT IN ('verified','withdrawn')").bind(now, item.batch_id, item.seat_id).run();
+    for (const f of uploaded) await c.env.HPS_TRACES.delete(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, f.name));
+    await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='quarantined'").bind(item.batch_id, g.student_id, revision).run();
+    return c.json({ error: 'uploaded files were omitted from the manifest and have been removed', reason: 'manifest_unlisted_file', state: 'quarantined' }, 422);
+  }
   if (v3) return sealCollection(c, g, item, revision, m.value.files, m.value.collection!, digest, snap.files_json ?? "[]", asked, now);
   // Re-hash what the Service actually holds. The device's claim is only what it is compared against.
   let coverage = 'sequence_unavailable', coverageReason = '', problem = '', malformed = 0, metaText = '', sessionId = '';
@@ -255,7 +289,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   // Seal, item state and the job outbox commit together: no verified receipt without a queued job, and no job for an unverified input.
   const open = sealAdmitted(g, item), sealed = sealedWith(g, item, revision, receipt);
   const res = await db.batch([
-    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND ${open.sql}`).bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision, ...open.binds),
+    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND files_json=? AND ${open.sql}`).bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision, snap.files_json, ...open.binds),
     ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now, receipt })] : []),
     // A later verified revision is a NEW input revision. It never silently replaces what a report was built from.
     // `reason` of a verified item is the coverage reason: integrity=verified is not coverage=complete, and the teacher view needs why (AT-41).
@@ -291,8 +325,11 @@ async function sealCollection(c: any, g: Grant, item: Record<string, any>, revis
     // Content that was not asked for is not held "for a person to look at": it is removed now. Everything else stays as before.
     let removed = 0;
     if (v.problem === 'kind_violation') {
+      const rejected = await db.prepare("UPDATE classroom_snapshots SET state='quarantined' WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND files_json=?").bind(item.batch_id, g.student_id, revision, storedJson).run();
+      if (!(rejected as any).meta?.changes) return sealNotCommitted(c, g, item, revision, digest);
+      await db.prepare("UPDATE classroom_collect_items SET state='quarantined',reason='kind_violation',updated_at=? WHERE batch_id=? AND seat_id=? AND state NOT IN ('verified','withdrawn')").bind(now, item.batch_id, item.seat_id).run();
       for (const f of (JSON.parse(storedJson || '[]') as Array<{ name: string }>)) { await c.env.HPS_TRACES.delete(key(f.name)); removed++; }
-      await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(item.batch_id, g.student_id, revision).run();
+      await db.prepare("UPDATE classroom_snapshots SET files_json='[]' WHERE batch_id=? AND student_id=? AND revision=? AND state='quarantined'").bind(item.batch_id, g.student_id, revision).run();
     }
     const open = sealAdmitted(g, item), res = await db.batch([
       db.prepare(`UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified' AND ${open.sql}`).bind(state, v.problem, now, item.batch_id, item.seat_id, ...open.binds),
@@ -306,7 +343,7 @@ async function sealCollection(c: any, g: Grant, item: Record<string, any>, revis
   const current = col.parts.find((p) => p.current) ?? col.parts[0]!;
   const open = sealAdmitted(g, item), sealed = sealedWith(g, item, revision, receipt);
   const res = await db.batch([
-    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND ${open.sql}`).bind(digest, v.coverage, receipt, now, item.batch_id, g.student_id, revision, ...open.binds),
+    db.prepare(`UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading' AND files_json=? AND ${open.sql}`).bind(digest, v.coverage, receipt, now, item.batch_id, g.student_id, revision, storedJson, ...open.binds),
     ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now, receipt })] : []),
     db.prepare(`UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=? AND ${sealed.sql}`).bind(v.reason, digest, v.coverage, receipt, inputRevision, now, item.batch_id, item.seat_id, ...sealed.binds),
     // range_json holds the extent the instructor view reads — numbers, times, flags and kinds. The parts' session ids stay in the part files.
@@ -478,17 +515,21 @@ classroomCollectTeacher.get(root + '/:id', async (c) => {
 /**
  * DB↔R2 reconciliation for one batch. Reports, never repairs by guessing:
  *  - uploads that never sealed within the window → `incomplete`
- *  - R2 objects with no snapshot row (the PUT landed, the row did not) → listed as orphans
+ *  - R2 objects without an admitted ledger entry, including rejected cleanup remnants → listed as orphans
  */
 classroomCollectTeacher.post(root + '/:id/reconcile', async (c) => {
   const t = await teacher(c); if (t instanceof Response) return t; const db = c.env.HPS_DB, now = Date.now(), id = c.req.param('id')!;
   const b = await db.prepare('SELECT id,cohort_id,class_run_id FROM classroom_collect_batches WHERE id=? AND class_run_id=?').bind(id, t.run.class_run_id).first<{ id: string; cohort_id: string; class_run_id: string }>();
   if (!b) return c.json({ error: 'batch not found' }, 404);
   const stale = await db.prepare("UPDATE classroom_collect_items SET state='incomplete',reason='never_sealed',updated_at=? WHERE batch_id=? AND state='uploading' AND updated_at<? RETURNING seat_id").bind(now, id, now - 10 * 60_000).all();
-  const rows = ((await db.prepare('SELECT student_id,revision,files_json FROM classroom_snapshots WHERE batch_id=?').bind(id).all()).results ?? []) as Array<{ student_id: string; revision: number; files_json: string }>;
-  const known = new Set(rows.flatMap((r) => (JSON.parse(r.files_json) as Array<{ name: string }>).map((f) => snapshotKey(b.cohort_id, b.class_run_id, r.student_id, id, r.revision, f.name))));
-  const listed = await c.env.HPS_TRACES.list({ prefix: `classroom-snapshots/${b.cohort_id}/${b.class_run_id}/`, limit: 1000 });
-  const orphans = listed.objects.map((o) => o.key).filter((k) => k.includes(`/${id}/`) && !known.has(k));
+  const rows = ((await db.prepare('SELECT student_id,revision,state,files_json FROM classroom_snapshots WHERE batch_id=?').bind(id).all()).results ?? []) as Array<{ student_id: string; revision: number; state: string; files_json: string }>;
+  const known = new Set(rows.filter((r) => r.state !== 'quarantined').flatMap((r) => (JSON.parse(r.files_json) as Array<{ name: string }>).map((f) => snapshotKey(b.cohort_id, b.class_run_id, r.student_id, id, r.revision, f.name))));
+  const orphans: string[] = []; let cursor: string | undefined;
+  do {
+    const listed = await c.env.HPS_TRACES.list({ prefix: `classroom-snapshots/${b.cohort_id}/${b.class_run_id}/`, limit: 1000, ...(cursor ? { cursor } : {}) });
+    orphans.push(...listed.objects.map((o) => o.key).filter((k) => k.includes(`/${id}/`) && !known.has(k)));
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
   await audit(db, b.class_run_id, '', 'system', 'collect', 'batch_reconciled', { batch_id: id, never_sealed: (stale.results ?? []).length, r2_orphans: orphans.length }, now).run();
   return c.json({ never_sealed: (stale.results ?? []).map((r: any) => r.seat_id), r2_orphans: orphans.length, view: await batchView(db, b.class_run_id, id) });
 });

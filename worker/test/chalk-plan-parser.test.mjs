@@ -327,4 +327,97 @@ const BIOPHARM_SAMPLE = `<!DOCTYPE html>
   console.log('T-E5 PASS: &#65; &#x41; → 위반 없음');
 }
 
-console.log('\nchalk-plan-parser: 모든 테스트 통과 (23개)');
+// ─── T-P19~T-P23: chalk:prerequisites 파싱 ──────────────────────────────────
+// evidence lesson.html (증거 파일): head에 chalk:prerequisites 없고 표에만 있음 — before-fix 시나리오
+import { readFileSync } from 'node:fs';
+const EVIDENCE_HTML = readFileSync(
+  new URL('./fixtures/chalk-plan/evidence-1306-lesson.html', import.meta.url), 'utf8'
+);
+const EVIDENCE_TABLE_PREREQ = 'AI 사용 경험·바이오 지식 불필요 (선행지식 없이 시작 가능). 준비물: 짝당 AI 도구가 열린 기기 1대';
+
+{
+  // T-P19: head meta chalk:prerequisites 만 있을 때 → meta.prerequisites 채워짐, mismatch 없음
+  const html = `<!DOCTYPE html><html data-chalk-kind="lesson"><head>
+<meta name="chalk:course" content="c1">
+<meta name="chalk:knowledge-version" content="1">
+<meta name="chalk:format" content="workshop">
+<meta name="chalk:audience-tier" content="lv1">
+<meta name="chalk:duration-min" content="60">
+<meta name="chalk:prerequisites" content="사전 지식 없음">
+<meta name="chalk:methods" content="m-001">
+</head><body><section data-chalk-section="meta"><table>
+<tr><th>과목</th><td>테스트</td></tr>
+</table></section></body></html>`;
+  const r = parsePlan(html, 'test');
+  assert.equal(r.meta.prerequisites, '사전 지식 없음', `T-P19: head meta 값 불일치. got=${r.meta.prerequisites}`);
+  const mismatch = r.violations.filter(v => v.item === 'spec.meta_prerequisites_mismatch');
+  assert.equal(mismatch.length, 0, `T-P19: 예상치 못한 mismatch 위반. got=${JSON.stringify(mismatch)}`);
+  console.log('T-P19 PASS: head meta only → prerequisites 채워짐, mismatch 없음');
+}
+
+{
+  // T-P20: 표 행만 있을 때 (head meta 없음) → meta.prerequisites = 표 행 값
+  const html = `<!DOCTYPE html><html data-chalk-kind="lesson"><head>
+<meta name="chalk:course" content="c1">
+<meta name="chalk:knowledge-version" content="1">
+<meta name="chalk:format" content="workshop">
+<meta name="chalk:audience-tier" content="lv1">
+<meta name="chalk:duration-min" content="60">
+<meta name="chalk:methods" content="m-001">
+</head><body><section data-chalk-section="meta"><table>
+<tr><th>선행 조건</th><td>경험 필요 없음</td></tr>
+</table></section></body></html>`;
+  const r = parsePlan(html, 'test');
+  assert.equal(r.meta.prerequisites, '경험 필요 없음', `T-P20: 표 행 값 읽기 실패. got=${r.meta.prerequisites}`);
+  const mismatch = r.violations.filter(v => v.item === 'spec.meta_prerequisites_mismatch');
+  assert.equal(mismatch.length, 0, `T-P20: 예상치 못한 mismatch 위반`);
+  console.log('T-P20 PASS: table-only → prerequisites 표 행에서 채워짐');
+}
+
+{
+  // T-P21: head meta 와 표 행이 불일치 → spec.meta_prerequisites_mismatch 위반 발생
+  const html = `<!DOCTYPE html><html data-chalk-kind="lesson"><head>
+<meta name="chalk:course" content="c1">
+<meta name="chalk:knowledge-version" content="1">
+<meta name="chalk:format" content="workshop">
+<meta name="chalk:audience-tier" content="lv1">
+<meta name="chalk:duration-min" content="60">
+<meta name="chalk:prerequisites" content="A">
+<meta name="chalk:methods" content="m-001">
+</head><body><section data-chalk-section="meta"><table>
+<tr><th>선행 조건</th><td>B</td></tr>
+</table></section></body></html>`;
+  const r = parsePlan(html, 'test');
+  const mismatch = r.violations.filter(v => v.item === 'spec.meta_prerequisites_mismatch');
+  assert.equal(mismatch.length, 1, `T-P21: mismatch 위반 없음. violations=${JSON.stringify(r.violations)}`);
+  // head meta wins
+  assert.equal(r.meta.prerequisites, 'A', `T-P21: head meta 값이 우선이어야 함. got=${r.meta.prerequisites}`);
+  console.log('T-P21 PASS: head≠표 → spec.meta_prerequisites_mismatch 발생, head meta 우선');
+}
+
+{
+  // T-P22: evidence lesson.html (수정 전 — head meta 없음) → 표에서 읽어 prerequisites 채워짐
+  const r = parsePlan(EVIDENCE_HTML, 'evidence-1306');
+  assert.equal(
+    r.meta.prerequisites, EVIDENCE_TABLE_PREREQ,
+    `T-P22: 표 행 읽기 실패. got=${r.meta.prerequisites}`
+  );
+  const mismatch = r.violations.filter(v => v.item === 'spec.meta_prerequisites_mismatch');
+  assert.equal(mismatch.length, 0, `T-P22: 예상치 못한 mismatch. got=${JSON.stringify(mismatch)}`);
+  console.log('T-P22 PASS: evidence lesson.html (head meta 없음) → 표 행에서 prerequisites 채워짐');
+}
+
+{
+  // T-P23: evidence lesson.html + head meta 추가 버전 (수정 후 skeleton 생성 시나리오) → 동일 값 → mismatch 없음
+  const htmlWithMeta = EVIDENCE_HTML.replace(
+    '<meta name="chalk:methods" content="m-001">',
+    `<meta name="chalk:methods" content="m-001">\n  <meta name="chalk:prerequisites" content="${EVIDENCE_TABLE_PREREQ}">`
+  );
+  const r = parsePlan(htmlWithMeta, 'evidence-1306-with-meta');
+  assert.equal(r.meta.prerequisites, EVIDENCE_TABLE_PREREQ, `T-P23: prerequisites 불일치. got=${r.meta.prerequisites}`);
+  const mismatch = r.violations.filter(v => v.item === 'spec.meta_prerequisites_mismatch');
+  assert.equal(mismatch.length, 0, `T-P23: 예상치 못한 mismatch. got=${JSON.stringify(mismatch)}`);
+  console.log('T-P23 PASS: head meta = 표 행 → mismatch 없음');
+}
+
+console.log('\nchalk-plan-parser: 모든 테스트 통과 (28개)');

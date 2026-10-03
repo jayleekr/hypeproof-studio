@@ -13,7 +13,8 @@ export type ViolationCode =
   | 'spec.parent_role_missing'
   | 'spec.step_id_duplicate'
   | 'spec.step_ref_unknown'
-  | 'spec.meta_missing';
+  | 'spec.meta_missing'
+  | 'spec.meta_prerequisites_mismatch';
 
 export interface ViolationAt {
   file: string;
@@ -39,6 +40,7 @@ export interface PlanMeta {
   familySession: boolean;
   durationMin: number | null;
   methods: string[];
+  prerequisites: string | null;   // chalk:prerequisites (선택)
 }
 
 export interface StepCell {

@@ -1,5 +1,28 @@
 # Studio behavioral requirements
 
+## Curriculum runtime proposal — 2026-09-29
+
+`REQ-STUDIO-CURRICULUM-RUNTIME`: Studio executes the AI for Good v5 loop
+(Problem → Hypothesis → Build → Test → Evidence → Decision → Product Change →
+Deck Change) with one HypeProof account. The embedded browser becomes an
+Experiment Browser the agent can observe and operate; "Test my product" verifies
+observable criteria against a specific artifact version; verified versions are
+published as immutable, revocable test links; participant events and notes become
+sourced evidence on the existing measurement-core store (SX-48, no second store);
+Venture Memory keeps hypotheses, experiments, decisions and versions; curriculum
+skills, a cached Weekly Review Pack and an evidence-aware HTML deck close the loop.
+Student apps call AI through capability names without provider keys; MU-02 stays,
+so there is no automatic cross-provider substitution. Source: HypeProof Studio
+Curriculum Runtime PRD v1.0 (2026-09-28), preserved at
+[design/curriculum-runtime-prd-v1.0-2026-09-28.md](design/curriculum-runtime-prd-v1.0-2026-09-28.md).
+[Intent INT-CR-00–09](intents/curriculum-runtime.md),
+[CR-01–84 requirements](requirements/curriculum-runtime.md),
+[CR-T01–T80 validation](testing/curriculum-runtime.md),
+[plan, DAG and gap matrix](plan/curriculum-runtime.md),
+[epic #1388](https://github.com/jayleekr/hypeproof-studio/issues/1388).
+Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.
+New behaviour ships behind a switch that is off by default (CR-02).
+
 ## Learning experience revision — 2026-09-18
 
 `REQ-STUDIO-LEARNING-EXPERIENCE`: the student's default screen shows the current
@@ -181,6 +204,8 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-G11 | Admin-tier mint delegation (#295) | `can_issue_issuers` 토큰을 든 운영 멤버는 본인 Bearer로 `/admin/issuers` 호출해 강사 issuer 발급 가능(비번 공유 X). 감사에 `minted_by` 기록. **신뢰 모델: Bearer minter ≠ full admin — 본인 scope 안에서만 위임(subset 강제)**: ① 자식 scope는 minter 자신의 scope의 부분집합(cohort 일치, profiles ⊆, max_hours ≤ minter 캡(minter 캡 부재=무제한), can_start_session은 minter가 보유한 scope에서만, max_session_hours ≤ minter 유효캡(기본 4h)) — 위반 시 403; ② `revoke_jti`는 `issuer_audit.minted_by === minter`인(본인이 발급한) 토큰만 대상 — 그 외 403; ③ `can_issue_issuers` 재부여 불가(403) — 권한 자가증식 차단. 새 admin-minter는 full admin(Basic/CF)만 생성하며, full admin은 ①②③ 제한 없음. minter revoke 시 발급권 즉시 소멸 | U |
 | REQ-G12 | Issuer mint-lineage query (#313) | `GET /admin/issuers?minted_by=<u>&limit=<n>` (admin Basic/CF **only** — `isIssuerAllowedEndpoint` 미등록이라 Bearer minter는 열람 불가) — `issuer_audit:` prefix 스캔으로 "minter X가 발급한 강사 issuer 목록"을 반환. 각 행은 `jti·instructor·minted_by·exp·expired·can_issue_issuers·cohorts·scopes` + jti별 실시간 revoke 교차조회(`revoked`). 멤버 퇴사/minter 토큰 유출 시 계보를 찾아 기존 `POST /admin/tokens/revoke`로 개별 revoke하기 위한 운영 도구. 오발동 파급이 커 일괄 cascade 엔드포인트는 의도적으로 미제공(runbook 4-step) | U |
 | REQ-G13 | Instructor surface is its own Worker — Chalk (plan task F) | `/console`·`/issuer` 페이지와 `GET /admin/cohorts/:id/state` 는 Service(`worker/`)가 아니라 **Chalk**(`chalk/`, `chalk.hypeproof-ai.xyz`, 태그 `c*`)가 서빙한다. Service 는 두 페이지를 302 로 Chalk 에 넘기고(`HPS_CHALK_ORIGIN`; Location 에 fragment 가 없어 `#t=` 토큰 링크 보존), 강사 **쓰기**(세션 open/close·roster append·토큰 mint)와 운영자 surface(admin Basic/CF Access)는 Service 에 남는다 — 채팅 게이트가 읽는 KV 키는 그것을 쓰는 아티팩트와 함께 배포돼야 하고, 서명은 Service 에서만 일어난다. Chalk 는 강사 쓰기를 Service 로 **forward** 한다(헤더 화이트리스트: Bearer + content-type; `cf-access-…` 는 절대 전달 안 함, Basic 거부). 토큰 검증은 `worker/src/lib/instructor-auth.ts` 하나를 re-export — 복제 금지. `c*` 태그 배포는 Service 버전(task C `/v1/health.version`)을 움직이지 않는다 | U (`chalk/test/instructor-auth-drift` — 두 워커 동일 판정 · `chalk/test/deploy-isolation` — c\* 트레인 격리 · `chalk/test/board-contract` — 읽기 계약 · `worker/test/route-order` — 리다이렉트) |
+
+Instructor-mode credential isolation (#1298): changing the saved issuer clears the previous issuer's authorization and brief before checking `whoami`. A network error, 500 or 429 for the new credential cannot inherit instructor mode; a later successful check may recover. Verified by `test/chalk-instructor-token-change.smoke.mjs`.
 
 ## H. Report problem (#64)
 
@@ -764,3 +789,18 @@ board alike (the learner's notice is shown once, nothing is retried), classified
 stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
 the window keeps the learner's work folder (it used to move them to the profile's default folder). Pause still refuses only NEW model requests: a request already streaming is not
 cut, the next request of the same turn is a new request and is refused, nothing is re-sent on resume.
+
+## Classroom integrity corrections (#1409)
+
+ADM-03/05 voluntary help cancellation and discard carry the request ID displayed
+in the preview; a stale window cannot cancel a replacement request. Oversize HTTP
+413 responses preserve the draft and explain the size refusal. The existing
+8,000-code-unit field limit is unchanged; the student share body budget covers
+six fields, including JSON escaping. Local help-store commits are confirmed by
+commit identity, so a successor does not replay an already committed mutation.
+
+ADM collection copies repeat approved artifact bytes at approval time, including
+after restart, and keep undated damaged fragments only inside the evidenced time
+window (all-undated legacy inputs retain compatibility). Missing approved pages
+never receive complete coverage. See the existing classroom-admin contract and
+`docs/testing/classroom-admin.md` for the nine regression cases and actual results.

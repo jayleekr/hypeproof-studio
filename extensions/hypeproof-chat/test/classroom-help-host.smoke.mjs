@@ -334,6 +334,40 @@ await check("MIG2", "a record the disk refuses during the move: the old store is
   assert.equal(shared.value[STORE], undefined); assert.equal((await shared.files.get("draft", dk("b")))?.question, "LEGACY-B");
 });
 
+await check("I1409-cancel", "stale cancellation never deletes a replacement preview; current cancellation still works", async (S) => {
+  const shared = sharedStorage(), w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "a");
+  const first = await preview(w1, "a", "FIRST"), second = await preview(w2, "a", "SECOND");
+  await w1.host.cancel(dk("a"), first.request_id);
+  assert.equal((await shared.envelope("a")).request_id, second.request_id);
+  assert.match(w1.last().note, /바뀌었거나/);
+  await w2.host.cancel(dk("a"), second.request_id);
+  assert.equal(await shared.envelope("a"), null);
+  assert.equal((await shared.draft("a")).question, "SECOND");
+});
+await check("I1409-discard", "stale discard sends no DELETE for another request; matching discard withdraws only its id", async (S) => {
+  const shared = sharedStorage(), w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "a");
+  const first = await preview(w1, "a", "FIRST"), second = await preview(w2, "a", "SECOND");
+  await shared.files.update("envelope", sk("a"), (e) => ({ ...e, state: "unknown" }));
+  const calls = [], base = S.fetch;
+  fetchImpl = (url, init) => { if (init?.method === "DELETE") calls.push(url); return base(url, init); };
+  await w1.host.discard(dk("a"), first.request_id);
+  assert.deepEqual(calls, []);
+  assert.equal((await shared.envelope("a")).request_id, second.request_id);
+  assert.match(w1.last().note, /바뀌었습니다/);
+  await w2.host.discard(dk("a"), second.request_id);
+  assert.equal(calls.length, 1); assert.ok(calls[0].endsWith(second.request_id));
+  assert.equal(await shared.envelope("a"), null);
+});
+await check("I1409-413", "oversize rejection explains size and preserves the learner's draft", async (S) => {
+  const shared = sharedStorage(), w = win(shared, S, "W1", () => "a"), e = await preview(w, "a", "KEEP-MY-DRAFT");
+  const h = S.hold((rest, method) => rest === "shares" && method === "POST");
+  const sending = w.host.send(dk("a"), e.request_id, true);
+  await h.entered; h.release({ status: 413 }); await sending;
+  assert.match(w.last().note, /너무 큽니다/);
+  assert.equal((await shared.draft("a")).question, "KEEP-MY-DRAFT");
+  assert.equal(await shared.envelope("a"), null);
+});
+
 const failed = results.filter((r) => r.status === "FAIL");
 if (process.env.HELP_HOST_OUT) writeFileSync(process.env.HELP_HOST_OUT, JSON.stringify({ host_source: path.relative(process.cwd(), hostSrc), results }, null, 2));
 console.log(`${results.length - failed.length}/${results.length} native help host checks passed`);

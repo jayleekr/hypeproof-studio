@@ -15,7 +15,9 @@ html, body, #root {
 .hps-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* #1298 — 100vh breaks when ChatPanel is nested inside InstructorChatPanel's flex column;
+     the band gets cut off. 100% inherits from #root (height: 100%) and works in both cases. */
+  height: 100%;
 }
 
 /* ---------- Header ---------- */
@@ -1026,6 +1028,36 @@ html, body, #root {
   line-height: 1.5;
 }
 
+/* CR-09 — the picked element queued for the next message; removable before sending. */
+.hps-element-context {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--vscode-focusBorder, #4a9);
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.hps-element-crop {
+  max-width: 72px;
+  max-height: 56px;
+  object-fit: contain;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.3));
+}
+.hps-element-meta { flex: 1; min-width: 0; }
+.hps-element-source { color: var(--vscode-descriptionForeground, inherit); }
+.hps-element-meta pre { max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.hps-element-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+}
+
 /* #497 — the notice right after Stop. Uses the same shape as page-notice but kills the
    accent color so it does not read as "something went wrong". It is the result of the
    user pressing it themselves. */
@@ -1467,3 +1499,93 @@ html, body, #root {
 .hp-surface textarea::placeholder, .hp-surface input::placeholder { color: var(--hp-muted); }
 .hp-surface :focus-visible { outline: 2px solid var(--hp-accent); outline-offset: 2px; }
 .hp-rehearsal { border: 1px dashed var(--hp-line); border-radius: 8px; padding: 8px 10px; }
+
+/* cr-verify — "내 제품 테스트" panel (CR-12–CR-16, CR-68, CR-81). */
+.hps-verify { border: 1px solid var(--vscode-panel-border, #8884); border-radius: 6px; padding: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.hps-verify-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hps-verify-close { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; }
+.hps-verify-state { padding: 1px 6px; border-radius: 4px; background: var(--vscode-badge-background, #8883); }
+.hps-verify-state-verified { background: #2e7d3233; }
+.hps-verify-state-failed { background: #c6282833; }
+.hps-verify-state-needs_recheck, .hps-verify-state-incomplete { background: #f9a82533; }
+.hps-verify-running { padding: 4px 6px; border-left: 3px solid #ff7a00; background: #ff7a0014; }
+.hps-verify-error { color: var(--vscode-errorForeground, #c62828); }
+.hps-verify-label { opacity: 0.8; }
+.hps-verify-row, .hps-verify-fix, .hps-verify-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.hps-verify-row input, .hps-verify-fix input { flex: 1 1 160px; min-width: 0; }
+.hps-verify-ai { font-size: 11px; opacity: 0.85; }
+.hps-verify-proposals { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.hps-verify-result { padding: 4px 0; border-top: 1px solid var(--vscode-panel-border, #8882); }
+.hps-verify-held { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--vscode-panel-border, #8884); }
+.hps-verify-badge { font-weight: 600; }
+.hps-verify-fail .hps-verify-badge, .hps-verify-non_reproducible .hps-verify-badge { color: var(--vscode-errorForeground, #c62828); }
+.hps-verify-pass .hps-verify-badge { color: #2e7d32; }
+.hps-verify-reason { opacity: 0.85; }
+
+/* #1298 — instructor band shown in InstructorChatPanel when isInstructor === true */
+.hps-instructor-band {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--vscode-editorInfo-background, rgba(60,120,200,0.12));
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  font-size: 12px;
+}
+.hps-instructor-badge {
+  font-weight: 600;
+  color: var(--vscode-editorInfo-foreground, #6ab0f5);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--vscode-editorInfo-background, rgba(60,120,200,0.18));
+}
+.hps-instructor-connection { color: var(--hp-muted, #8a8a8a); }
+.hps-instructor-model-label { color: var(--hp-muted, #8a8a8a); }
+.hps-instructor-model { font-weight: 500; }
+.hps-instructor-model-input {
+  font: inherit; font-size: 12px;
+  background: var(--hp-bg, var(--vscode-input-background));
+  color: var(--hp-ink, var(--vscode-input-foreground));
+  border: 1px solid var(--hp-line, var(--vscode-input-border, #444));
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 0; flex: 1;
+}
+.hps-instructor-model-input:focus-visible { outline: 2px solid var(--hp-accent, #0ea5e9); outline-offset: 1px; }
+.hps-instructor-model-error { color: var(--vscode-errorForeground, #f48771); font-size: 11px; flex-basis: 100%; }
+
+/* cr-publish (#1393) — "사용자 테스트용으로 공개" panel. Same frame as the verify panel. */
+.hps-publish { border: 1px solid var(--vscode-panel-border, #8884); border-radius: 6px; padding: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.hps-publish > header { display: flex; align-items: center; gap: 8px; }
+.hps-publish > header button { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; }
+.hps-publish-error, .hps-publish-refusal { color: var(--vscode-errorForeground, #c62828); }
+.hps-publish-version, .hps-publish-form, .hps-publish-experiment { display: flex; flex-direction: column; gap: 4px; }
+.hps-publish-form input, .hps-publish-form textarea, .hps-publish-form select { width: 100%; box-sizing: border-box; }
+.hps-publish-manifest, .hps-publish-more, .hps-publish-expiry { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.hps-publish-manifest input, .hps-publish-more input { flex: 1 1 160px; min-width: 0; }
+.hps-publish [data-state="verified"] { color: #2e7d32; font-weight: 600; }
+.hps-publish-experiment { border-top: 1px solid var(--vscode-panel-border, #8882); padding-top: 6px; }
+.hps-publish-link { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.hps-publish-link code, .hps-publish-done code { word-break: break-all; user-select: all; }
+.hps-publish-link img { background: #fff; padding: 4px; }
+.hps-publish-note, .hps-publish-timing { opacity: 0.8; font-size: 11px; }
+.hps-publish-declare { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); padding: 6px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.hps-publish-declare legend { padding: 0 4px; font-size: 12px; }
+.hps-publish-declare small { flex-basis: 100%; opacity: .8; }
+/* cr-evidence — the "실험 증거" panel (#1394). */
+.hps-evidence { border: 1px solid var(--vscode-panel-border, #8884); border-radius: 6px; padding: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.hps-evidence > header { display: flex; align-items: center; gap: 8px; }
+.hps-evidence > header button { margin-left: auto; background: none; border: none; cursor: pointer; color: inherit; }
+.hps-evidence ul { margin: 0; padding-left: 16px; }
+.hps-evidence-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.hps-evidence-section { font-weight: 600; margin-top: 4px; }
+.hps-evidence-claim { background: none; border: none; padding: 0; color: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; font: inherit; }
+.hps-evidence-claim:disabled { text-decoration: none; cursor: default; }
+.hps-evidence-meta { opacity: 0.8; font-size: 11px; margin-left: 4px; }
+.hps-evidence-sources { border-left: 2px solid var(--vscode-panel-border, #8884); margin: 2px 0 4px; }
+.hps-evidence-sources [data-state]:not([data-state="ok"]) { color: var(--vscode-errorForeground, #c62828); }
+.hps-evidence-review, .hps-evidence-note, .hps-evidence-records { display: flex; flex-wrap: wrap; gap: 4px; }
+.hps-evidence-note textarea, .hps-evidence-note input, .hps-evidence-note select { width: 100%; box-sizing: border-box; }
+.hps-evidence-variants { border-collapse: collapse; }
+.hps-evidence-variants td, .hps-evidence-variants th { border: 1px solid var(--vscode-panel-border, #8884); padding: 2px 4px; text-align: left; }
