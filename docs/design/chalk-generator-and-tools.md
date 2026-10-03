@@ -163,7 +163,7 @@ E1-1 §2-7 모양에 두 칸을 더한다.
 | `POST …/feedback` · `GET …/diff` | E2-7 | 🔴 `authoring_drafts` 는 최신 revision 만 갖는다. 비교(FB-01)와 이력(FB-05)을 위해 **초안 revision 이력 테이블**이 필요하다(E2-7 설계에서 정함) |
 
 - 전부 `worker/src/routes/chalk-*.ts` 새 파일, issuer 전용, 소유 강사만(기존 `owns()` 규칙 재사용). 새 Chalk 경로는 `chalk-*.ts` 새 파일에 두고, 스택 파일은 개정 R1 조건으로만 최소 수정한다. `owns()` 는 #1295 에서 `lib/authoring-draft-write.ts` 로 이동했다(`authoring.ts:15` import 확인). 새 경로는 같은 모듈에서 import 한다. 로직을 복사하지 않는다.
-- 🔴 issuer Bearer 는 허용 목록(`isIssuerAllowedEndpoint`)에 있는 admin 경로에서만 통한다(T0-b 실측: 목록에 없는 경로는 Basic 인증을 요구한다). 새 `/admin/chalk/*` 경로를 이 목록에 더하는 것을 각 구현 이슈의 작업에 넣는다. 허용 목록은 `worker/src/lib/instructor-auth.ts:59` 한 곳이고 Chalk 웹 포워더와 공유한다(`admin.ts:112`). 두 번째 목록을 만들지 않는다(ARC-01 `instructor-auth-drift` 시험)
+- 🔴 issuer Bearer 는 허용 목록(`isIssuerAllowedEndpoint`)에 있는 admin 경로에서만 통한다(T0-b 실측: 목록에 없는 경로는 Basic 인증을 요구한다). 새 `/admin/chalk/*` 경로를 이 목록에 더하는 것을 각 구현 이슈의 작업에 넣는다. 허용 목록은 `worker/src/lib/instructor-auth.ts:89` 한 곳이고 Chalk 웹 포워더와 공유한다(`admin.ts:112`). 두 번째 목록을 만들지 않는다(ARC-01 `instructor-auth-drift` 시험)
 
 ---
 

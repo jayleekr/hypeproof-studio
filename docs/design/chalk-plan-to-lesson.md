@@ -126,7 +126,7 @@ coach_brief?: {
 | 학생 앱 `/v1/profile` (`chat.ts:283`) | lesson 전체 | **`prohibited_moves` · `coach_brief` 를 뺀 투영.** 나머지는 그대로 |
 | 확정본 바이트 / sha256 | `content` 전체 | 그대로 전체(투영은 전달할 때만) |
 
-- 🔴 **두 투영 모두 "새 칸이 없는 옛 강의는 같은 참조를 그대로 돌려준다"** 를 지킨다. 기존 계약(`learning-prompt.ts:72-75`: `coachVisibleLesson` line 76, 옛 강의 코치 프롬프트 바이트 불변)과 시험(`authoring.test.mjs` 의 `T-08/T-09 deliver immutable lesson only to registered students in a matching session` 안 단언, 140행 `system_prompt.includes(JSON.stringify(frozen.content))` — 독립 시험이 아니라 해당 시험 안 단언)이 깨지지 않아야 한다. E5-2 는 이 단언을 통과해야 한다
+- 🔴 **두 투영 모두 "새 칸이 없는 옛 강의는 같은 참조를 그대로 돌려준다"** 를 지킨다. 기존 계약(`learning-prompt.ts:72-75`: `coachVisibleLesson` line 98, 옛 강의 코치 프롬프트 바이트 불변)과 시험(`authoring.test.mjs` 의 `T-08/T-09 deliver immutable lesson only to registered students in a matching session` 안 단언, 143행 `system_prompt.includes(JSON.stringify(frozen.content))` — 독립 시험이 아니라 해당 시험 안 단언)이 깨지지 않아야 한다. E5-2 는 이 단언을 통과해야 한다
 - ✅ 스택 머지 완료(2026-09-28, main `5edefa55`, 개정 R1). `chat-gate.ts`·`chat.ts`·`learning-prompt.ts` 모두 머지됨. E5-2 는 이 파일들에서 직접 작업할 수 있다(개정 R1 조건으로 — 최소 수정, 스택 줄 삭제 0, TJ 알림)
 
 ---
