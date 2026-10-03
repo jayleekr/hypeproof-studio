@@ -31,6 +31,7 @@ const AUTHORING_SCHEMA = readFileSync(new URL("../migrations/0002-chalk-authorin
 const PLAN_SCHEMA = readFileSync(new URL("../migrations/0031-chalk-plan-files.sql", import.meta.url), "utf8");
 const TIER_DURATION_SCHEMA = readFileSync(new URL("../migrations/0035-chalk-course-inputs-tier-duration.sql", import.meta.url), "utf8");
 const FEEDBACK_SCHEMA = readFileSync(new URL("../migrations/0036-chalk-feedback.sql", import.meta.url), "utf8");
+const JUDGEMENTS_SCHEMA = readFileSync(new URL("../migrations/0037-chalk-judgements.sql", import.meta.url), "utf8");
 
 const profileId = listProfiles().find(p => p.session.cohort_id === COHORT)?.id;
 assert.ok(profileId, "profile not found for COHORT");
@@ -82,6 +83,7 @@ function makeDb() {
   db.exec(PLAN_SCHEMA);
   db.exec(TIER_DURATION_SCHEMA);
   db.exec(FEEDBACK_SCHEMA);
+  db.exec(JUDGEMENTS_SCHEMA);
   // seed knowledge version 1 + minimal vocab for plan save
   db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,1,'digest0')`).run();
   db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
