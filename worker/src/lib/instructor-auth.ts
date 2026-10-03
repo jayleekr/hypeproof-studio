@@ -132,6 +132,9 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
     (method === "PUT" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/(inputs|plan)$/.test(path)) ||
     (method === "GET" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/(plan|brief)$/.test(path))
   ) return true;
+  // #1466 — Chalk feedback record (POST) and revision diff (GET).
+  if (method === "POST" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/feedback$/.test(path)) return true;
+  if (method === "GET" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/diff$/.test(path)) return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
   // #1298 — instructor-mode identity check. No cohort required: any valid issuer
