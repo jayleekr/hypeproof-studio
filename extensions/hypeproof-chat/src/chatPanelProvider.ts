@@ -421,6 +421,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private voiceProbes = new Map<string, (o: import("./voiceCapabilityHelpers").VoiceProbeObservations) => void>();
 
+  isViewVisible(): boolean { return !!this.view?.visible; }
+
   /** The surface the diagnostic command uses. With the webview closed it returns null, leaving it as not measured. */
   async probeVoiceCapability(
     timeoutMs: number,

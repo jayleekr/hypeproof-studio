@@ -724,7 +724,13 @@ export async function activate(context: vscode.ExtensionContext) {
   // start page is shown once (handled in postConfig/refresh via instructorMode.handleAutoReadResult).
   void (async () => {
     const storedIssuer = await context.secrets.get(ISSUER_TOKEN_KEY);
-    if (!storedIssuer || !looksLikeIssuerTokenUnverified(storedIssuer)) {
+    if (storedIssuer && looksLikeIssuerTokenUnverified(storedIssuer)) return;
+    const resume = context.globalState.get<{ at: number }>(PENDING_ACTIVITY_RESUME_KEY);
+    if (resume && Date.now() - resume.at < 60_000) {
+      await context.globalState.update(PENDING_ACTIVITY_RESUME_KEY, undefined);
+      await startPage.show();
+      await startPage.openChat();
+    } else {
       startPage.show();
     }
   })();
@@ -794,6 +800,7 @@ const LEGACY_WORKSPACE_DIRNAME = "HypeProofGames";
  * learner's window would reload forever mid-lecture.
  */
 const WORKSPACE_SWITCH_ATTEMPT_KEY = "hypeproofChat.workspaceSwitchAttempt";
+const PENDING_ACTIVITY_RESUME_KEY = "hypeproofChat.pendingActivityResume";
 
 async function clearWorkspaceSwitchAttempt(context?: vscode.ExtensionContext): Promise<void> {
   if (!context) return;
@@ -995,6 +1002,7 @@ async function openWorkspaceFolder(
   await commit(dir);
 
   // Single-root open (clean Explorer). Reloads the window.
+  await context?.globalState.update(PENDING_ACTIVITY_RESUME_KEY, { at: Date.now() });
   await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
     forceReuseWindow: true,
   });
