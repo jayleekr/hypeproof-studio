@@ -22,6 +22,11 @@ const TOKEN_KEY = "hypeproofChat.workshopToken";
 const isLegacyHistoryKey = (key: string): boolean =>
   key === 'hypeproofChat.history' || (key.startsWith('hypeproofChat.history:') && !/:[a-f0-9]{64}$/.test(key));
 
+/** True when all tab groups are empty AND the chat view is not visible — both conditions must hold. */
+export function shouldHideSidebar(allTabGroups: readonly { tabs: readonly unknown[] }[], chatViewVisible: boolean): boolean {
+  return allTabGroups.every(g => g.tabs.length === 0) && !chatViewVisible;
+}
+
 /** App entry surface; authentication and cohort authority remain in Service. */
 export class StartPage {
   private panel?: vscode.WebviewPanel;

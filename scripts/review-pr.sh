@@ -176,6 +176,18 @@ if [[ -d "$STATE_DIR/user-data/User/workspaceStorage" ]]; then
 fi
 [[ $TOTAL_DELETED -gt 0 ]] && echo "이전 대화 비움 (${TOTAL_DELETED}행)" || echo "지울 대화 없음"
 
+BINDINGS_DIR="$STATE_DIR/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+BINDINGS_DELETED=0
+STATE_DIR_REAL="$(realpath "$STATE_DIR" 2>/dev/null || true)"
+# Safety: only delete files when operating inside the Dev state folder.
+if [[ -n "$STATE_DIR_REAL" ]] && echo "$STATE_DIR_REAL" | grep -q "HypeProof Studio Development/" && [[ -d "$BINDINGS_DIR" ]]; then
+  while IFS= read -r -d '' f; do
+    rm -f "$f"
+    BINDINGS_DELETED=$((BINDINGS_DELETED + 1))
+  done < <(find "$BINDINGS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+fi
+[[ $BINDINGS_DELETED -gt 0 ]] && echo "이전 검수 폴더 연결 ${BINDINGS_DELETED}건 비움" || echo "지울 폴더 연결 없음"
+
 # ── Step 2: extension deps ────────────────────────────────────────────────────
 echo ""
 echo "=== [2/6] npm ci ==="

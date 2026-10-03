@@ -415,6 +415,93 @@ else
   fail "45: Bearer token passed inline via -H curl arg (ps exposure):"$'\n'"$_BEARER_ARGV_LINES"
 fi
 
+# ── activity-bindings 정리 ────────────────────────────────────────────────────
+
+# 46. Dev 폴더 아래 binding 파일이 지워지고 개수가 출력된다.
+{
+  FAKE_STATE="$(mktemp -d)/HypeProof Studio Development/abc123"
+  mkdir -p "$FAKE_STATE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+  touch "$FAKE_STATE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings/aabbcc.json"
+  touch "$FAKE_STATE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings/ddeeff.json"
+
+  # Run the relevant snippet from review-pr.sh in /bin/bash
+  OUT="$(/bin/bash -c '
+    set -euo pipefail
+    BINDINGS_DIR="'"$FAKE_STATE"'/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+    BINDINGS_DELETED=0
+    STATE_DIR_REAL="$(realpath "'"$FAKE_STATE"'" 2>/dev/null || true)"
+    if [[ -n "$STATE_DIR_REAL" ]] && echo "$STATE_DIR_REAL" | grep -q "HypeProof Studio Development/" && [[ -d "$BINDINGS_DIR" ]]; then
+      while IFS= read -r -d "" f; do
+        rm -f "$f"
+        BINDINGS_DELETED=$((BINDINGS_DELETED + 1))
+      done < <(find "$BINDINGS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+    [[ $BINDINGS_DELETED -gt 0 ]] && echo "이전 검수 폴더 연결 ${BINDINGS_DELETED}건 비움" || echo "지울 폴더 연결 없음"
+  ' 2>&1)"
+  REMAINING="$(find "$FAKE_STATE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings" -type f | wc -l | tr -d ' ')"
+  if echo "$OUT" | grep -q "2건 비움" && [[ "$REMAINING" -eq 0 ]]; then
+    ok "46: Dev 폴더 아래 binding 파일 2건 삭제, 출력 확인"
+  else
+    fail "46: binding 삭제 실패 (out='$OUT', remaining=$REMAINING)"
+  fi
+  rm -rf "${FAKE_STATE%%HypeProof*}"
+}
+
+# 47. STATE_DIR 경로가 Development 밖이면 파일을 지우지 않는다.
+{
+  FAKE_OUTSIDE="$(mktemp -d)/Other Folder/abc123"
+  mkdir -p "$FAKE_OUTSIDE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+  touch "$FAKE_OUTSIDE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings/safe.json"
+
+  OUT="$(/bin/bash -c '
+    set -euo pipefail
+    BINDINGS_DIR="'"$FAKE_OUTSIDE"'/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+    BINDINGS_DELETED=0
+    STATE_DIR_REAL="$(realpath "'"$FAKE_OUTSIDE"'" 2>/dev/null || true)"
+    if [[ -n "$STATE_DIR_REAL" ]] && echo "$STATE_DIR_REAL" | grep -q "HypeProof Studio Development/" && [[ -d "$BINDINGS_DIR" ]]; then
+      while IFS= read -r -d "" f; do
+        rm -f "$f"
+        BINDINGS_DELETED=$((BINDINGS_DELETED + 1))
+      done < <(find "$BINDINGS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+    [[ $BINDINGS_DELETED -gt 0 ]] && echo "이전 검수 폴더 연결 ${BINDINGS_DELETED}건 비움" || echo "지울 폴더 연결 없음"
+  ' 2>&1)"
+  REMAINING="$(find "$FAKE_OUTSIDE/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings" -type f | wc -l | tr -d ' ')"
+  if echo "$OUT" | grep -q "지울 폴더 연결 없음" && [[ "$REMAINING" -eq 1 ]]; then
+    ok "47: Development 밖 경로는 파일을 건드리지 않는다"
+  else
+    fail "47: Development 밖인데 파일을 삭제했거나 출력이 잘못됨 (out='$OUT', remaining=$REMAINING)"
+  fi
+  rm -rf "${FAKE_OUTSIDE%%Other*}"
+}
+
+# 48. binding 폴더가 없거나 파일이 없으면 0건 출력, 오류 없음.
+{
+  FAKE_EMPTY="$(mktemp -d)/HypeProof Studio Development/zzz999"
+  mkdir -p "$FAKE_EMPTY/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+
+  OUT="$(/bin/bash -c '
+    set -euo pipefail
+    BINDINGS_DIR="'"$FAKE_EMPTY"'/user-data/User/globalStorage/hypeproof.hypeproof-chat/activity-bindings"
+    BINDINGS_DELETED=0
+    STATE_DIR_REAL="$(realpath "'"$FAKE_EMPTY"'" 2>/dev/null || true)"
+    if [[ -n "$STATE_DIR_REAL" ]] && echo "$STATE_DIR_REAL" | grep -q "HypeProof Studio Development/" && [[ -d "$BINDINGS_DIR" ]]; then
+      while IFS= read -r -d "" f; do
+        rm -f "$f"
+        BINDINGS_DELETED=$((BINDINGS_DELETED + 1))
+      done < <(find "$BINDINGS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+    [[ $BINDINGS_DELETED -gt 0 ]] && echo "이전 검수 폴더 연결 ${BINDINGS_DELETED}건 비움" || echo "지울 폴더 연결 없음"
+  ' 2>&1)"
+  RC=$?
+  if [[ $RC -eq 0 ]] && echo "$OUT" | grep -q "지울 폴더 연결 없음"; then
+    ok "48: 빈 폴더 0건, 오류 없음"
+  else
+    fail "48: 빈 폴더 케이스 실패 (rc=$RC, out='$OUT')"
+  fi
+  rm -rf "${FAKE_EMPTY%%HypeProof*}"
+}
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 [[ $FAIL -eq 0 ]]
