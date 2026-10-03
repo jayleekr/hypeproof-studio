@@ -207,4 +207,96 @@ await check('T-C7b POST /check invalid-token 256KB+ body returns 401', async () 
   assert.equal(res.status, 401, `expected 401 got ${res.status}`);
 });
 
+// ─── T-C8: html-absent fallback — /check reads latest plan row ──────────────
+// Insert a chalk_plan_files row directly, then POST /check without html.
+// G1-* findings (audience-tier=lv1) must appear — same as /check with html supplied.
+await check('T-C8 /check without html falls back to latest plan row (G1 checks fire)', async () => {
+  const planCheckBase = `/admin/chalk/cohorts/${cohort}/courses/site-check/check`;
+
+  // HTML with audience-tier=lv1 so G1-* checks fire.
+  const richHtml = `<!DOCTYPE html>
+<html lang="ko" data-chalk-plan="1" data-chalk-kind="lesson">
+<head>
+  <meta charset="utf-8">
+  <meta name="chalk:course" content="site-check">
+  <meta name="chalk:knowledge-version" content="1">
+  <meta name="chalk:format" content="workshop">
+  <meta name="chalk:family-session" content="false">
+  <meta name="chalk:duration-min" content="90">
+  <meta name="chalk:methods" content="m-001">
+  <meta name="chalk:audience-tier" content="lv1">
+  <meta name="chalk:prerequisites" content="없음">
+</head>
+<body>
+  <section data-chalk-section="meta">
+    <table>
+      <tr><th>과목</th><td>테스트</td></tr>
+      <tr><th>형식</th><td>workshop</td></tr>
+      <tr><th>시간</th><td>90분</td></tr>
+      <tr><th>선행 조건</th><td>없음</td></tr>
+    </table>
+  </section>
+  <section data-chalk-section="objectives">
+    <ul><li data-chalk-objective="obj-1">목표. 자격증</li></ul>
+  </section>
+  <section data-chalk-section="essential-question">
+    <p data-chalk-question>질문</p>
+  </section>
+  <section data-chalk-section="evidence">
+    <ul><li data-chalk-evidence="ev-1">제출 증거: 기록지</li></ul>
+  </section>
+  <section data-chalk-section="flow">
+    <table data-chalk-flow>
+      <tr data-chalk-step="s-1" data-duration-min="40" data-chalk-requires="" data-chalk-forbids="">
+        <th data-chalk-field="title">활동</th>
+        <td data-chalk-role="teacher">안내</td>
+        <td data-chalk-role="learner">활동 수행 후 제출 증거: 기록지</td>
+      </tr>
+    </table>
+  </section>
+  <section data-chalk-section="key-questions">
+    <ul><li data-chalk-key-question>핵심 질문</li></ul>
+  </section>
+  <section data-chalk-section="prohibited-moves">
+    <ul><li data-chalk-move="P1" data-chalk-step="s-1">금지 개입</li></ul>
+  </section>
+  <section data-chalk-section="materials">
+    <ul><li data-chalk-material data-kind="physical" data-owner="instructor">기록지</li></ul>
+  </section>
+  <section data-chalk-section="safety" data-chalk-safety="none"></section>
+  <section data-chalk-section="bridging"><p>연결</p></section>
+  <section data-chalk-section="support"></section>
+</body>
+</html>`;
+
+  // Insert plan row directly so we avoid PUT /plan CAS complexity in a shared DB.
+  db.prepare(
+    `INSERT OR REPLACE INTO chalk_plan_files
+     (cohort_id, course_id, ref_kind, ref, file, html, sha256, knowledge_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(cohort, 'site-check', 'draft', '99', 'lesson', richHtml, 'sha-tc8', 1, Date.now());
+
+  // POST /check without html — should fall back to the row above.
+  const noHtmlR = await req(planCheckBase, 'POST', {});
+  assert.equal(noHtmlR.status, 200, `POST /check (no html): ${noHtmlR.raw}`);
+  const noHtmlChecks = (noHtmlR.json.results ?? []).map(f => f.check).filter(Boolean);
+
+  // G1-4 (자격증) should fire since the html body contains "자격증".
+  assert.ok(
+    noHtmlChecks.includes('g1_4_credential'),
+    `expected g1_4_credential in /check results (no html): ${JSON.stringify(noHtmlChecks)}`,
+  );
+
+  // POST /check with same html — must produce the same check names.
+  const withHtmlR = await req(planCheckBase, 'POST', { html: richHtml });
+  assert.equal(withHtmlR.status, 200, `POST /check (with html): ${withHtmlR.raw}`);
+  const withHtmlChecks = (withHtmlR.json.results ?? []).map(f => f.check).filter(Boolean).sort();
+
+  assert.deepEqual(
+    noHtmlChecks.slice().sort(),
+    withHtmlChecks,
+    `html-absent vs html-present check sets differ:\nno-html: ${noHtmlChecks}\nwith-html: ${withHtmlChecks}`,
+  );
+});
+
 console.log(`\n${passed} tests passed`);

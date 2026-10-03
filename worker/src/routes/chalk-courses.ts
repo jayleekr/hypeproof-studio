@@ -434,7 +434,7 @@ chalkCourses.put(
     });
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent') {
-      const findings = runPlanCheck(wr.draft, b.html as string);
+      const findings = runPlanCheck(wr.draft, b.html as string, parsed.meta.audienceTier);
       const judged = await mergeStoredJudgements(c.env.HPS_DB, cohort, course, sha256);
       findings.push(...judged);
       appendHumanOnly(findings);
@@ -832,10 +832,17 @@ function appendHumanOnly(results: CheckResultItem[]): void {
 
 // ── Shared check logic ───────────────────────────────────────────────────────
 
-function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
+function runPlanCheck(
+  draft: Draft,
+  htmlOverride?: string,
+  audienceTier?: string | null,
+): CheckResultItem[] {
   const results: CheckResultItem[] = [];
 
   let derivedPrerequisites: string | null = null;
+  let parsedSteps: import('../lib/chalk-plan/types.ts').ParsedStep[] | undefined;
+  let parsedPlanText: string | undefined;
+  let parsedAudienceTier: string | null | undefined;
 
   if (htmlOverride !== undefined) {
     const parsed = parsePlan(htmlOverride, 'lesson');
@@ -847,7 +854,16 @@ function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
     if (parsed.meta.prerequisites) {
       derivedPrerequisites = parsed.meta.prerequisites;
     }
+    parsedSteps = parsed.steps;
+    // Strip tags from full HTML for G1 text checks.
+    parsedPlanText = htmlOverride.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    // Use parsed audienceTier when caller did not supply one.
+    if (audienceTier === undefined && parsed.meta.audienceTier) {
+      parsedAudienceTier = parsed.meta.audienceTier;
+    }
   }
+
+  const effectiveAudienceTier = audienceTier !== undefined ? audienceTier : (parsedAudienceTier ?? null);
 
   let content: SessionDesign | null = null;
   try {
@@ -871,7 +887,12 @@ function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
     ? { ...content, prerequisites: derivedPrerequisites }
     : content;
 
-  const pedagogyFindings = checkLessonPedagogy(checkContent);
+  const pedagogyFindings = checkLessonPedagogy(
+    checkContent,
+    parsedSteps !== undefined
+      ? { parsedSteps, audienceTier: effectiveAudienceTier, planText: parsedPlanText }
+      : undefined,
+  );
   for (const f of pedagogyFindings) {
     results.push(fromPedagogyFinding(f));
   }
@@ -895,7 +916,18 @@ chalkCourses.post(
     }
 
     const rawBody = await c.req.json().catch(() => null) as Record<string, unknown> | null;
-    const html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
+    let html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
+
+    // When html is absent, fall back to the latest draft lesson row in chalk_plan_files.
+    // This ensures G1/G2-9/G3-* checks run consistently regardless of call path.
+    if (html === undefined) {
+      const fallbackRow = await c.env.HPS_DB.prepare(
+        `SELECT html FROM chalk_plan_files
+         WHERE cohort_id=? AND course_id=? AND file='lesson' AND ref_kind='draft'
+         ORDER BY CAST(ref AS INTEGER) DESC LIMIT 1`
+      ).bind(cohort, course).first<{ html: string }>();
+      if (fallbackRow) html = fallbackRow.html;
+    }
 
     const results = runPlanCheck(draft, html);
 
@@ -947,9 +979,30 @@ function fromParserViolation(v: Violation): CheckResultItem {
   };
 }
 
+const CHECK_TO_ITEM: Partial<Record<string, string>> = {
+  step_acceptance: 'G2-2',
+  step_evidence: 'G2-1',
+  lesson_prerequisites: 'G2-6',
+  duration_consistency: 'G2-9',
+  g3_1_instructor_ratio: 'G3-1',
+  g3_4_closing_duration: 'G3-4',
+  g2_5_atomic: 'G2-5',
+  g2_7_forbids: 'G2-7',
+  g2_8_placement: 'G2-8',
+  g2_11_safety: 'G2-11',
+  g1_1_type: 'G1-1',
+  g1_2_rank: 'G1-2',
+  g1_3_total_score: 'G1-3',
+  g1_4_credential: 'G1-4',
+  g1_5_expert: 'G1-5',
+  g1_6_peer_comparison: 'G1-6',
+  g1_7_consent: 'G1-7',
+  g1_8_model_age: 'G1-8',
+};
+
 function fromPedagogyFinding(f: PedagogyFinding): CheckResultItem {
   return {
-    item: null,
+    item: CHECK_TO_ITEM[f.check] ?? null,
     check: f.check,
     severity: f.severity,
     judge: 'machine',

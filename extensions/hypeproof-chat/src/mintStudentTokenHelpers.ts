@@ -92,7 +92,7 @@ export interface IssuerScope {
  * segments, not a 3-segment JWT. The payload is therefore parts[0].
  * Returns undefined for any unrecognized structure — never throws.
  */
-function decodeTokenPayload(token: string): Record<string, unknown> | undefined {
+export function decodeTokenPayload(token: string): Record<string, unknown> | undefined {
   try {
     const parts = token.split(".");
     if (parts.length !== 2) return undefined;

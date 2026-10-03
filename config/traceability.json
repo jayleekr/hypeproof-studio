@@ -1163,6 +1163,10 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/pending-send.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/activity-resume.test.mjs",
+          "owner": "JinyongShin"
         }
       ]
     },
@@ -2877,6 +2881,19 @@
         },
         {
           "path": "worker/test/chalk-session-design-fields.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-PEDAGOGY-MACHINE",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-pedagogy-machine.test.mjs"
         }
       ]
     },

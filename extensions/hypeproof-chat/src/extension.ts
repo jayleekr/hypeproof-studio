@@ -724,7 +724,18 @@ export async function activate(context: vscode.ExtensionContext) {
   // start page is shown once (handled in postConfig/refresh via instructorMode.handleAutoReadResult).
   void (async () => {
     const storedIssuer = await context.secrets.get(ISSUER_TOKEN_KEY);
-    if (!storedIssuer || !looksLikeIssuerTokenUnverified(storedIssuer)) {
+    const resume = context.globalState.get<{ id: string; at: number }>(PENDING_ACTIVITY_RESUME_KEY);
+    // Always clear the flag, regardless of which branch is taken below.
+    if (resume !== undefined) await context.globalState.update(PENDING_ACTIVITY_RESUME_KEY, undefined);
+    const branch = resolveActivateBranch(storedIssuer, resume, activityConnections(context)?.current?.serverId);
+    if (branch === "resume") {
+      // Student wins over issuer early-return (#1298 principle: active student slot wins).
+      await startPage.show();
+      await startPage.openChat();
+    } else if (branch === "skip") {
+      // Issuer stored and no pending resume — skip student start page (#1298).
+      return;
+    } else {
       startPage.show();
     }
   })();
@@ -794,6 +805,35 @@ const LEGACY_WORKSPACE_DIRNAME = "HypeProofGames";
  * learner's window would reload forever mid-lecture.
  */
 const WORKSPACE_SWITCH_ATTEMPT_KEY = "hypeproofChat.workspaceSwitchAttempt";
+const PENDING_ACTIVITY_RESUME_KEY = "hypeproofChat.pendingActivityResume";
+
+export function shouldResumeActivity(
+  resume: { id: string; at: number } | undefined,
+  serverId: string | undefined,
+): boolean {
+  if (!resume) return false;
+  if (Date.now() - resume.at >= 60_000) return false;
+  return !!resume.id && resume.id === serverId;
+}
+
+/**
+ * Pure function: given the stored secrets/state at activation time, decide
+ * which branch the activate() start-surface logic should take.
+ *
+ * Returns:
+ *   "resume"   — pending activity resume wins; open chat directly
+ *   "skip"     — issuer stored, no pending resume; skip student start page
+ *   "show"     — neither condition; show the start page normally
+ */
+export function resolveActivateBranch(
+  storedIssuer: string | undefined,
+  resume: { id: string; at: number } | undefined,
+  serverId: string | undefined,
+): "resume" | "skip" | "show" {
+  if (shouldResumeActivity(resume, serverId)) return "resume";
+  if (storedIssuer && looksLikeIssuerTokenUnverified(storedIssuer)) return "skip";
+  return "show";
+}
 
 async function clearWorkspaceSwitchAttempt(context?: vscode.ExtensionContext): Promise<void> {
   if (!context) return;
@@ -995,6 +1035,7 @@ async function openWorkspaceFolder(
   await commit(dir);
 
   // Single-root open (clean Explorer). Reloads the window.
+  await context?.globalState.update(PENDING_ACTIVITY_RESUME_KEY, { id: profile?.activity_id ?? '', at: Date.now() });
   await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
     forceReuseWindow: true,
   });
