@@ -22,6 +22,11 @@ const TOKEN_KEY = "hypeproofChat.workshopToken";
 const isLegacyHistoryKey = (key: string): boolean =>
   key === 'hypeproofChat.history' || (key.startsWith('hypeproofChat.history:') && !/:[a-f0-9]{64}$/.test(key));
 
+/** True when all tab groups are empty AND the chat view is not visible — both conditions must hold. */
+export function shouldHideSidebar(allTabGroups: readonly { tabs: readonly unknown[] }[], chatViewVisible: boolean): boolean {
+  return allTabGroups.every(g => g.tabs.length === 0) && !chatViewVisible;
+}
+
 /** App entry surface; authentication and cohort authority remain in Service. */
 export class StartPage {
   private panel?: vscode.WebviewPanel;
@@ -38,14 +43,25 @@ export class StartPage {
   /** #751 U2 — a card arrived, changed or came down while this tab is open. */
   inboxChanged(): void { if (this.panel) void this.refresh(); }
 
+  async openChat(): Promise<void> {
+    const entry = this.panel;
+    if (!entry) return;
+    await this.chat.openInEditor(entry);
+    if (this.panel === entry) this.panel = undefined;
+    this.started = true;
+    this.chat.refreshConfig();
+  }
+
   async show(): Promise<void> {
     if (this.panel) { this.panel.reveal(); void this.refresh(); return; }
     // Empty first-run windows need one useful canvas, not empty editor groups.
     // Existing editors and layouts are left alone.
     if (vscode.window.tabGroups.all.every(group => group.tabs.length === 0)) {
       await vscode.commands.executeCommand("workbench.action.editorLayoutSingle");
-      await vscode.commands.executeCommand("workbench.action.closeSidebar");
-      await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+      if (!this.chat.isViewVisible()) {
+        await vscode.commands.executeCommand("workbench.action.closeSidebar");
+        await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+      }
     }
     const existing = this.panel as vscode.WebviewPanel | undefined;
     if (existing) { existing.reveal(); return; }
@@ -204,12 +220,8 @@ export class StartPage {
         };
         if (await this.begin(profile, commit)) return; // workspace switch reloads the window
         await commit();
-        const entry = this.panel;
-        if (!entry) throw new Error('Entry page was closed');
-        await this.chat.openInEditor(entry);
-        if (this.panel === entry) this.panel = undefined;
-        this.started = true;
-        this.chat.refreshConfig();
+        if (!this.panel) throw new Error('Entry page was closed');
+        await this.openChat();
       } catch (error) {
         let restoreFailed = false;
         if (committed) {
@@ -254,7 +266,8 @@ export class StartPage {
       const running = await this.chat.ensureProfile(), connections = activityConnections(this.context);
       const workspace = reentryWorkspace({ candidateActivity: p.activity_id, record: connections?.current ?? null, recordServiceMatches: !!connections?.matchesService, openFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, runningActivity: running?.activity_id });
       this.candidate = { token, profile: workspace ? { ...p, workspace_root: workspace } : p, proxyUrl, previousConnected: !!running, ...(workspace ? { workspace } : {}) };
-    } catch {
+    } catch (error) {
+      console.error('[startPage] connectCourse failed:', error instanceof Error ? `${error.name}: ${error.message}` : String(error));
       this.error = "수업에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.";
     } finally {
       this.busy = false; await this.chat.setConnectionChanging(false);
