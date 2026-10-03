@@ -1163,6 +1163,10 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/pending-send.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/activity-resume.test.mjs",
+          "owner": "JinyongShin"
         }
       ]
     },
