@@ -29,7 +29,7 @@ try {
   const raw = await mf.getD1Database('HPS_DB');
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await raw.prepare(s).run(); };
   await raw.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
-  // The classroom-ops range only (0011–0029): 0030+ is the Chalk range, applied and checked separately.
+  // The classroom-ops range only (0011–0029); later migrations are applied and checked by their own paths.
   const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((x) => /^\d{4}-.*\.sql$/.test(x) && Number(x.slice(0, 4)) >= 11 && Number(x.slice(0, 4)) <= 29).sort();
   // 0024 is measured on its own; later additive migrations (0025 U1b collection kinds) are applied after it and checked in classroom-ops-d1.
   const u3At = files.indexOf('0024-classroom-lesson-bindings.sql'); assert.ok(u3At >= 0, 'this test describes migration 0024');

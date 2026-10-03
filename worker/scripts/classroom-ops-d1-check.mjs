@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../migrations');
 export const FIRST = 11;
-export const LAST = 29; // 0030+ is the Chalk range (separate application and check)
+export const LAST = 29; // The classroom-ops range only (0011–0029). Later migrations (Chalk, Curriculum Runtime, …) are applied and checked by their own paths.
 /** migration file → the objects it creates (all of them are CREATE … IF NOT EXISTS; anything else would not be additive). */
 export function expectedObjects(first = FIRST, last = LAST) {
   return readdirSync(dir).filter((f) => /^\d{4}-.*\.sql$/.test(f) && Number(f.slice(0, 4)) >= first && Number(f.slice(0, 4)) <= last).sort().map((file) => {
