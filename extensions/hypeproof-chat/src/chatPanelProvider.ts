@@ -4006,6 +4006,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 serverUrl: proxyUrl,
                 secrets: this.context.secrets,
                 cwd,
+                currentModel: local.model,
                 requestConfirmation: async (message: string): Promise<boolean> => {
                   const answer = await vscode.window.showWarningMessage(
                     message, { modal: true }, "계속", "취소",
