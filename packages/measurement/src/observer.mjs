@@ -79,7 +79,7 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
   for(const b of blocks){
    if(['thinking','reasoning','redacted_thinking','encrypted_content'].includes(b.type)){coverage.hidden++;continue}
    if(['text','input_text','output_text'].includes(b.type)&&typeof b.text==='string'&&['user','assistant'].includes(role)){
-    if(role==='user'&&/^\s*(# AGENTS\.md instructions|<environment_context>|<INSTRUCTIONS>|<system-reminder>|<skill>)/.test(b.text)){coverage.omitted++;continue}
+    if(role==='user'&&/^\s*(# AGENTS\.md instructions|<environment_context>|<INSTRUCTIONS>|<system-reminder>|<skill>|<recommended_plugins>|<external_codex_apps_writing_block_edits>)/.test(b.text)){coverage.omitted++;continue}
     const clean=redactText(b.text);coverage.redacted+=clean.exclusions.length;
     if(clean.text.length>OBSERVER_LIMITS.message)coverage.excerpted++;
     emit('message',agentMessage?'delegated':role==='assistant'?'ai':delegated?'delegated':'human-unconfirmed',{message:{text:clean.text.slice(0,OBSERVER_LIMITS.message)}});
