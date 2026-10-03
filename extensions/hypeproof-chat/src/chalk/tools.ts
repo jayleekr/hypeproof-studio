@@ -647,7 +647,6 @@ export async function execSavePlan(
   }
 }
 
-<<<<<<< HEAD
 // ─── #1466 (E2-7) 도구 정의 ──────────────────────────────────────────────
 
 export const CHALK_RECORD_FEEDBACK_DEF: ChalkToolDefinition = {
@@ -715,7 +714,6 @@ export const CHALK_TOOL_DEFINITIONS_FEEDBACK: ChalkToolDefinition[] = [
   CHALK_VIEW_DIFF_DEF,
 ];
 
-=======
 // chalk_judge_items — GET /admin/chalk/cohorts/:cohort/courses/:course/judge-brief
 // (#1465 E2-5): returns 5 model-judged items with prompt text + plan excerpt.
 export const CHALK_JUDGE_ITEMS_DEF: ChalkToolDefinition = {
@@ -805,7 +803,6 @@ export async function execRecordJudgement(
   }
 }
 
->>>>>>> origin/main
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
 
 export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
@@ -816,13 +813,10 @@ export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_GENERATOR_BRIEF_DEF,
   CHALK_OPEN_COURSE_DEF,
   CHALK_SAVE_PLAN_DEF,
-<<<<<<< HEAD
   CHALK_RECORD_FEEDBACK_DEF,
   CHALK_VIEW_DIFF_DEF,
-=======
   CHALK_JUDGE_ITEMS_DEF,
   CHALK_RECORD_JUDGEMENT_DEF,
->>>>>>> origin/main
 ];
 
 type ExecutorMap = Record<
@@ -838,13 +832,10 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_generator_brief: execGeneratorBrief,
   chalk_open_course: execOpenCourse,
   chalk_save_plan: execSavePlan,
-<<<<<<< HEAD
   chalk_record_feedback: execRecordFeedback,
   chalk_view_diff: execViewDiff,
-=======
   chalk_judge_items: execJudgeItems,
   chalk_record_judgement: execRecordJudgement,
->>>>>>> origin/main
 };
 
 /**
